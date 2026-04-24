@@ -4,10 +4,10 @@ set -euo pipefail
 MB_URL="${MB_URL:-http://metabase:3000}"
 ADMIN_EMAIL="${METABASE_ADMIN_EMAIL:-${METABASE_ADMIN_USER:-}}"
 ADMIN_PASSWORD="${METABASE_ADMIN_PASSWORD:-}"
-APP_DB_NAME="${APP_DATABASE_NAME:-egisz_corp}"
+APP_DB_NAME="${APP_DATABASE_NAME:-egisz_reports}"
 APP_DB_DISPLAY_NAME="${APP_DATABASE_DISPLAY_NAME:-EGISZ Corp DWH}"
-APP_DB_USER="${APP_DATABASE_USER:-egisz_corp}"
-APP_DB_PASSWORD="${APP_DATABASE_PASSWORD:-egisz_corp}"
+APP_DB_USER="${APP_DATABASE_USER:-egisz}"
+APP_DB_PASSWORD="${APP_DATABASE_PASSWORD:-egisz}"
 PGHOST="${PGHOST:-postgres}"
 SITE_NAME="${METABASE_SITE_NAME:-EGISZ Monitor Corp}"
 PUBLIC_UUID_FILE="${METABASE_PUBLIC_UUID_FILE:-/shared/main-dashboard-public-uuid}"
@@ -93,11 +93,20 @@ if [ "${HAS_USER_SETUP}" != "true" ]; then
 fi
 
 if [ -x /app/setup-dashboards.sh ]; then
-  log_info "Validating application database schema..."
-  # Verify key tables exist using proper quoting
+  log_info "Waiting for DWH schema in Postgres (needed for dashboard provisioning)..."
   SCHEMA_SQL="SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('fact_egisz_transactions', 'v_egisz_transactions_enriched', 'etl_state');"
-  SCHEMA_CHECK="$(PGPASSWORD="${APP_DB_PASSWORD}" psql -h "${PGHOST}" -U "${APP_DB_USER}" -d "${APP_DB_NAME}" -tc "${SCHEMA_SQL}" 2>/dev/null || echo '0')"
-  
+  SCHEMA_CHECK="0"
+  # -At: одна строка без пробелов/переносов — иначе [ \"  3\" -ge 3 ] в bash может не сработать
+  for _attempt in $(seq 1 120); do
+    SCHEMA_CHECK="$(PGPASSWORD="${APP_DB_PASSWORD}" psql -h "${PGHOST}" -U "${APP_DB_USER}" -d "${APP_DB_NAME}" -Atc "${SCHEMA_SQL}" 2>/dev/null || true)"
+    SCHEMA_CHECK="$(echo "${SCHEMA_CHECK}" | tr -d '[:space:]')"
+    SCHEMA_CHECK="${SCHEMA_CHECK:-0}"
+    if [ "${SCHEMA_CHECK}" -ge 3 ] 2>/dev/null; then
+      break
+    fi
+    sleep 5
+  done
+
   if [ "${SCHEMA_CHECK}" -ge 3 ]; then
     log_info "Application schema validated. Running dashboard provisioning..."
     ADMIN_EMAIL="${ADMIN_EMAIL}" \
@@ -111,7 +120,7 @@ if [ -x /app/setup-dashboards.sh ]; then
     PGPORT="5432" \
     /app/setup-dashboards.sh
   else
-    echo "[provision] Warning: Application database schema not fully initialized. Skipping dashboard provisioning."
+    echo "[provision] Warning: Application database schema not fully initialized after wait. Skipping dashboard provisioning. Restart the Metabase pod after apply-schema / ETL DB is ready."
   fi
 fi
 

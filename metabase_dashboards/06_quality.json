@@ -1,0 +1,60 @@
+{
+  "name": "Качество интеграции (Corp)",
+  "description": "Относительные метрики успешности (Success Rate) по клиникам и типам СЭМД.",
+  "parameters": [],
+  "cards": [
+    {
+      "name": "Успешность по клиникам",
+      "description": "Процент успешных отправок по клиникам.",
+      "table_ref": "v_egisz_transactions_enriched",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT clinic_name AS \"Наименование клиники\", COUNT(*)::bigint AS \"Всего отправлено\", SUM(CASE WHEN status='success' THEN 1 ELSE 0 END)::bigint AS \"Успешно\", SUM(CASE WHEN status='error' THEN 1 ELSE 0 END)::bigint AS \"Ошибок\", ROUND(SUM(CASE WHEN status='success' THEN 1 ELSE 0 END)*100.0 / NULLIF(COUNT(*), 0), 2) AS \"Процент успешных\" FROM public.v_egisz_transactions_enriched GROUP BY 1 ORDER BY 5 ASC, 2 DESC LIMIT 50",
+          "template-tags": {}
+        },
+        "database": 1
+      },
+      "display": "table",
+      "visualization_settings": {
+        "column_settings": {
+          "[\"name\",\"Наименование клиники\"]": { "column_title": "Наименование клиники" },
+          "[\"name\",\"Всего отправлено\"]": { "column_title": "Всего отправлено" },
+          "[\"name\",\"Успешно\"]": { "column_title": "Успешно" },
+          "[\"name\",\"Ошибок\"]": { "column_title": "Ошибок" },
+          "[\"name\",\"Процент успешных\"]": { "column_title": "% успешных" }
+        }
+      },
+      "sizeX": 12,
+      "sizeY": 8,
+      "row": 0,
+      "col": 0
+    },
+    {
+      "name": "Успешность по типам СЭМД",
+      "description": "Процент успешных отправок по типам документов.",
+      "table_ref": "v_egisz_transactions_enriched",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT COALESCE(NULLIF(TRIM(kind_code), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(kind_name), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(*)::bigint AS \"Всего отправлено\", ROUND(SUM(CASE WHEN status='success' THEN 1 ELSE 0 END)*100.0 / NULLIF(COUNT(*), 0), 2) AS \"Процент успешных\" FROM public.v_egisz_transactions_enriched GROUP BY 1, 2 ORDER BY 4 ASC, 3 DESC LIMIT 50",
+          "template-tags": {}
+        },
+        "database": 1
+      },
+      "display": "table",
+      "visualization_settings": {
+        "column_settings": {
+          "[\"name\",\"Код СЭМД\"]": { "column_title": "Код СЭМД" },
+          "[\"name\",\"Наименование СЭМД\"]": { "column_title": "Наименование СЭМД" },
+          "[\"name\",\"Всего отправлено\"]": { "column_title": "Всего отправлено" },
+          "[\"name\",\"Процент успешных\"]": { "column_title": "% успешных" }
+        }
+      },
+      "sizeX": 12,
+      "sizeY": 8,
+      "row": 0,
+      "col": 12
+    }
+  ]
+}

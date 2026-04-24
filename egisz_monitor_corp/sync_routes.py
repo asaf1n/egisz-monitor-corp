@@ -10,6 +10,7 @@ _state: dict[str, Any] = {
     "message": "",
     "error": None,
     "last_stats": None,
+    "progress": None,
 }
 
 
@@ -25,7 +26,15 @@ def _run_sync_job(config_path: str) -> None:
         from egisz_monitor_corp.etl import run_sync
 
         cfg = load_corp_config()
-        stats = run_sync(cfg, dry_run=False, progress_cb=log)
+        def on_progress_detail(payload: dict[str, Any]) -> None:
+            _state["progress"] = payload
+
+        stats = run_sync(
+            cfg,
+            dry_run=False,
+            progress_cb=log,
+            progress_detail_cb=on_progress_detail,
+        )
         _state["last_stats"] = {
             "fetched": stats.fetched,
             "facts_upserted": stats.facts_upserted,
@@ -49,6 +58,7 @@ def try_start_sync(config_path: str) -> tuple[bool, str]:
     _state["error"] = None
     _state["message"] = "Запуск..."
     _state["last_stats"] = None
+    _state["progress"] = None
     t = threading.Thread(target=_run_sync_job, args=(config_path,), daemon=True)
     t.start()
     return True, "Синхронизация запущена в фоне."
@@ -60,6 +70,7 @@ def get_sync_state() -> dict[str, Any]:
         "message": _state["message"],
         "error": _state["error"],
         "last_stats": _state["last_stats"],
+        "progress": _state["progress"],
     }
 
 

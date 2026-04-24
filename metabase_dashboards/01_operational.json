@@ -1,8 +1,60 @@
 {
   "name": "Оперативный мониторинг (Corp)",
-  "description": "Статусы и последние записи витрины v_egisz_transactions_enriched.",
+  "description": "Статусы, топы по СЭМД и клиникам, последние записи и ошибки витрины.",
   "parameters": [],
   "cards": [
+    {
+      "name": "Топ типов СЭМД",
+      "description": "Количество записей по kind_code.",
+      "table_ref": "v_egisz_transactions_enriched",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT COALESCE(NULLIF(TRIM(kind_code), ''), '(пусто)') AS \"Код СЭМД\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched GROUP BY 1 ORDER BY 2 DESC LIMIT 25",
+          "template-tags": {}
+        },
+        "database": 1
+      },
+      "display": "bar",
+      "visualization_settings": {
+        "graph.dimensions": ["Код СЭМД"],
+        "graph.metrics": ["Количество"],
+        "column_settings": {
+          "[\"name\",\"Код СЭМД\"]": { "column_title": "Код СЭМД" },
+          "[\"name\",\"Количество\"]": { "column_title": "Количество" }
+        }
+      },
+      "sizeX": 12,
+      "sizeY": 6,
+      "row": 0,
+      "col": 0
+    },
+    {
+      "name": "По клиникам (имя)",
+      "description": "Топ клиник по числу записей.",
+      "table_ref": "v_egisz_transactions_enriched",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT clinic_name AS \"Наименование клиники\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched GROUP BY 1 ORDER BY 2 DESC LIMIT 20",
+          "template-tags": {}
+        },
+        "database": 1
+      },
+      "display": "bar",
+      "visualization_settings": {
+        "graph.dimensions": ["Наименование клиники"],
+        "graph.metrics": ["Количество"],
+        "column_settings": {
+          "[\"name\",\"Наименование клиники\"]": { "column_title": "Наименование клиники" },
+          "[\"name\",\"Количество\"]": { "column_title": "Количество" }
+        }
+      },
+      "sizeX": 12,
+      "sizeY": 6,
+      "row": 0,
+      "col": 12
+    },
     {
       "name": "Распределение статусов",
       "description": "Успех / ошибка / неизвестно по fact pipeline.",
@@ -10,7 +62,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT status AS status, COUNT(*)::bigint AS cnt FROM public.v_egisz_transactions_enriched GROUP BY 1 ORDER BY 2 DESC",
+          "query": "SELECT status AS \"Статус\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched GROUP BY 1 ORDER BY 2 DESC",
           "template-tags": {}
         },
         "database": 1
@@ -18,12 +70,16 @@
       "display": "pie",
       "visualization_settings": {
         "pie.show_legend": true,
-        "pie.dimension": ["status"],
-        "pie.metric": "cnt"
+        "pie.dimension": ["Статус"],
+        "pie.metric": ["Количество"],
+        "column_settings": {
+          "[\"name\",\"Статус\"]": { "column_title": "Статус" },
+          "[\"name\",\"Количество\"]": { "column_title": "Количество" }
+        }
       },
       "sizeX": 8,
       "sizeY": 6,
-      "row": 0,
+      "row": 6,
       "col": 0
     },
     {
@@ -33,17 +89,59 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT relates_to_id, jid, kind_code, kind_name, status, processed_at, clinic_name FROM public.v_egisz_transactions_enriched ORDER BY processed_at DESC NULLS LAST LIMIT 50",
+          "query": "SELECT relates_to_id AS \"Связанное сообщение\", local_uid_semd AS \"localUid СЭМД\", jid AS \"JID клиники\", kind_code AS \"Код СЭМД\", kind_name AS \"Наименование СЭМД\", status AS \"Статус\", processed_at AS \"Обработано\", clinic_name AS \"Наименование клиники\", clinic_inn AS \"ИНН клиники\", clinic_mo_oid AS \"OID клиники\" FROM public.v_egisz_transactions_enriched ORDER BY processed_at DESC NULLS LAST LIMIT 50",
           "template-tags": {}
         },
         "database": 1
       },
       "display": "table",
-      "visualization_settings": {},
+      "visualization_settings": {
+        "column_settings": {
+          "[\"name\",\"Связанное сообщение\"]": { "column_title": "Связанное сообщение (relatesToMessage)" },
+          "[\"name\",\"localUid СЭМД\"]": { "column_title": "localUid СЭМД" },
+          "[\"name\",\"JID клиники\"]": { "column_title": "JID клиники" },
+          "[\"name\",\"Код СЭМД\"]": { "column_title": "Код СЭМД" },
+          "[\"name\",\"Наименование СЭМД\"]": { "column_title": "Наименование СЭМД" },
+          "[\"name\",\"Статус\"]": { "column_title": "Статус" },
+          "[\"name\",\"Обработано\"]": { "column_title": "Обработано" },
+          "[\"name\",\"Наименование клиники\"]": { "column_title": "Наименование клиники" },
+          "[\"name\",\"ИНН клиники\"]": { "column_title": "ИНН клиники" },
+          "[\"name\",\"OID клиники\"]": { "column_title": "OID клиники" }
+        }
+      },
       "sizeX": 16,
       "sizeY": 8,
-      "row": 0,
+      "row": 6,
       "col": 8
+    },
+    {
+      "name": "Факты со статусом error",
+      "description": "Последние error-строки из витрины.",
+      "table_ref": "v_egisz_transactions_enriched",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT relates_to_id AS \"Связанное сообщение\", local_uid_semd AS \"localUid СЭМД\", kind_code AS \"Код СЭМД\", clinic_name AS \"Наименование клиники\", clinic_inn AS \"ИНН клиники\", clinic_mo_oid AS \"OID клиники\", processed_at AS \"Обработано\" FROM public.v_egisz_transactions_enriched WHERE status = 'error' ORDER BY processed_at DESC NULLS LAST LIMIT 50",
+          "template-tags": {}
+        },
+        "database": 1
+      },
+      "display": "table",
+      "visualization_settings": {
+        "column_settings": {
+          "[\"name\",\"Связанное сообщение\"]": { "column_title": "Связанное сообщение (relatesToMessage)" },
+          "[\"name\",\"localUid СЭМД\"]": { "column_title": "localUid СЭМД" },
+          "[\"name\",\"Код СЭМД\"]": { "column_title": "Код СЭМД" },
+          "[\"name\",\"Наименование клиники\"]": { "column_title": "Наименование клиники" },
+          "[\"name\",\"ИНН клиники\"]": { "column_title": "ИНН клиники" },
+          "[\"name\",\"OID клиники\"]": { "column_title": "OID клиники" },
+          "[\"name\",\"Обработано\"]": { "column_title": "Обработано" }
+        }
+      },
+      "sizeX": 24,
+      "sizeY": 8,
+      "row": 14,
+      "col": 0
     }
   ]
 }

@@ -2,11 +2,11 @@
 set -euo pipefail
 
 METABASE_URL="${METABASE_URL:-http://localhost:3000}"
-ADMIN_EMAIL="${ADMIN_EMAIL:-admin@egisz-monitor.local}"
+ADMIN_EMAIL="${ADMIN_EMAIL:-admin@egisz-corp.local}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-ChangeMeNow123!}"
-DB_NAME="${DB_NAME:-egisz_corp}"
-DB_USER="${DB_USER:-egisz_corp}"
-DB_PASSWORD="${DB_PASSWORD:-egisz_corp}"
+DB_NAME="${DB_NAME:-egisz_reports}"
+DB_USER="${DB_USER:-egisz}"
+DB_PASSWORD="${DB_PASSWORD:-egisz}"
 DB_DISPLAY_NAME="${DB_DISPLAY_NAME:-EGISZ Corp DWH}"
 PGHOST="${PGHOST:-postgres}"
 PGPORT="${PGPORT:-5432}"

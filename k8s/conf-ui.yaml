@@ -1,40 +1,49 @@
+# Config UI (Flask): редактирование YAML конфигурации EGISZ Corp.
+# NodePort — доступ с хоста Windows без kubectl port-forward (Docker Desktop / kind).
 apiVersion: v1
 kind: Service
 metadata:
-  name: corp-web
+  name: conf-ui
   namespace: egisz-corp
 spec:
+  type: NodePort
   ports:
     - port: 8080
       targetPort: 8080
+      nodePort: 30808
       name: http
   selector:
-    app.kubernetes.io/name: corp-web
+    app.kubernetes.io/name: conf-ui
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: corp-web
+  name: conf-ui
   namespace: egisz-corp
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: corp-web
+      app.kubernetes.io/name: conf-ui
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: corp-web
+        app.kubernetes.io/name: conf-ui
     spec:
       containers:
-        - name: web
-          image: egisz-corp-web:latest
+        - name: conf-ui
+          # Тег corp-web пересобирается из latest в start.ps1 (Invoke-DockerBuild), чтобы Docker Desktop K8s подхватывал новый digest.
+          image: egisz-conf-ui:corp-web
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
           env:
             - name: EGISZ_CORP_CONFIG
               value: /app/config/egisz_corp.yaml
+            - name: FB_CLIENT_LIBRARY
+              value: "/usr/local/lib/libfbclient.so"
+            - name: EGISZ_CORP_SQL_DIR
+              value: "/app/sql"
             - name: FLASK_RUN_HOST
               value: "0.0.0.0"
             - name: FLASK_RUN_PORT
@@ -52,4 +61,4 @@ spec:
       volumes:
         - name: cfg
           secret:
-            secretName: egisz-corp-web-config
+            secretName: egisz-corp-conf-ui-config

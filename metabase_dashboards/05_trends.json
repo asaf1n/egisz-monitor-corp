@@ -1,0 +1,62 @@
+{
+  "name": "Динамика и тренды (Corp)",
+  "description": "Оценка нагрузки на систему и выявление массовых сбоев во времени.",
+  "parameters": [],
+  "cards": [
+    {
+      "name": "Транзакции по дням и статусам",
+      "description": "Количество обработанных сообщений по дням, разбитое по статусам.",
+      "table_ref": "v_egisz_transactions_enriched",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT DATE(processed_at) AS \"Дата\", status AS \"Статус\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched GROUP BY 1, 2 ORDER BY 1 ASC",
+          "template-tags": {}
+        },
+        "database": 1
+      },
+      "display": "bar",
+      "visualization_settings": {
+        "graph.dimensions": ["Дата", "Статус"],
+        "graph.metrics": ["Количество"],
+        "stackable.stack_type": "stacked",
+        "column_settings": {
+          "[\"name\",\"Дата\"]": { "column_title": "Дата" },
+          "[\"name\",\"Статус\"]": { "column_title": "Статус" },
+          "[\"name\",\"Количество\"]": { "column_title": "Количество" }
+        }
+      },
+      "sizeX": 12,
+      "sizeY": 8,
+      "row": 0,
+      "col": 0
+    },
+    {
+      "name": "Динамика по типам СЭМД",
+      "description": "Тренд отправки документов по дням.",
+      "table_ref": "v_egisz_transactions_enriched",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT DATE(processed_at) AS \"Дата\", COALESCE(NULLIF(TRIM(kind_code), ''), '(пусто)') AS \"Код СЭМД\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched GROUP BY 1, 2 ORDER BY 1 ASC",
+          "template-tags": {}
+        },
+        "database": 1
+      },
+      "display": "line",
+      "visualization_settings": {
+        "graph.dimensions": ["Дата", "Код СЭМД"],
+        "graph.metrics": ["Количество"],
+        "column_settings": {
+          "[\"name\",\"Дата\"]": { "column_title": "Дата" },
+          "[\"name\",\"Код СЭМД\"]": { "column_title": "Код СЭМД" },
+          "[\"name\",\"Количество\"]": { "column_title": "Количество" }
+        }
+      },
+      "sizeX": 12,
+      "sizeY": 8,
+      "row": 0,
+      "col": 12
+    }
+  ]
+}

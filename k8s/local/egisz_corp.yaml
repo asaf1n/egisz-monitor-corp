@@ -1,0 +1,33 @@
+# Конфиг для деплоя в Kubernetes на Windows (локальный Firebird на хосте).
+# start.ps1 подставляет этот файл в Secret egisz-corp-conf-ui-config.
+#
+# Firebird: из пода на Windows — host.docker.internal.
+
+firebird:
+  host: "host.docker.internal"
+  port: 3050
+  database: "proxy_egisz"
+  user: "SYSDBA"
+  password: "masterkey"
+  # См. комментарий в config/egisz_corp.example.yaml (кириллица Firebird).
+  charset: "WIN1251"
+  page_size: 4096
+
+postgres:
+  host: "postgres.egisz-corp.svc.cluster.local"
+  port: 5432
+  database: "egisz_reports"
+  user: "egisz"
+  password: "egisz"
+  schema: "public"
+
+etl:
+  batch_size: 500
+  pipeline_name: "firebird_exchangelog"
+  sync_window_days: 30
+  full_scan: false
+  source_query: null
+
+metabase:
+  # С ПК при port-forward Metabase на localhost:3000 (см. .\start.ps1 -Action web)
+  site_url: "http://127.0.0.1:3000"

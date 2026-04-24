@@ -10,13 +10,21 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT id, relates_to_id, error_code, left(message, 200) AS message, created_at FROM public.stg_parse_errors ORDER BY id DESC LIMIT 100",
+          "query": "SELECT id AS \"Номер записи\", relates_to_id AS \"Связанное сообщение\", error_code AS \"Код ошибки\", LEFT(message, 200) AS \"Сообщение\", created_at AS \"Создано\" FROM public.stg_parse_errors ORDER BY id DESC LIMIT 100",
           "template-tags": {}
         },
         "database": 1
       },
       "display": "table",
-      "visualization_settings": {},
+      "visualization_settings": {
+        "column_settings": {
+          "[\"name\",\"Номер записи\"]": { "column_title": "№ записи" },
+          "[\"name\",\"Связанное сообщение\"]": { "column_title": "Связанное сообщение (relatesToMessage)" },
+          "[\"name\",\"Код ошибки\"]": { "column_title": "Код ошибки" },
+          "[\"name\",\"Сообщение\"]": { "column_title": "Сообщение" },
+          "[\"name\",\"Создано\"]": { "column_title": "Создано" }
+        }
+      },
       "sizeX": 24,
       "sizeY": 8,
       "row": 0,
@@ -29,13 +37,23 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT relates_to_id, kind_code, clinic_name, processed_at FROM public.v_egisz_transactions_enriched WHERE status = 'error' ORDER BY processed_at DESC NULLS LAST LIMIT 50",
+          "query": "SELECT relates_to_id AS \"Связанное сообщение\", local_uid_semd AS \"localUid СЭМД\", kind_code AS \"Код СЭМД\", clinic_name AS \"Наименование клиники\", clinic_inn AS \"ИНН клиники\", clinic_mo_oid AS \"OID клиники\", processed_at AS \"Обработано\" FROM public.v_egisz_transactions_enriched WHERE status = 'error' ORDER BY processed_at DESC NULLS LAST LIMIT 50",
           "template-tags": {}
         },
         "database": 1
       },
       "display": "table",
-      "visualization_settings": {},
+      "visualization_settings": {
+        "column_settings": {
+          "[\"name\",\"Связанное сообщение\"]": { "column_title": "Связанное сообщение (relatesToMessage)" },
+          "[\"name\",\"localUid СЭМД\"]": { "column_title": "localUid СЭМД" },
+          "[\"name\",\"Код СЭМД\"]": { "column_title": "Код СЭМД" },
+          "[\"name\",\"Наименование клиники\"]": { "column_title": "Наименование клиники" },
+          "[\"name\",\"ИНН клиники\"]": { "column_title": "ИНН клиники" },
+          "[\"name\",\"OID клиники\"]": { "column_title": "OID клиники" },
+          "[\"name\",\"Обработано\"]": { "column_title": "Обработано" }
+        }
+      },
       "sizeX": 24,
       "sizeY": 8,
       "row": 8,

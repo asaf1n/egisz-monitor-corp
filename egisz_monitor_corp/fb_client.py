@@ -14,6 +14,7 @@ def firebird_dsn(cfg: FirebirdConfig) -> str:
 
 
 def connect_firebird(cfg: FirebirdConfig):  # type: ignore[no-untyped-def]
+    """charset в конфиге должен совпадать с фактической кодировкой строк в БД (JPERSONS.JNAME и т.д.)."""
     from firebird.driver import connect
 
     return connect(

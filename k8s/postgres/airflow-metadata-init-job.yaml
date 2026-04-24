@@ -1,4 +1,4 @@
-# Одноразовая инициализация: БД airflow на том же инстансе Postgres, что и витрина egisz_corp.
+# Одноразовая инициализация: БД airflow на том же инстансе Postgres, что и витрина egisz_reports.
 # Применить после готовности StatefulSet postgres и секрета postgres-credentials:
 #   kubectl -n egisz-corp apply -f k8s/postgres/airflow-metadata-init-job.yaml
 # Повторный apply: Job с тем же именем — удалите завершённый Job перед повтором:

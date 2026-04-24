@@ -1,4 +1,5 @@
 FROM metabase/metabase:latest
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 RUN apk add --no-cache jq curl postgresql-client bash
 COPY metabase/provision.sh /app/provision.sh
 COPY metabase/setup-dashboards.sh /app/setup-dashboards.sh

@@ -1,0 +1,40 @@
+# Применяет sql/001_schema.sql (полная витрина) и sql/002_etl_state.sql к БД из Secret postgres-credentials.
+# ConfigMap egisz-reports-schema создаётся в start.ps1 (kubectl create configmap ...).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: egisz-reports-schema-init
+  namespace: egisz-corp
+spec:
+  backoffLimit: 4
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: apply-schema
+          image: postgres:16-bookworm
+          envFrom:
+            - secretRef:
+                name: postgres-credentials
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              export PGPASSWORD="${POSTGRES_PASSWORD}"
+              HOST="postgres"
+              until pg_isready -h "$HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do
+                echo "waiting for postgres..."
+                sleep 2
+              done
+              psql -v ON_ERROR_STOP=1 -h "$HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /schema/001_schema.sql
+              psql -v ON_ERROR_STOP=1 -h "$HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /schema/002_etl_state.sql
+              echo "egisz_reports schema applied"
+          volumeMounts:
+            - name: schema
+              mountPath: /schema
+      volumes:
+        - name: schema
+          configMap:
+            name: egisz-reports-schema

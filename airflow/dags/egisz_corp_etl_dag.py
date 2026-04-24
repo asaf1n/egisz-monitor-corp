@@ -62,7 +62,7 @@ def _test_connections(**_context) -> str:
 
 with DAG(
     dag_id="egisz_corp_firebird_to_postgres",
-    description="Corp ETL: LOGTEXT parse → fact_egisz_transactions (LOGID watermark)",
+    description="Corp ETL: MSGTEXT SOAP + LOGTEXT host → fact_egisz_transactions (LOGID watermark)",
     schedule_interval=os.environ.get("EGISZ_CORP_AIRFLOW_SCHEDULE", "@hourly"),
     start_date=__import__("datetime").datetime(2026, 1, 1),
     catchup=False,

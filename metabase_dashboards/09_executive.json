@@ -1,0 +1,99 @@
+{
+  "name": "Управленческий дашборд (Corp)",
+  "description": "Ключевые показатели системы (Executive Summary).",
+  "parameters": [],
+  "cards": [
+    {
+      "name": "Всего обработано за сегодня",
+      "description": "Количество транзакций за текущие сутки.",
+      "table_ref": "v_egisz_transactions_enriched",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched WHERE DATE(processed_at) = CURRENT_DATE",
+          "template-tags": {}
+        },
+        "database": 1
+      },
+      "display": "scalar",
+      "visualization_settings": {
+        "column_settings": {
+          "[\"name\",\"Количество\"]": { "column_title": "Количество" }
+        }
+      },
+      "sizeX": 6,
+      "sizeY": 4,
+      "row": 0,
+      "col": 0
+    },
+    {
+      "name": "Успешно за сегодня",
+      "description": "Количество успешных транзакций за текущие сутки.",
+      "table_ref": "v_egisz_transactions_enriched",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched WHERE DATE(processed_at) = CURRENT_DATE AND status = 'success'",
+          "template-tags": {}
+        },
+        "database": 1
+      },
+      "display": "scalar",
+      "visualization_settings": {
+        "column_settings": {
+          "[\"name\",\"Количество\"]": { "column_title": "Количество" }
+        }
+      },
+      "sizeX": 6,
+      "sizeY": 4,
+      "row": 0,
+      "col": 6
+    },
+    {
+      "name": "% Ошибок за сегодня",
+      "description": "Доля ошибочных транзакций за текущие сутки.",
+      "table_ref": "v_egisz_transactions_enriched",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT ROUND(SUM(CASE WHEN status='error' THEN 1 ELSE 0 END)*100.0 / NULLIF(COUNT(*), 0), 2) AS \"Процент ошибок\" FROM public.v_egisz_transactions_enriched WHERE DATE(processed_at) = CURRENT_DATE",
+          "template-tags": {}
+        },
+        "database": 1
+      },
+      "display": "scalar",
+      "visualization_settings": {
+        "column_settings": {
+          "[\"name\",\"Процент ошибок\"]": { "column_title": "% ошибок за сегодня" }
+        }
+      },
+      "sizeX": 6,
+      "sizeY": 4,
+      "row": 0,
+      "col": 12
+    },
+    {
+      "name": "Документов в ожидании",
+      "description": "Текущая длина очереди (документы без ответа).",
+      "table_ref": "v_rpt_documents_no_response",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT COUNT(*)::bigint AS \"Количество\" FROM public.v_rpt_documents_no_response",
+          "template-tags": {}
+        },
+        "database": 1
+      },
+      "display": "scalar",
+      "visualization_settings": {
+        "column_settings": {
+          "[\"name\",\"Количество\"]": { "column_title": "Количество" }
+        }
+      },
+      "sizeX": 6,
+      "sizeY": 4,
+      "row": 0,
+      "col": 18
+    }
+  ]
+}

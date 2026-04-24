@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +30,11 @@ def connect_pg(cfg: PostgresConfig):  # type: ignore[no-untyped-def]
 
 
 def sql_dir() -> Path:
-    return Path(__file__).resolve().parents[1] / "sql"
+    """Репозиторий: <root>/sql. Wheel в контейнере: задайте EGISZ_CORP_SQL_DIR (см. docker/web/Dockerfile)."""
+    override = (os.environ.get("EGISZ_CORP_SQL_DIR") or "").strip()
+    if override:
+        return Path(override)
+    return Path(__file__).resolve().parent.parent / "sql"
 
 
 def apply_sql_files(con, *names: str) -> None:  # type: ignore[no-untyped-def]
@@ -80,18 +85,62 @@ def upsert_dim_semd(con, kind_code: str, kind_name: str) -> None:  # type: ignor
         )
 
 
-def upsert_dim_clinic(con, jid: int, jname: str | None, mo_uid: str | None) -> None:  # type: ignore[no-untyped-def]
+def upsert_dim_clinic(
+    con,
+    jid: int,
+    jname: str | None,
+    mo_uid: str | None,
+    *,
+    jinn: str | None = None,
+    fir_oid: str | None = None,
+) -> None:  # type: ignore[no-untyped-def]
+    jin = (jinn or "").strip()
+    fir = (fir_oid or "").strip()
     with con.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO dim_clinics (jid, jname, mo_uid, updated_at)
-            VALUES (%s, %s, %s, NOW())
+            INSERT INTO dim_clinics (jid, jname, mo_uid, jinn, fir_oid, updated_at)
+            VALUES (%s, %s, %s, %s, %s, NOW())
             ON CONFLICT (jid) DO UPDATE SET
                 jname = COALESCE(EXCLUDED.jname, dim_clinics.jname),
                 mo_uid = CASE WHEN EXCLUDED.mo_uid <> '' THEN EXCLUDED.mo_uid ELSE dim_clinics.mo_uid END,
+                jinn = CASE WHEN EXCLUDED.jinn <> '' THEN EXCLUDED.jinn ELSE dim_clinics.jinn END,
+                fir_oid = CASE WHEN EXCLUDED.fir_oid <> '' THEN EXCLUDED.fir_oid ELSE dim_clinics.fir_oid END,
                 updated_at = NOW();
             """,
-            (jid, jname, mo_uid or ""),
+            (jid, jname, mo_uid or "", jin, fir),
+        )
+
+
+def refresh_outbound_documents_staging(con, rows: list[dict[str, Any]]) -> None:  # type: ignore[no-untyped-def]
+    """Полная перезапись stg_egisz_outbound_documents снимком за окно (см. outbound_documents_staging_select)."""
+    with con.cursor() as cur:
+        cur.execute("DELETE FROM stg_egisz_outbound_documents")
+    if not rows:
+        return
+    tuples: list[tuple[Any, ...]] = []
+    for r in rows:
+        tuples.append(
+            (
+                r["document_id"],
+                r.get("sent_at"),
+                r.get("reply_to"),
+                r.get("gost_jid_token"),
+                r.get("kind_code"),
+                r.get("jid"),
+            )
+        )
+    template = "(%s, %s, %s, %s, %s, %s, NOW())"
+    with con.cursor() as cur:
+        execute_values(
+            cur,
+            """
+            INSERT INTO stg_egisz_outbound_documents (
+                document_id, sent_at, reply_to, gost_jid_token, kind_code, jid, synced_at
+            ) VALUES %s
+            """,
+            tuples,
+            template=template,
         )
 
 
@@ -99,6 +148,11 @@ def upsert_facts_batch(con, rows: list[dict[str, Any]]) -> None:  # type: ignore
     """Batch UPSERT into fact_egisz_transactions."""
     if not rows:
         return
+    # execute_values + ON CONFLICT: duplicate relates_to_id in one statement is rejected (CardinalityViolation).
+    dedup: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        dedup[r["relates_to_id"]] = r
+    rows = list(dedup.values())
     tuples: list[tuple[Any, ...]] = []
     for r in rows:
         err = r["errors_json"]
@@ -107,6 +161,7 @@ def upsert_facts_batch(con, rows: list[dict[str, Any]]) -> None:  # type: ignore
         tuples.append(
             (
                 r["relates_to_id"],
+                r.get("local_uid_semd"),
                 r["jid"],
                 r["gost_jid_token"],
                 r["org_oid"],
@@ -118,16 +173,17 @@ def upsert_facts_batch(con, rows: list[dict[str, Any]]) -> None:  # type: ignore
                 r["processed_at"],
             )
         )
-    template = "(%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)"  # Json() → jsonb
+    template = "(%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)"  # Json() → jsonb
     with con.cursor() as cur:
         execute_values(
             cur,
             """
             INSERT INTO fact_egisz_transactions (
-                relates_to_id, jid, gost_jid_token, org_oid, kind_code, status,
+                relates_to_id, local_uid_semd, jid, gost_jid_token, org_oid, kind_code, status,
                 emdr_id, errors_json, registration_date, processed_at
             ) VALUES %s
             ON CONFLICT (relates_to_id) DO UPDATE SET
+                local_uid_semd = EXCLUDED.local_uid_semd,
                 jid = EXCLUDED.jid,
                 gost_jid_token = EXCLUDED.gost_jid_token,
                 org_oid = EXCLUDED.org_oid,

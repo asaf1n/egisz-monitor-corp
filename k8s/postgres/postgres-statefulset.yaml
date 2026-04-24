@@ -35,12 +35,21 @@ spec:
             - name: data
               mountPath: /var/lib/postgresql/data
           resources:
+            # Docker Desktop / kind single-node often cannot schedule 4Gi limits; keep modest.
             requests:
-              cpu: "250m"
-              memory: "512Mi"
+              cpu: "100m"
+              memory: "256Mi"
             limits:
               cpu: "2"
-              memory: "4Gi"
+              memory: "1536Mi"
+          startupProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            periodSeconds: 5
+            failureThreshold: 60
           readinessProbe:
             exec:
               command:
@@ -55,7 +64,7 @@ spec:
                 - /bin/sh
                 - -c
                 - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
-            initialDelaySeconds: 30
+            initialDelaySeconds: 60
             periodSeconds: 20
   volumeClaimTemplates:
     - metadata:

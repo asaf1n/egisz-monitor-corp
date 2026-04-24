@@ -16,79 +16,249 @@ PAGE = """
 <html lang="ru">
 <head>
   <meta charset="utf-8"/>
-  <title>EGISZ Corp — подключения</title>
+  <title>EGISZ Corp — конфигурация</title>
+  <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 52rem; margin: 2rem auto; padding: 0 1rem; }
-    label { display: block; margin-top: 0.75rem; font-weight: 600; }
-    input { width: 100%; padding: 0.4rem; box-sizing: border-box; }
-    fieldset { margin: 1rem 0; border: 1px solid #ccc; border-radius: 6px; }
-    button { margin-top: 1rem; padding: 0.5rem 1rem; cursor: pointer; }
-    .ok { color: #0a0; } .err { color: #a00; }
-    .hint { color: #555; font-size: 0.9rem; margin-top: 0.25rem; }
-    code { background: #f4f4f4; padding: 0.1rem 0.3rem; }
+    body { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    pre::-webkit-scrollbar { width: 8px; height: 8px; }
+    pre::-webkit-scrollbar-track { background: #0F1522; }
+    pre::-webkit-scrollbar-thumb { background: #2D3F5E; border-radius: 4px; }
+    pre::-webkit-scrollbar-thumb:hover { background: #3E5A85; }
   </style>
 </head>
-<body>
-  <h1>Конфигурация БД (EGISZ Monitor Corp)</h1>
-  <p class="hint">Файл: <code>{{ path }}</code>. Переопределение: переменная окружения <code>EGISZ_CORP_CONFIG</code>
-     или <code>CONFIG_WRITE_PATH</code> для записи.</p>
-  <fieldset>
-    <legend>Подключение Firebird (в т.ч. с Windows)</legend>
-    <p class="hint">Поля ниже — это <strong>TCP к серверу Firebird</strong> (как в DBeaver / isql): хост и порт — где слушает <code>firebird.conf</code> (часто <code>3050</code>),
-      <strong>database</strong> — имя alias или полный путь к <code>.fdb</code> <em>на стороне сервера Firebird</em>, не путь на вашем ПК.</p>
-    <p class="hint">DSN для драйвера Python (<code>firebird-driver</code>): <code>{{ fb.host }}/{{ fb.port }}:{{ fb.database }}</code> (см. также документацию пакета).</p>
-    <p class="hint"><strong>Проверить Firebird</strong> выполняется на машине/в поде, где запущен этот веб-интерфейс. Если UI в Kubernetes, до Firebird должен быть доступ <strong>из пода</strong> (сеть, firewall).
-      С Windows вы можете отдельно проверить те же host/port/database в DBeaver — это подтвердит доступность с вашей сети.</p>
-  </fieldset>
-  {% if message %}<p class="{{ 'ok' if ok else 'err' }}">{{ message }}</p>{% endif %}
-  <form method="post" action="{{ url_for('save') }}">
-    <fieldset>
-      <legend>Firebird</legend>
-      <label>host <input name="fb_host" value="{{ fb.host }}" required/></label>
-      <label>port <input name="fb_port" type="number" value="{{ fb.port }}" required/></label>
-      <label>database (alias или путь на сервере) <input name="fb_database" value="{{ fb.database }}" required/></label>
-      <label>user <input name="fb_user" value="{{ fb.user }}" required/></label>
-      <label>password <input name="fb_password" type="password" value="{{ fb.password }}" autocomplete="current-password"/></label>
-      <label>charset <input name="fb_charset" value="{{ fb.charset }}"/></label>
-    </fieldset>
-    <fieldset>
-      <legend>PostgreSQL</legend>
-      <p class="hint"><strong>PostgreSQL (Kubernetes):</strong> из пода витрины — <code>postgres.egisz-corp.svc.cluster.local:5432</code> (см. <code>k8s/README.md</code>). Port-forward с ПК: <code>kubectl -n egisz-corp port-forward svc/postgres 5432:5432</code>, тогда host <code>127.0.0.1</code>.</p>
-      <p class="hint"><strong>Kubernetes:</strong> см. <code>k8s/postgres/</code> — из пода к сервису обычно <code>postgres.egisz-corp.svc.cluster.local:5432</code> (порт сервиса <code>5432</code>).
-        С вашего ПК без VPN: <code>kubectl port-forward -n egisz-corp svc/postgres 5432:5432</code>, в форме host <code>127.0.0.1</code>, port <code>5432</code>.</p>
-      <label>host <input name="pg_host" value="{{ pg.host }}" required/></label>
-      <label>port <input name="pg_port" type="number" value="{{ pg.port }}" required/></label>
-      <label>database <input name="pg_database" value="{{ pg.database }}" required/></label>
-      <label>user <input name="pg_user" value="{{ pg.user }}" required/></label>
-      <label>password <input name="pg_password" type="password" value="{{ pg.password }}" autocomplete="current-password"/></label>
-      <label>schema <input name="pg_schema" value="{{ pg.schema }}"/></label>
-    </fieldset>
-    <fieldset>
-      <legend>ETL (фрагмент)</legend>
-      <label>batch_size <input name="etl_batch" type="number" value="{{ etl.batch_size }}"/></label>
-      <label>sync_window_days <input name="etl_sync_days" type="number" value="{{ etl.sync_window_days }}"/></label>
-      <label><input type="checkbox" name="etl_full_scan" value="1" {{ 'checked' if etl.full_scan else '' }}/> full_scan</label>
-    </fieldset>
-    <button type="submit">Сохранить в YAML</button>
-  </form>
-  <form method="post" action="{{ url_for('test_fb') }}" style="display:inline;margin-right:0.5rem;">
-    <button type="submit">Проверить Firebird</button>
-  </form>
-  <form method="post" action="{{ url_for('test_pg') }}" style="display:inline;">
-    <button type="submit">Проверить PostgreSQL</button>
-  </form>
-  <fieldset>
-    <legend>Синхронизация Firebird -&gt; PostgreSQL</legend>
-    <p class="hint">Запускает полный цикл ETL в фоне на сервере, где работает это приложение (под в k8s или процесс на ПК). Не закрывайте вкладку до завершения; статус обновляется ниже.</p>
-    <button type="button" id="btnSync">Запустить синхронизацию</button>
-    <pre id="syncStatus" style="background:#f8f8f8;padding:0.75rem;border-radius:6px;min-height:4rem;white-space:pre-wrap;font-size:0.9rem;"></pre>
-  </fieldset>
+<body class="min-h-screen bg-[#121826] text-white">
+  <div class="mx-auto max-w-4xl px-4 py-6 sm:px-6">
+    <nav class="flex items-center justify-center gap-3 text-xs mb-8">
+      <span class="text-[#509EE3]">Конфигурация</span>
+      <span class="text-[#4B5563]">|</span>
+      <a href="/" class="text-[#4B5563] transition hover:text-[#509EE3]">Обновить страницу</a>
+    </nav>
+
+    <section class="rounded-lg bg-[#0F1522] px-4 py-5 sm:px-6 shadow-lg border border-[#1B2940]">
+      <div class="mb-6 border-b border-[#1B2940] pb-4">
+        <h1 class="text-lg font-semibold text-white">Конфигурация БД (EGISZ Monitor Corp)</h1>
+        <p class="mt-1 text-sm text-[#9CA3AF]">
+          Файл: <code class="text-[#509EE3]">{{ path }}</code><br/>
+          Переопределение: переменная окружения <code class="text-[#509EE3]">EGISZ_CORP_CONFIG</code> или <code class="text-[#509EE3]">CONFIG_WRITE_PATH</code>.
+        </p>
+      </div>
+
+      {% if message %}
+      <div class="mb-6 rounded-md p-4 {{ 'bg-emerald-900/30 border border-emerald-800 text-emerald-400' if ok else 'bg-rose-900/30 border border-rose-800 text-rose-400' }}">
+        {{ message }}
+      </div>
+      {% endif %}
+
+      <form id="configForm" method="post" action="{{ url_for('save') }}" class="space-y-8">
+        
+        <!-- Firebird Section -->
+        <div>
+          <div class="mb-4">
+            <h2 class="text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">Firebird Configuration</h2>
+            <p class="mt-1 text-xs text-[#9CA3AF]">TCP к серверу Firebird (как в DBeaver). Если в Docker — используйте <code class="text-white">host.docker.internal</code></p>
+          </div>
+          
+          <div class="grid gap-4 sm:grid-cols-2">
+            <label class="block">
+              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">host</span>
+              <input name="fb_host" value="{{ fb.host }}" required class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+            </label>
+            <label class="block">
+              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">port</span>
+              <input name="fb_port" type="number" value="{{ fb.port }}" required class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+            </label>
+          </div>
+          <div class="mt-4 grid gap-4 sm:grid-cols-2">
+            <label class="block">
+              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">database (alias/path)</span>
+              <input name="fb_database" value="{{ fb.database }}" required class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+            </label>
+            <label class="block">
+              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">user</span>
+              <input name="fb_user" value="{{ fb.user }}" required class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+            </label>
+          </div>
+          <div class="mt-4 grid gap-4 sm:grid-cols-2">
+            <label class="block">
+              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">password</span>
+              <input name="fb_password" type="password" value="{{ fb.password }}" autocomplete="current-password" class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+            </label>
+            <label class="block">
+              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">charset</span>
+              <input name="fb_charset" value="{{ fb.charset }}" class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+            </label>
+          </div>
+        </div>
+
+        <!-- PostgreSQL Section -->
+        <div class="pt-6 border-t border-[#1B2940]">
+          <div class="mb-4">
+            <h2 class="text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">PostgreSQL Configuration</h2>
+            <p class="mt-1 text-xs text-[#9CA3AF]">Из пода витрины обычно <code class="text-white">postgres.egisz-corp.svc.cluster.local:5432</code></p>
+          </div>
+
+          <div class="grid gap-4 sm:grid-cols-2">
+            <label class="block">
+              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">host</span>
+              <input name="pg_host" value="{{ pg.host }}" required class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+            </label>
+            <label class="block">
+              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">port</span>
+              <input name="pg_port" type="number" value="{{ pg.port }}" required class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+            </label>
+          </div>
+          <div class="mt-4 grid gap-4 sm:grid-cols-2">
+            <label class="block">
+              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">database</span>
+              <input name="pg_database" value="{{ pg.database }}" required class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+            </label>
+            <label class="block">
+              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">schema</span>
+              <input name="pg_schema" value="{{ pg.schema }}" class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+            </label>
+          </div>
+          <div class="mt-4 grid gap-4 sm:grid-cols-2">
+            <label class="block">
+              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">user</span>
+              <input name="pg_user" value="{{ pg.user }}" required class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+            </label>
+            <label class="block">
+              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">password</span>
+              <input name="pg_password" type="password" value="{{ pg.password }}" autocomplete="current-password" class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+            </label>
+          </div>
+        </div>
+
+        <!-- ETL Section -->
+        <div class="pt-6 border-t border-[#1B2940]">
+          <div class="mb-4">
+            <h2 class="text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">ETL Configuration</h2>
+          </div>
+          
+          <div class="grid gap-4 sm:grid-cols-3">
+            <label class="block">
+              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">batch_size</span>
+              <input name="etl_batch" type="number" value="{{ etl.batch_size }}" class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+            </label>
+            <label class="block">
+              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">sync_window_days</span>
+              <input name="etl_sync_days" type="number" value="{{ etl.sync_window_days }}" class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+            </label>
+            <label class="block flex flex-col justify-center">
+              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563] mb-3">full_scan</span>
+              <div class="flex items-center">
+                <input type="checkbox" name="etl_full_scan" value="1" {{ 'checked' if etl.full_scan else '' }} class="h-5 w-5 rounded border-[#1B2940] bg-[#121826] text-[#509EE3] focus:ring-[#509EE3] focus:ring-offset-[#0F1522]"/>
+                <span class="ml-2 text-sm text-[#9CA3AF]">Включить полный скан</span>
+              </div>
+            </label>
+          </div>
+        </div>
+      </form>
+
+      <div class="pt-6 flex flex-wrap gap-3">
+        <button type="submit" form="configForm" class="inline-flex min-w-[160px] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-4 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white">
+          Сохранить в YAML
+        </button>
+        <form method="post" action="{{ url_for('test_fb') }}">
+          <button type="submit" class="inline-flex min-w-[160px] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-4 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white">
+            Проверить Firebird
+          </button>
+        </form>
+        <form method="post" action="{{ url_for('test_pg') }}">
+          <button type="submit" class="inline-flex min-w-[160px] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-4 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white">
+            Проверить PostgreSQL
+          </button>
+        </form>
+      </div>
+
+      <div class="mt-10 pt-6 border-t border-[#1B2940]">
+        <div class="mb-4">
+          <h2 class="text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">Синхронизация Firebird -&gt; PostgreSQL</h2>
+          <p class="mt-1 text-xs text-[#9CA3AF]">Запускает полный цикл ETL в фоне на сервере. Не закрывайте вкладку до завершения.</p>
+        </div>
+        
+        <div class="flex flex-col gap-4">
+          <div>
+            <button type="button" id="btnSync" class="inline-flex min-w-[220px] items-center justify-center rounded-md border border-[#F59F36] bg-[#F59F36] px-4 py-2.5 font-mono text-sm text-[#121826] transition hover:bg-[#FFB95D]">
+              Запустить синхронизацию
+            </button>
+          </div>
+
+          <div id="syncProgressWrap" class="hidden rounded-md bg-[#0B1120] px-4 py-3 border border-[#1B2940]">
+            <div class="flex justify-between items-baseline gap-3 mb-2">
+              <span id="syncProgressLabel" class="text-[11px] uppercase tracking-[0.16em] text-[#509EE3]">прогресс</span>
+              <span id="syncProgressFraction" class="font-mono text-xs text-[#D1D5DB]"></span>
+            </div>
+            <div class="h-2.5 w-full rounded-full bg-[#1B2940] overflow-hidden">
+              <div id="syncProgressBar" class="h-full rounded-full bg-[#509EE3] transition-[width] duration-300 ease-out" style="width:0%"></div>
+            </div>
+            <p id="syncProgressMeta" class="mt-2 whitespace-pre-line font-mono text-[11px] text-[#9CA3AF] leading-relaxed"></p>
+          </div>
+          
+          <div class="rounded-md bg-[#0B1120] px-4 py-4 text-sm text-[#93A1B6] border border-[#1B2940]">
+            <div class="mb-2 text-[11px] uppercase tracking-[0.16em] text-[#509EE3]">system log</div>
+            <pre id="syncStatus" class="whitespace-pre-wrap font-mono text-xs text-[#D1D5DB] min-h-[4rem]"></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
   <script>
+  const PHASE_RU = {
+    counting: 'Подсчёт строк в Firebird…',
+    exchangelog_ready: 'К журналу EXCHANGELOG',
+    fetch_page: 'Загрузка страницы из Firebird…',
+    parsing: 'Парсинг SOAP / журнал…',
+    page_done: 'Сохранение страницы в PostgreSQL…',
+    exchangelog_done: 'Журнал обработан',
+    outbound_fetch: 'Исходящие сообщения (EGISZ_MESSAGES)…',
+    outbound_parse: 'Разбор исходящих…',
+  };
+  function renderProgress(j) {
+    const wrap = document.getElementById('syncProgressWrap');
+    const bar = document.getElementById('syncProgressBar');
+    const frac = document.getElementById('syncProgressFraction');
+    const label = document.getElementById('syncProgressLabel');
+    const meta = document.getElementById('syncProgressMeta');
+    const p = j.progress;
+    const active = j.running && p && typeof p === 'object';
+    if (!active) {
+      wrap.classList.add('hidden');
+      return;
+    }
+    wrap.classList.remove('hidden');
+    const phase = p.phase || '';
+    label.textContent = (PHASE_RU[phase] || phase || 'прогресс').toUpperCase();
+    let pct = 0;
+    let lineA = '';
+    let lineB = '';
+    if (phase === 'outbound_fetch' || phase === 'outbound_parse') {
+      const tot = Number(p.outbound_total) || 0;
+      const lo = Number(p.outbound_loaded) || 0;
+      pct = tot > 0 ? Math.min(100, Math.round((lo / tot) * 100)) : 0;
+      lineA = 'Исходящие: просмотрено ' + lo + ' из ' + tot + ' строк выборки';
+      lineB = 'В staging документов: ' + (Number(p.parsed_facts) || 0);
+    } else {
+      const tot = Number(p.total_rows) || 0;
+      const lo = Number(p.loaded_rows) || 0;
+      pct = tot > 0 ? Math.min(100, Math.round((lo / tot) * 100)) : (phase === 'counting' ? 3 : 0);
+      lineA = tot > 0
+        ? ('Загружено из журнала: ' + lo + ' / ' + tot + ' строк')
+        : 'Ожидаемый объём журнала: подсчёт неизвестен';
+      lineB = 'После парсинга в витрину: ' + (Number(p.parsed_facts) || 0) + ' фактов · staging: ' + (Number(p.staging_errors) || 0);
+      if (p.page) lineB += ' · страница ' + p.page;
+    }
+    bar.style.width = pct + '%';
+    frac.textContent = pct + '%';
+    meta.textContent = lineA + String.fromCharCode(10) + lineB;
+  }
   async function pollSync() {
     const el = document.getElementById('syncStatus');
     try {
       const r = await fetch('/api/sync/status');
       const j = await r.json();
+      renderProgress(j);
       const parts = [j.message || '', j.running ? 'Статус: выполняется' : 'Статус: ожидание'];
       if (j.error) parts.push('Ошибка: ' + j.error);
       if (j.last_stats) parts.push(JSON.stringify(j.last_stats, null, 2));
@@ -103,7 +273,7 @@ PAGE = """
     el.textContent = j.message || JSON.stringify(j);
     pollSync();
   };
-  setInterval(pollSync, 3000);
+  setInterval(pollSync, 1200);
   pollSync();
   </script>
 </body>

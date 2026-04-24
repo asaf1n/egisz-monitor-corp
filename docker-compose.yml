@@ -7,16 +7,16 @@ services:
     image: postgres:15-alpine
     container_name: egisz-corp-db
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-egisz_corp}
-      POSTGRES_USER: ${POSTGRES_USER:-egisz_corp}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-egisz_corp}
+      POSTGRES_DB: ${POSTGRES_DB:-egisz_reports}
+      POSTGRES_USER: ${POSTGRES_USER:-egisz}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-egisz}
     ports:
       - "${CORP_DB_PORT:-5433}:5432"
     volumes:
       - egisz_corp_pgdata:/var/lib/postgresql/data
     # Defaults match .env.example; if you change POSTGRES_USER/POSTGRES_DB, adjust this line too.
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U egisz_corp -d egisz_corp"]
+      test: ["CMD-SHELL", "pg_isready -U egisz -d egisz_reports"]
       interval: 5s
       timeout: 5s
       retries: 12
@@ -24,4 +24,6 @@ services:
     restart: unless-stopped
 
 volumes:
+  # Fixed host volume name: never merges with sibling project "egisz-monitor" volumes.
   egisz_corp_pgdata:
+    name: egisz_monitor_corp_postgres_data

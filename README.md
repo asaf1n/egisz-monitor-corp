@@ -13,7 +13,7 @@
 * **СУБД Источник:** Firebird (драйвер `firebird-driver`).
 * **Хранилище (DWH):** PostgreSQL 15/16.
 * **Оркестрация:** Apache Airflow (исполнение DAG `egisz_corp_firebird_to_postgres`).
-* **Визуализация:** Metabase.
+* **Визуализация:** Metabase (карточки в `metabase_dashboards/`; подписи колонок и осей — кириллические алиасы в SQL и `visualization_settings`). Кириллица из Firebird: см. `firebird.charset` в `egisz_corp.yaml` (часто `WIN1251`, см. `docs/METABASE.md`).
 * **Инфраструктура:** Docker, Kubernetes (namespace `egisz-corp`).
 
 ### Техническая реализация и логика парсинга
@@ -40,7 +40,7 @@
 * Наименование типа документа определяется по справочнику НСИ 1.2.643.5.1.13.13.11.1520.
 
 #### Отчёт «Документы без ответа»
-После синхронизации ETL обновляет снимок **`stg_egisz_outbound_documents`** (исходящие сообщения **`EGISZ_MESSAGES`** с непустым **`DOCUMENTID`** за окно **`sync_window_days`**). Представление **`v_rpt_documents_no_response`** в PostgreSQL: строки из снимка, для которых в **`fact_egisz_transactions`** отсутствует строка с **`local_uid_semd`**, равным **`DOCUMENTID`**. Колонки: ид сэмд, тип сэмд, клиника, хост, дата отправки (в источнике — **`EGISZ_MESSAGES.CREATEDATE`**; при другом имени поля даты создания записи поправьте выборку в **`egisz_monitor_corp.sql_util.outbound_documents_staging_select`**). Дашборд Metabase: **`metabase_dashboards/04_documents_no_response.json`**.
+После синхронизации ETL обновляет снимок **`stg_egisz_outbound_documents`** (исходящие сообщения **`EGISZ_MESSAGES`** с непустым **`DOCUMENTID`** за окно **`sync_window_days`**). Представление **`v_rpt_documents_no_response`**: строки снимка, для которых в **`fact_egisz_transactions`** нет **`local_uid_semd`**, совпадающего с **`DOCUMENTID`**. Имена колонок совпадают с **`v_egisz_transactions_enriched`** там, где смысл тот же: **`local_uid_semd`**, **`kind_code`**, **`kind_name`**, **`jid`**, **`clinic_name`**; дополнительно **`gost_host`** (эндпоинт `gost-…infoclinica.lan` или фрагмент **`REPLYTO`**) и **`sent_at`** — момент создания строки в **`EGISZ_MESSAGES`** (в источнике сейчас **`CREATEDATE`** в **`egisz_monitor_corp.sql_util.outbound_documents_staging_select`**). Дашборд Metabase: **`metabase_dashboards/04_documents_no_response.json`**.
 
 ### Конфигурация и управление параметрами
 

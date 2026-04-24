@@ -12,16 +12,17 @@ firebird:
   database: "proxy_egisz"
   user: "SYSDBA"
   password: "masterkey"
-  charset: "UTF8"
+  # Кириллица в JPERSONS.JNAME: в типичных БД Infoclinica — WIN1251; если строки в Metabase — «????», попробуйте WIN1251 и перезапустите ETL. Для БД в UTF8 оставьте UTF8.
+  charset: "WIN1251"
   page_size: 4096
 
 # Параметры ниже совпадают с docker-compose.yml + .env.example (порт 5433 на хосте).
 postgres:
   host: "localhost"
   port: 5433
-  database: "egisz_corp"
-  user: "egisz_corp"
-  password: "egisz_corp"
+  database: "egisz_reports"
+  user: "egisz"
+  password: "egisz"
   schema: "public"
 
 etl:

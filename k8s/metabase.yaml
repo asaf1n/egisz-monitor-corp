@@ -8,9 +8,11 @@ metadata:
   labels:
     app.kubernetes.io/name: metabase
 spec:
+  type: NodePort
   ports:
     - port: 3000
       targetPort: 3000
+      nodePort: 30300
       name: http
   selector:
     app.kubernetes.io/name: metabase
@@ -40,8 +42,17 @@ spec:
             - containerPort: 3000
               name: http
           env:
+            - name: LANG
+              value: "C.UTF-8"
+            - name: LC_ALL
+              value: "C.UTF-8"
+            # provision.sh в том же поде ходит на API Metabase
             - name: MB_URL
-              value: "http://127.0.0.1:3000"
+              value: "http://localhost:3000"
+            - name: MB_PASSWORD_COMPLEXITY
+              value: "weak"
+            - name: MB_PASSWORD_LENGTH
+              value: "4"
             - name: PGHOST
               value: "postgres.egisz-corp.svc.cluster.local"
             - name: METABASE_ADMIN_EMAIL

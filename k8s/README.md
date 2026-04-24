@@ -2,7 +2,7 @@
 
 Целевой контур: **namespace `egisz-corp`**. Здесь размещаются **витрина PostgreSQL** (данные ETL / Metabase) и **Apache Airflow** (расписание, DAG `egisz_corp_firebird_to_postgres`).
 
-Локальный `docker-compose.yml` в корне пакета — **отдельная среда для разработки на одной машине**; для продакшена ориентируйтесь на этот каталог `k8s/`.
+Локальная разработка: `docker-compose.yml` в корне пакета. Манифесты кластера: каталог `k8s/`.
 
 ---
 
@@ -26,7 +26,7 @@ kubectl apply -f k8s/postgres/postgres-statefulset.yaml
 kubectl apply -f k8s/postgres/postgres-service.yaml
 ```
 
-Либо `kubectl apply -k k8s/postgres/` после того, как рядом с `kustomization.yaml` лежит ваш `postgres-credentials.yaml` (добавьте его в `resources` в kustomization при желании; по умолчанию секрет в kustomization не включён).
+Либо `kubectl apply -k k8s/postgres/`: в `kustomization.yaml` должен быть перечислен ваш `postgres-credentials.yaml` в секции `resources` рядом с остальными манифестами.
 
 ### Готовность
 
@@ -52,13 +52,13 @@ export EGISZ_CORP_CONFIG=/path/to/egisz_corp.yaml
 egisz-corp apply-schema
 ```
 
-`egisz_corp.yaml` → секция `postgres` должна указывать на этот сервис (не на localhost).
+`egisz_corp.yaml` → секция `postgres`: `host` — DNS-имя сервиса PostgreSQL в кластере (например `postgres.egisz-corp.svc.cluster.local`), порт сервиса `5432`.
 
 ---
 
 ## 2. База метаданных Airflow на том же Postgres
 
-Один инстанс Postgres, **вторая БД** `airflow` для служебных таблиц Airflow (не смешивать с `egisz_corp`).
+Один инстанс Postgres; служебные таблицы Airflow — в отдельной БД **`airflow`**, витрина ETL — в БД из `postgres-credentials` (например `egisz_reports` или `egisz_corp` по вашей схеме).
 
 ```bash
 kubectl -n egisz-corp apply -f k8s/postgres/airflow-metadata-init-job.yaml
@@ -158,7 +158,7 @@ kubectl -n egisz-corp port-forward svc/airflow-webserver 8080:8080
 
 ## 7. Metabase
 
-В этом репозитории **нет** Helm-чарта Metabase. Поднимите Metabase в k8s отдельно (свой chart/манифесты) и подключите к **той же** витрине PostgreSQL (`postgres:5432`, БД `egisz_corp`). См. также `docs/METABASE.md`.
+Metabase в репозитории: манифест `k8s/metabase.yaml`, описание полей витрины — `docs/METABASE.md`. Подключение Metabase к PostgreSQL в кластере: хост `postgres` (или FQDN сервиса), порт `5432`, имя БД из секрета `postgres-credentials`.
 
 ---
 
@@ -168,4 +168,24 @@ kubectl -n egisz-corp port-forward svc/airflow-webserver 8080:8080
 kubectl -n egisz-corp port-forward svc/postgres 5432:5432
 ```
 
-Для админских задач; для продакшена предпочтительны Metabase и ETL внутри кластера.
+Команда пробрасывает порт сервиса `postgres` на `localhost:5432` на машине, где запущен `kubectl`.
+
+### Config UI и Metabase (localhost)
+
+В `k8s/conf-ui.yaml` и `k8s/metabase.yaml` сервисы объявлены как **NodePort**: `8080:30808/TCP`, `3000:30300/TCP` (см. `kubectl -n egisz-corp get svc`). Для доступа с Windows через **стандартные порты localhost** (`5432`, `8080`, `3000`) без ручного набора NodePort:
+
+```powershell
+.\start.ps1 -Action web
+# то же самое:
+.\start.ps1 -Action forward
+```
+
+Скрипт запускает три окна PowerShell с `kubectl port-forward` (сервисы `postgres`, `conf-ui`, `metabase`) и открывает браузер на `http://127.0.0.1:8080/` и `http://127.0.0.1:3000/`. Окна держите открытыми на время работы. Если порт `5432` на ПК занят другим процессом: `.\start.ps1 -Action web -SkipPostgresPortForward`.
+
+### Firebird с хоста Windows в под Config UI
+
+Параметры по умолчанию: `k8s/local/egisz_corp.yaml` — **`host.docker.internal`**, порт **`3050`**.
+
+Поле **database** в форме DSN — строка в формате Firebird для **того процесса `firebird`, к которому выполняется TCP-подключение**: зарегистрированный alias (например `proxy_egisz`) или путь к `.fdb` **на файловой системе, видимой этому серверу** (как в DBeaver при том же `host`/`port`).
+
+Образ `egisz-conf-ui` собирается с **`libfbclient`** (`docker/web/Dockerfile`, переменная **`FB_CLIENT_LIBRARY`** в `k8s/conf-ui.yaml`). После правок Dockerfile: `.\start.ps1 -Action deploy` или последовательность `build` + `apply` и обновление пода `conf-ui`.

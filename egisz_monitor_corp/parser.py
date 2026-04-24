@@ -1,6 +1,7 @@
 """
-Parse EGISZ SOAP callback fragments from EXCHANGELOG.LOGTEXT.
+Parse EGISZ SOAP callback fragments from EXCHANGELOG.MSGTEXT (XML body).
 
+LOGTEXT typically holds the clinic endpoint URL (gost-…); MSGTEXT holds the SOAP/XML payload.
 Namespace (canonical): ns2 = http://egisz.rosminzdrav.ru/iehr/emdr/callback/
 Tags may use any prefix; matching uses local-name (Clark notation).
 """
@@ -41,8 +42,16 @@ def _norm_ws(s: str | None) -> str | None:
     return t or None
 
 
+def _soap_xml_source(msg_text: str | None) -> str | None:
+    """SOAP/XML только из EXCHANGELOG.MSGTEXT; в LOGTEXT — только транспортный хост, не XML."""
+    blob = (msg_text or "").strip()
+    if not blob or "<" not in blob:
+        return None
+    return blob
+
+
 def _extract_embedded_xml(raw: str) -> str:
-    """LOGTEXT often prefixes transport lines before the SOAP document."""
+    """MSGTEXT may prefix transport lines before the SOAP document."""
     markers = ("<?xml", "<soap:", "<SOAP:", "<soap ", "<SOAP ", "<s:Envelope", "<S:Envelope")
     positions = [raw.find(m) for m in markers if raw.find(m) != -1]
     if positions:
@@ -75,6 +84,7 @@ class NormalizedRecord:
     """Row-shaped payload for fact_egisz_transactions (before UPSERT)."""
 
     relates_to_id: str
+    local_uid_semd: str | None
     jid: int | None
     gost_jid_token: str | None
     org_oid: str | None
@@ -89,6 +99,7 @@ class NormalizedRecord:
     def as_fact_row(self) -> dict[str, Any]:
         return {
             "relates_to_id": self.relates_to_id,
+            "local_uid_semd": self.local_uid_semd,
             "jid": self.jid,
             "gost_jid_token": self.gost_jid_token,
             "org_oid": self.org_oid,
@@ -103,39 +114,42 @@ class NormalizedRecord:
 
 class EgiszMonitorParser:
     """
-    SOAP-focused parser with resilient XML handling and clinic resolution chain:
-    JID: gost- URL → LICENSE_JID из строки Firebird → OID → license map → JPERSONS.
+    SOAP-focused parser: XML from MSGTEXT; gost- host from LOGTEXT then EGISZ_MESSAGES.REPLYTO.
+    Clinic JID: LOGTEXT URL, строка EGISZ_LICENSES (JID), или OID→EGISZ_LICENSES.MO_UID→JID; реквизиты МО из JPERSONS.
     """
 
     def __init__(self, log_excerpt_max: int = 4000) -> None:
         self.log_excerpt_max = log_excerpt_max
 
-    def extract_jid(self, log_text: str | None) -> dict[str, Any]:
+    def extract_jid(
+        self,
+        log_text: str | None,
+        reply_to: str | None = None,
+    ) -> dict[str, Any]:
         """
-        Extract clinic token from gost-<jid>.infoclinica.lan URLs inside LOGTEXT.
+        Extract clinic token from gost-<jid>.infoclinica.lan in LOGTEXT, then in REPLYTO.
 
-        Returns:
-            jid: int | None — when the token is all digits (internal JID).
-            gost_jid_token: str | None — lowercased token from the host segment.
+        DOCUMENTID / localUid are not used here; they feed local_uid_semd only after SOAP localUid is read (see build_record).
         """
-        if not log_text:
-            return {"jid": None, "gost_jid_token": None}
+        def _first_gost(s: str | None) -> tuple[str | None, int | None]:
+            if not s:
+                return None, None
+            best: str | None = None
+            for m in _GOST_JID_RE.finditer(s):
+                token = m.group(1).lower()
+                if best is None:
+                    best = token
+            if not best:
+                return None, None
+            jid: int | None = int(best) if best.isdigit() else None
+            return best, jid
 
-        best_token: str | None = None
-        for m in _GOST_JID_RE.finditer(log_text):
-            token = m.group(1).lower()
-            # Deterministic: first gost-… host in log order (avoids picking unrelated long tokens).
-            if best_token is None:
-                best_token = token
+        for blob in (log_text, reply_to):
+            token, jid = _first_gost(blob)
+            if token is not None:
+                return {"jid": jid, "gost_jid_token": token}
 
-        if not best_token:
-            return {"jid": None, "gost_jid_token": None}
-
-        jid: int | None = None
-        if best_token.isdigit():
-            jid = int(best_token)
-
-        return {"jid": jid, "gost_jid_token": best_token}
+        return {"jid": None, "gost_jid_token": None}
 
     def parse_xml(self, xml_string: str | None) -> dict[str, Any] | None:
         """
@@ -160,6 +174,7 @@ class EgiszMonitorParser:
                 return None
 
         relates: str | None = None
+        local_uid: str | None = None
         status: str | None = None
         kind: str | None = None
         org_oid: str | None = None
@@ -170,7 +185,7 @@ class EgiszMonitorParser:
         stack: list[str] = []
 
         def walk(el: ET.Element) -> None:
-            nonlocal relates, status, kind, org_oid, emdr_id, reg_date, errors
+            nonlocal relates, local_uid, status, kind, org_oid, emdr_id, reg_date, errors
             stack.append(_local_tag(el.tag))
             path = stack
             text = _norm_ws(el.text)
@@ -178,6 +193,8 @@ class EgiszMonitorParser:
 
             if ln == "relatesToMessage" and text:
                 relates = text
+            elif ln == "localUid" and text:
+                local_uid = text
             elif ln == "status" and text and "registerDocumentResult" in path:
                 status = text.lower()
             elif ln == "kind" and text:
@@ -218,6 +235,7 @@ class EgiszMonitorParser:
         if not relates:
             return {
                 "relates_to_id": None,
+                "local_uid": _norm_ws(local_uid),
                 "status": status or "unknown",
                 "kind_code": _norm_kind_code(kind),
                 "org_oid": org_oid,
@@ -233,6 +251,7 @@ class EgiszMonitorParser:
 
         return {
             "relates_to_id": relates,
+            "local_uid": _norm_ws(local_uid),
             "status": st,
             "kind_code": _norm_kind_code(kind),
             "org_oid": org_oid,
@@ -247,22 +266,22 @@ class EgiszMonitorParser:
         jid_from_url: int | None,
         oid: str | None,
         *,
-        license_jid_from_row: int | None = None,
-        license_jid_by_mo_uid: Mapping[str, int] | None = None,
+        jid_from_egisz_licenses_row: int | None = None,
+        jid_by_mo_uid_from_egisz_licenses: Mapping[str, int] | None = None,
     ) -> tuple[int | None, str | None]:
         """
-        Resolve internal JID: URL → EGISZ_LICENSES.JID from extraction row → OID map.
+        Resolve internal JID: URL → EGISZ_LICENSES.JID из строки выборки → OID→EGISZ_LICENSES.MO_UID→JID.
         """
         if jid_from_url is not None and jid_from_url > 0:
             return jid_from_url, None
 
-        lj = license_jid_from_row
+        lj = jid_from_egisz_licenses_row
         if lj is not None and lj > 0:
             return int(lj), None
 
         oid_n = _norm_ws(oid)
-        if oid_n and license_jid_by_mo_uid:
-            mapped = license_jid_by_mo_uid.get(oid_n)
+        if oid_n and jid_by_mo_uid_from_egisz_licenses:
+            mapped = jid_by_mo_uid_from_egisz_licenses.get(oid_n)
             if mapped is not None and mapped > 0:
                 return mapped, oid_n
 
@@ -272,23 +291,31 @@ class EgiszMonitorParser:
         self,
         log_text: str | None,
         *,
-        kind_from_licenses: str | int | None = None,
-        org_from_licenses: str | None = None,
-        license_jid_from_row: int | None = None,
-        license_jid_by_mo_uid: Mapping[str, int] | None = None,
+        msg_text: str | None = None,
+        kind_from_egisz_licenses: str | int | None = None,
+        mo_uid_from_egisz_licenses: str | None = None,
+        jid_from_egisz_licenses_row: int | None = None,
+        jid_by_mo_uid_from_egisz_licenses: Mapping[str, int] | None = None,
+        reply_to: str | None = None,
+        document_id: str | None = None,
         on_staging_error: Callable[[StagingParseError], None] | None = None,
     ) -> NormalizedRecord | None:
         """
-        Parse LOGTEXT; KIND only from XML then EGISZ_LICENSES (KIND is not on messages).
-        MO_UID from licenses used when SOAP omits organization. Resolve JID. UPSERT: relates_to_id.
+        SOAP только из MSGTEXT; хост gost- из LOGTEXT затем REPLYTO.
+        KIND из XML (MSGTEXT) либо из колонки EGISZ_LICENSES.KIND строки журнала. UPSERT key: relates_to_id.
+        local_uid_semd: тег localUid в SOAP либо EGISZ_MESSAGES.DOCUMENTID.
         """
-        excerpt = (log_text or "")[: self.log_excerpt_max]
+        combined = "\n".join(
+            x for x in ((msg_text or "").strip(), (log_text or "").strip()) if x
+        )
+        excerpt = combined[: self.log_excerpt_max] if combined else ""
 
-        host_part = self.extract_jid(log_text)
+        host_part = self.extract_jid(log_text, reply_to=reply_to)
         jid_url = host_part["jid"]
         gost_token = host_part["gost_jid_token"]
 
-        parsed = self.parse_xml(log_text)
+        soap_src = _soap_xml_source(msg_text)
+        parsed = self.parse_xml(soap_src)
 
         relates_to_id: str | None = None
         status = "unknown"
@@ -297,6 +324,7 @@ class EgiszMonitorParser:
         emdr_id: str | None = None
         registration_date: datetime | None = None
         errors_json: list[dict[str, str]] = []
+        local_uid_xml: str | None = None
 
         if parsed:
             relates_to_id = parsed.get("relates_to_id")
@@ -306,24 +334,27 @@ class EgiszMonitorParser:
             emdr_id = parsed.get("emdr_id")
             registration_date = parsed.get("registration_date")
             errors_json = list(parsed.get("errors") or [])
+            local_uid_xml = parsed.get("local_uid")
 
         if not kind_code:
             kind_code = _norm_kind_code(
-                str(kind_from_licenses).strip() if kind_from_licenses is not None else None
+                str(kind_from_egisz_licenses).strip() if kind_from_egisz_licenses is not None else None
             )
 
-        org_license = _norm_ws(org_from_licenses)
-        org_for_resolve = org_oid or org_license
+        mo_uid_egisz = _norm_ws(mo_uid_from_egisz_licenses)
+        org_for_resolve = org_oid or mo_uid_egisz
 
         kind_name = get_semd_name(kind_code) if kind_code else get_semd_name(None)
 
         jid_resolved, oid_kept = self.resolve_clinic(
             jid_url,
             org_for_resolve,
-            license_jid_from_row=license_jid_from_row,
-            license_jid_by_mo_uid=license_jid_by_mo_uid,
+            jid_from_egisz_licenses_row=jid_from_egisz_licenses_row,
+            jid_by_mo_uid_from_egisz_licenses=jid_by_mo_uid_from_egisz_licenses,
         )
-        org_out = org_oid or org_license or oid_kept
+        org_out = org_oid or mo_uid_egisz or oid_kept
+
+        local_uid_semd = _norm_ws(local_uid_xml) or _norm_ws(document_id)
 
         def _stage(err: StagingParseError) -> None:
             if on_staging_error:
@@ -336,22 +367,23 @@ class EgiszMonitorParser:
                         relates_to_id=None,
                         error_code="MISSING_RELATES_TO",
                         message="SOAP fragment without relatesToMessage",
-                        log_excerpt=excerpt,
+                        log_excerpt=excerpt or None,
                     )
                 )
-            elif parsed is None and "relatesToMessage" in (log_text or ""):
+            elif parsed is None and "relatesToMessage" in (msg_text or ""):
                 _stage(
                     StagingParseError(
                         relates_to_id=None,
                         error_code="XML_BROKEN",
                         message="relatesToMessage hinted in text but XML not parseable",
-                        log_excerpt=excerpt,
+                        log_excerpt=excerpt or None,
                     )
                 )
             return None
 
         return NormalizedRecord(
             relates_to_id=relates_to_id,
+            local_uid_semd=local_uid_semd,
             jid=jid_resolved,
             gost_jid_token=gost_token,
             org_oid=org_out,

@@ -23,7 +23,7 @@ def main(argv: list[str] | None = None) -> int:
     t = sub.add_parser("test-fb", help="SELECT 1 FROM RDB$DATABASE on Firebird")
     t2 = sub.add_parser("test-pg", help="SELECT 1 on PostgreSQL")
 
-    a = sub.add_parser("apply-schema", help="Apply sql/001_schema.sql and 002_etl_state.sql")
+    a = sub.add_parser("apply-schema", help="Apply sql/001_schema.sql (полная витрина) и 002_etl_state.sql")
 
     sub.add_parser("config-ui", help="Run Flask config editor on FLASK_RUN_HOST:FLASK_RUN_PORT")
 
