@@ -27,12 +27,12 @@
 **1. Идентификация документа и корреляция:**
 * **Связь с ответом:** Тег `<relatesToMessage>` и остальной SOAP читаются **только** из **`EXCHANGELOG.MSGTEXT`**; в **`LOGTEXT`** — только URL/хост клиники, не XML. Первичный ключ витрины в PostgreSQL — **`relates_to_id`**.
 * **localUid СЭМД:** В колонке **`local_uid_semd`** (и во вью `v_egisz_transactions_enriched`) сохраняется значение тега **`<localUid>`** из SOAP, а если его нет — **`EGISZ_MESSAGES.DOCUMENTID`**. По этому полю удобно искать в Metabase; оно согласовано с `localUid` интеграции.
-* **Связь с клиникой по сообщению:** `EGISZ_MESSAGES.DOCUMENTID` связывает запись журнала с сообщением; **`REPLYTO`** сопоставляется с **`EGISZ_LICENSES.MO_DOMEN`**, оттуда **`JID`**. Из **`JPERSONS`** подтягиваются **`JNAME`**, **`JINN`** (ИНН) и **`FIR_OID`** (OID МО, в том же смысле, что **`<organization>`** и **`EGISZ_LICENSES.MO_UID`**).
+* **Связь с клиникой по сообщению:** `EGISZ_MESSAGES.DOCUMENTID` связывает запись журнала с сообщением; **`REPLYTO`** сопоставляется с **`EGISZ_LICENSES.MO_DOMEN`** — из подходящей **строки `EGISZ_LICENSES`** берут **`JID`**, а при необходимости с той же строки — **`MO_UID`**, **`KIND`**. Это привязка интеграции к **`EGISZ_LICENSES`**, а не паспорт МО в **`JPERSONS`**.
 
 **2. Идентификация юридического лица (Клиники):**
 * **Через URL:** Хост `gost-…infoclinica.lan` извлекается из **`EXCHANGELOG.LOGTEXT`**, при отсутствии — из **`EGISZ_MESSAGES.REPLYTO`**, по шаблону `gost-([a-zA-Z0-9_-]+)\.infoclinica\.lan`.
-* **Через OID:** Тег `<organization>` из XML (`MSGTEXT`) сопоставляется с **`EGISZ_LICENSES.MO_UID`** для получения `JID`.
-* **Реквизиты клиники в витрине:** По разрешённому **`JID`** — сначала из связки лицензии (**`EGISZ_LICENSES` → `JPERSONS`**), при неполных данных — дозаполнение из **`JPERSONS`** по `JID`. В **`dim_clinics`** пишутся `jname`, **`jinn`**, **`fir_oid`** (и `mo_uid` с лицензии/SOAP); во **`v_egisz_transactions_enriched`** они доступны как **`clinic_name`**, **`clinic_inn`**, **`clinic_mo_oid`**.
+* **Через OID:** Тег `<organization>` из XML (`MSGTEXT`) сопоставляется с **`EGISZ_LICENSES.MO_UID`** для получения **`JID`**.
+* **Реквизиты клиники в витрине:** Из **`EGISZ_LICENSES`** для строки журнала определяется **`JID`** и поля этой таблицы (**`MO_UID`**, **`KIND`** и т.д.). **Наименование, ИНН (`JINN`), OID МО (`FIR_OID`) и прочие реквизиты МО — только из `JPERSONS`** по этому **`JID`** (в SQL: **`EGISZ_LICENSES` LEFT JOIN `JPERSONS`** по **`JID`**, либо прямой выбор из **`JPERSONS`**, если **`JID`** уже получен из URL/OID и нет подходящей строки **`EGISZ_LICENSES`** в выборке). В **`dim_clinics`** / **`v_egisz_transactions_enriched`**: **`clinic_name`**, **`clinic_inn`**, **`clinic_mo_oid`**; **`mo_uid`** из **`EGISZ_LICENSES`** или SOAP отдельно от **`JPERSONS.FIR_OID`**.
 
 **3. Классификация типов документов:**
 * Код типа документа (KIND) извлекается из тега `<kind>` в XML (**`MSGTEXT`**) или из `EGISZ_LICENSES.KIND`.
