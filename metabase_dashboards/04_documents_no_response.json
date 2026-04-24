@@ -5,12 +5,12 @@
   "cards": [
     {
       "name": "Документы без ответа",
-      "description": "Строки витрины v_rpt_documents_no_response с русскими именами колонок.",
-      "table_ref": "v_rpt_documents_no_response",
+      "description": "Строки v_rpt_documents_no_response_ui (подписи из dim_column_display_labels).",
+      "table_ref": "v_rpt_documents_no_response_ui",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT local_uid_semd AS \"localUid СЭМД\", kind_code AS \"Код СЭМД\", kind_name AS \"Наименование СЭМД\", jid AS \"JID клиники\", clinic_name AS \"Наименование клиники\", gost_host AS \"Хост клиники (ГОСТ VPN)\", sent_at AS \"Отправлено\" FROM public.v_rpt_documents_no_response ORDER BY sent_at DESC NULLS LAST",
+          "query": "SELECT * FROM public.v_rpt_documents_no_response_ui ORDER BY \"Отправлено\" DESC NULLS LAST",
           "template-tags": {}
         },
         "database": 1

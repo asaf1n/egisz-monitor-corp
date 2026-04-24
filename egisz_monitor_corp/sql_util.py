@@ -123,6 +123,24 @@ WHERE m.DOCUMENTID IS NOT NULL
 """.strip()
 
 
+def exchangelog_count_window_after_cursor(sync_window_days: int, *, last_log_id: int) -> str:
+    """
+    Count rows of the *default* EXCHANGELOG extract (LOGDATE window + join to EGISZ_MESSAGES) after LOGID cursor.
+    The heavy scalar subqueries in the main SELECT are not in the result rowset — this COUNT matches that rowset
+    but avoids N×(EGISZ_LICENSES lookups) work that a COUNT over the full inner SELECT would trigger.
+    """
+    sd = int(sync_window_days)
+    lid = int(last_log_id)
+    return f"""
+SELECT COUNT(*) AS cnt
+FROM EXCHANGELOG e
+LEFT JOIN EGISZ_MESSAGES m
+    ON m.MSGID = e.MSGID
+WHERE e.LOGDATE >= DATEADD(-{sd} DAY TO CURRENT_TIMESTAMP)
+  AND e.LOGID > {lid}
+""".strip()
+
+
 def paginated_exchangelog_sql(inner_select: str, *, last_log_id: int, limit: int) -> str:
     """Firebird: FIRST n rows with LOGID > cursor, ordered by LOGID (incremental, not MODIFYDATE)."""
     lid = int(last_log_id)

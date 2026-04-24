@@ -19,19 +19,25 @@
 
 | Объект | Назначение |
 |--------|------------|
-| `v_egisz_transactions_enriched` | Факты + `local_uid_semd` + СЭМД + `clinic_name` / `clinic_inn` / `clinic_mo_oid` |
+| `v_egisz_transactions_enriched` | Техническая витрина (snake_case): факты + СЭМД + клиника; **не переименовывать колонки здесь** — от этого зависят другие представления и ETL. |
+| `v_egisz_transactions_enriched_ui` | То же содержимое, колонки с **русскими подписями** для Metabase (имена как в `dim_column_display_labels`). |
+| `v_rpt_documents_no_response` | Очередь «документы без ответа» (технические имена колонок). |
+| `v_rpt_documents_no_response_ui` | То же для отчётов с русскими именами колонок. |
+| `dim_column_display_labels` | Справочник сопоставления `source_object` + `source_column` → `display_label_ru` (синхронизирован с колонками `*_ui`). |
 | `fact_egisz_transactions` | Сырой факт (JSON ошибок, статусы, `local_uid_semd`) |
 | `stg_parse_errors` | Строки без `relatesToMessage` / битый XML в **MSGTEXT** |
 | `dim_clinics` | `jname`, `jinn`, `fir_oid`, `mo_uid` (ETL: `JPERSONS` + `EGISZ_LICENSES` по `JID`) |
 | `dim_semd_types` | KIND → наименование |
 | `etl_state` | Контроль курсора `last_log_id` (не используйте как бизнес-время) |
 
+Карточки в `metabase_dashboards/` по умолчанию читают **`v_egisz_transactions_enriched_ui`** и **`v_rpt_documents_no_response_ui`**, чтобы заголовки таблиц и осей совпадали с подписями без ручного дублирования в каждом запросе.
+
 ## Пример вопроса (SQL)
 
 ```sql
-SELECT status, COUNT(*)::bigint AS "Количество"
-FROM v_egisz_transactions_enriched
-WHERE processed_at > NOW() - INTERVAL '7 days'
+SELECT "Статус", COUNT(*)::bigint AS "Количество"
+FROM v_egisz_transactions_enriched_ui
+WHERE "Обработано" > NOW() - INTERVAL '7 days'
 GROUP BY 1;
 ```
 

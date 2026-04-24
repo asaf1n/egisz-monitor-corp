@@ -94,20 +94,20 @@ fi
 
 if [ -x /app/setup-dashboards.sh ]; then
   log_info "Waiting for DWH schema in Postgres (needed for dashboard provisioning)..."
-  SCHEMA_SQL="SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('fact_egisz_transactions', 'v_egisz_transactions_enriched', 'etl_state');"
+  SCHEMA_SQL="SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('fact_egisz_transactions', 'v_egisz_transactions_enriched', 'v_egisz_transactions_enriched_ui', 'etl_state');"
   SCHEMA_CHECK="0"
-  # -At: одна строка без пробелов/переносов — иначе [ \"  3\" -ge 3 ] в bash может не сработать
+  # -At: одна строка без пробелов/переносов — иначе сравнение в bash может не сработать
   for _attempt in $(seq 1 120); do
     SCHEMA_CHECK="$(PGPASSWORD="${APP_DB_PASSWORD}" psql -h "${PGHOST}" -U "${APP_DB_USER}" -d "${APP_DB_NAME}" -Atc "${SCHEMA_SQL}" 2>/dev/null || true)"
     SCHEMA_CHECK="$(echo "${SCHEMA_CHECK}" | tr -d '[:space:]')"
     SCHEMA_CHECK="${SCHEMA_CHECK:-0}"
-    if [ "${SCHEMA_CHECK}" -ge 3 ] 2>/dev/null; then
+    if [ "${SCHEMA_CHECK}" -ge 4 ] 2>/dev/null; then
       break
     fi
     sleep 5
   done
 
-  if [ "${SCHEMA_CHECK}" -ge 3 ]; then
+  if [ "${SCHEMA_CHECK}" -ge 4 ]; then
     log_info "Application schema validated. Running dashboard provisioning..."
     ADMIN_EMAIL="${ADMIN_EMAIL}" \
     ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
@@ -120,7 +120,7 @@ if [ -x /app/setup-dashboards.sh ]; then
     PGPORT="5432" \
     /app/setup-dashboards.sh
   else
-    echo "[provision] Warning: Application database schema not fully initialized after wait. Skipping dashboard provisioning. Restart the Metabase pod after apply-schema / ETL DB is ready."
+    echo "[provision] Warning: Application database schema not fully initialized after wait (need fact + v_egisz_transactions_enriched + v_egisz_transactions_enriched_ui + etl_state). Skipping dashboard provisioning. Run egisz-corp apply-schema and restart Metabase."
   fi
 fi
 

@@ -6,11 +6,11 @@
     {
       "name": "Топ типов СЭМД",
       "description": "Количество записей по kind_code.",
-      "table_ref": "v_egisz_transactions_enriched",
+      "table_ref": "v_egisz_transactions_enriched_ui",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT COALESCE(NULLIF(TRIM(kind_code), ''), '(пусто)') AS \"Код СЭМД\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched GROUP BY 1 ORDER BY 2 DESC LIMIT 25",
+          "query": "SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui GROUP BY 1 ORDER BY 2 DESC LIMIT 25",
           "template-tags": {}
         },
         "database": 1
@@ -19,9 +19,10 @@
       "visualization_settings": {
         "graph.dimensions": ["Код СЭМД"],
         "graph.metrics": ["Количество"],
+        "graph.x_axis.axis_enabled": "rotate-45",
         "column_settings": {
           "[\"name\",\"Код СЭМД\"]": { "column_title": "Код СЭМД" },
-          "[\"name\",\"Количество\"]": { "column_title": "Количество" }
+          "[\"name\",\"Количество\"]": { "column_title": "Количество", "number_separators": ".", "decimals": 0 }
         }
       },
       "sizeX": 12,
@@ -32,22 +33,22 @@
     {
       "name": "По клиникам (имя)",
       "description": "Топ клиник по числу записей.",
-      "table_ref": "v_egisz_transactions_enriched",
+      "table_ref": "v_egisz_transactions_enriched_ui",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT clinic_name AS \"Наименование клиники\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched GROUP BY 1 ORDER BY 2 DESC LIMIT 20",
+          "query": "SELECT \"Наименование клиники\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui GROUP BY 1 ORDER BY 2 DESC LIMIT 20",
           "template-tags": {}
         },
         "database": 1
       },
-      "display": "bar",
+      "display": "row",
       "visualization_settings": {
         "graph.dimensions": ["Наименование клиники"],
         "graph.metrics": ["Количество"],
         "column_settings": {
           "[\"name\",\"Наименование клиники\"]": { "column_title": "Наименование клиники" },
-          "[\"name\",\"Количество\"]": { "column_title": "Количество" }
+          "[\"name\",\"Количество\"]": { "column_title": "Количество", "number_separators": ".", "decimals": 0 }
         }
       },
       "sizeX": 12,

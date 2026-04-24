@@ -10,7 +10,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT id AS \"Номер записи\", relates_to_id AS \"Связанное сообщение\", error_code AS \"Код ошибки\", LEFT(message, 200) AS \"Сообщение\", created_at AS \"Создано\" FROM public.stg_parse_errors ORDER BY id DESC LIMIT 100",
+          "query": "SELECT id AS \"Номер записи\", error_code AS \"Код ошибки\", LEFT(message, 200) AS \"Сообщение\", created_at AS \"Создано\", relates_to_id AS \"Связанное сообщение\" FROM public.stg_parse_errors ORDER BY id DESC LIMIT 100",
           "template-tags": {}
         },
         "database": 1
@@ -33,11 +33,11 @@
     {
       "name": "Факты со статусом error",
       "description": "Последние error-строки из витрины.",
-      "table_ref": "v_egisz_transactions_enriched",
+      "table_ref": "v_egisz_transactions_enriched_ui",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT relates_to_id AS \"Связанное сообщение\", local_uid_semd AS \"localUid СЭМД\", kind_code AS \"Код СЭМД\", clinic_name AS \"Наименование клиники\", clinic_inn AS \"ИНН клиники\", clinic_mo_oid AS \"OID клиники\", processed_at AS \"Обработано\" FROM public.v_egisz_transactions_enriched WHERE status = 'error' ORDER BY processed_at DESC NULLS LAST LIMIT 50",
+          "query": "SELECT \"localUid СЭМД\", \"Код СЭМД\", \"Наименование клиники\", \"ИНН клиники\", \"OID клиники\", \"Обработано\", \"Связанное сообщение\" FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' ORDER BY \"Обработано\" DESC NULLS LAST LIMIT 50",
           "template-tags": {}
         },
         "database": 1

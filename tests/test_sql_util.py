@@ -1,6 +1,7 @@
 from egisz_monitor_corp.sql_util import (
     default_exchangelog_select,
     exchangelog_count_after_cursor,
+    exchangelog_count_window_after_cursor,
     paginated_exchangelog_sql,
 )
 
@@ -19,6 +20,16 @@ def test_count_wraps_inner_and_filters_logid() -> None:
     assert "COUNT(*)" in sql
     assert "cnt_inner" in sql
     assert "LOGID > 42" in sql
+
+
+def test_fast_count_matches_default_window_not_full_inner_select() -> None:
+    sql = exchangelog_count_window_after_cursor(30, last_log_id=0)
+    assert "COUNT(*)" in sql
+    assert "EXCHANGELOG" in sql
+    assert "EGISZ_MESSAGES" in sql
+    assert "LOGDATE" in sql and "DATEADD(-30 DAY" in sql
+    assert "LOGID > 0" in sql
+    assert "EGISZ_LICENSES" not in sql
 
 
 def test_default_select_contains_egisz_licenses_columns() -> None:

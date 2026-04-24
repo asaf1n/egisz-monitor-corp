@@ -26,6 +26,7 @@ from egisz_monitor_corp.sql_util import (
     enrichment_egisz_licenses_sql,
     enrichment_jpersons_sql,
     exchangelog_count_after_cursor,
+    exchangelog_count_window_after_cursor,
     outbound_documents_staging_select,
     paginated_exchangelog_sql,
 )
@@ -174,7 +175,12 @@ def run_sync(
         log("Подсчёт строк EXCHANGELOG для прогресса...")
         total_exchangelog = 0
         try:
-            cnt_sql = exchangelog_count_after_cursor(base_sql, last_log_id=last_id)
+            if (cfg.etl.source_query or "").strip():
+                cnt_sql = exchangelog_count_after_cursor(base_sql, last_log_id=last_id)
+            else:
+                cnt_sql = exchangelog_count_window_after_cursor(
+                    cfg.etl.sync_window_days, last_log_id=last_id
+                )
             cnt_rows = fetch_all(cfg.firebird, cnt_sql)
             if cnt_rows:
                 raw = cnt_rows[0].get("cnt")

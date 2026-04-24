@@ -27,17 +27,17 @@ PAGE = """
   </style>
 </head>
 <body class="min-h-screen bg-[#121826] text-white">
-  <div class="mx-auto max-w-4xl px-4 py-6 sm:px-6">
-    <nav class="flex items-center justify-center gap-3 text-xs mb-8">
+  <div class="w-full max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-10 py-3">
+    <nav class="flex items-center justify-center gap-3 text-xs mb-3">
       <span class="text-[#509EE3]">Конфигурация</span>
       <span class="text-[#4B5563]">|</span>
       <a href="/" class="text-[#4B5563] transition hover:text-[#509EE3]">Обновить страницу</a>
     </nav>
 
-    <section class="rounded-lg bg-[#0F1522] px-4 py-5 sm:px-6 shadow-lg border border-[#1B2940]">
-      <div class="mb-6 border-b border-[#1B2940] pb-4">
-        <h1 class="text-lg font-semibold text-white">Конфигурация БД (EGISZ Monitor Corp)</h1>
-        <p class="mt-1 text-sm text-[#9CA3AF]">
+    <section class="rounded-lg bg-[#0F1522] px-4 py-4 sm:px-5 lg:px-6 shadow-lg border border-[#1B2940]">
+      <div class="mb-4 border-b border-[#1B2940] pb-3">
+        <h1 class="text-base sm:text-lg font-semibold text-white">Конфигурация БД (EGISZ Monitor Corp)</h1>
+        <p class="mt-0.5 text-xs sm:text-sm text-[#9CA3AF]">
           Файл: <code class="text-[#509EE3]">{{ path }}</code><br/>
           Переопределение: переменная окружения <code class="text-[#509EE3]">EGISZ_CORP_CONFIG</code> или <code class="text-[#509EE3]">CONFIG_WRITE_PATH</code>.
         </p>
@@ -49,155 +49,155 @@ PAGE = """
       </div>
       {% endif %}
 
-      <form id="configForm" method="post" action="{{ url_for('save') }}" class="space-y-8">
-        
+      <form id="configForm" method="post" action="{{ url_for('save') }}" class="space-y-4">
+
+        <div class="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-0 lg:items-stretch">
         <!-- Firebird Section -->
-        <div>
-          <div class="mb-4">
+        <div class="min-w-0 lg:pr-6 lg:border-r lg:border-[#1B2940]">
+          <div class="mb-2">
             <h2 class="text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">Firebird Configuration</h2>
-            <p class="mt-1 text-xs text-[#9CA3AF]">TCP к серверу Firebird (как в DBeaver). Если в Docker — используйте <code class="text-white">host.docker.internal</code></p>
+            <p class="mt-0.5 text-[11px] sm:text-xs text-[#9CA3AF] leading-snug">TCP к серверу Firebird (как в DBeaver). Если в Docker — используйте <code class="text-white">host.docker.internal</code></p>
           </div>
-          
-          <div class="grid gap-4 sm:grid-cols-2">
+
+          <div class="grid gap-2.5 sm:grid-cols-2">
             <label class="block">
               <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">host</span>
-              <input name="fb_host" value="{{ fb.host }}" required class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              <input name="fb_host" value="{{ fb.host }}" required class="mt-1.5 h-9 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-2.5 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
             <label class="block">
               <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">port</span>
-              <input name="fb_port" type="number" value="{{ fb.port }}" required class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              <input name="fb_port" type="number" value="{{ fb.port }}" required class="mt-1.5 h-9 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-2.5 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
           </div>
-          <div class="mt-4 grid gap-4 sm:grid-cols-2">
+          <div class="mt-2.5 grid gap-2.5 sm:grid-cols-2">
             <label class="block">
               <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">database (alias/path)</span>
-              <input name="fb_database" value="{{ fb.database }}" required class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              <input name="fb_database" value="{{ fb.database }}" required class="mt-1.5 h-9 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-2.5 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
             <label class="block">
               <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">user</span>
-              <input name="fb_user" value="{{ fb.user }}" required class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              <input name="fb_user" value="{{ fb.user }}" required class="mt-1.5 h-9 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-2.5 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
           </div>
-          <div class="mt-4 grid gap-4 sm:grid-cols-2">
+          <div class="mt-2.5 grid gap-2.5 sm:grid-cols-2">
             <label class="block">
               <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">password</span>
-              <input name="fb_password" type="password" value="{{ fb.password }}" autocomplete="current-password" class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              <input name="fb_password" type="password" value="{{ fb.password }}" autocomplete="current-password" class="mt-1.5 h-9 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-2.5 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
             <label class="block">
               <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">charset</span>
-              <input name="fb_charset" value="{{ fb.charset }}" class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              <input name="fb_charset" value="{{ fb.charset }}" class="mt-1.5 h-9 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-2.5 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
           </div>
         </div>
 
         <!-- PostgreSQL Section -->
-        <div class="pt-6 border-t border-[#1B2940]">
-          <div class="mb-4">
+        <div class="min-w-0 pt-4 border-t border-[#1B2940] lg:pt-0 lg:pl-6 lg:border-0">
+          <div class="mb-2">
             <h2 class="text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">PostgreSQL Configuration</h2>
-            <p class="mt-1 text-xs text-[#9CA3AF]">Из пода витрины обычно <code class="text-white">postgres.egisz-corp.svc.cluster.local:5432</code></p>
+            <p class="mt-0.5 text-[11px] sm:text-xs text-[#9CA3AF] leading-snug">Из пода витрины обычно <code class="text-white">postgres.egisz-corp.svc.cluster.local:5432</code></p>
           </div>
 
-          <div class="grid gap-4 sm:grid-cols-2">
+          <div class="grid gap-2.5 sm:grid-cols-2">
             <label class="block">
               <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">host</span>
-              <input name="pg_host" value="{{ pg.host }}" required class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              <input name="pg_host" value="{{ pg.host }}" required class="mt-1.5 h-9 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-2.5 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
             <label class="block">
               <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">port</span>
-              <input name="pg_port" type="number" value="{{ pg.port }}" required class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              <input name="pg_port" type="number" value="{{ pg.port }}" required class="mt-1.5 h-9 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-2.5 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
           </div>
-          <div class="mt-4 grid gap-4 sm:grid-cols-2">
+          <div class="mt-2.5 grid gap-2.5 sm:grid-cols-2">
             <label class="block">
               <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">database</span>
-              <input name="pg_database" value="{{ pg.database }}" required class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              <input name="pg_database" value="{{ pg.database }}" required class="mt-1.5 h-9 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-2.5 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
             <label class="block">
               <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">schema</span>
-              <input name="pg_schema" value="{{ pg.schema }}" class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              <input name="pg_schema" value="{{ pg.schema }}" class="mt-1.5 h-9 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-2.5 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
           </div>
-          <div class="mt-4 grid gap-4 sm:grid-cols-2">
+          <div class="mt-2.5 grid gap-2.5 sm:grid-cols-2">
             <label class="block">
               <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">user</span>
-              <input name="pg_user" value="{{ pg.user }}" required class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              <input name="pg_user" value="{{ pg.user }}" required class="mt-1.5 h-9 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-2.5 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
             <label class="block">
               <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">password</span>
-              <input name="pg_password" type="password" value="{{ pg.password }}" autocomplete="current-password" class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              <input name="pg_password" type="password" value="{{ pg.password }}" autocomplete="current-password" class="mt-1.5 h-9 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-2.5 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
           </div>
         </div>
+        </div>
 
         <!-- ETL Section -->
-        <div class="pt-6 border-t border-[#1B2940]">
-          <div class="mb-4">
+        <div class="pt-3 border-t border-[#1B2940]">
+          <div class="mb-2">
             <h2 class="text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">ETL Configuration</h2>
           </div>
-          
-          <div class="grid gap-4 sm:grid-cols-3">
+
+          <div class="grid gap-2.5 sm:grid-cols-3">
             <label class="block">
               <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">batch_size</span>
-              <input name="etl_batch" type="number" value="{{ etl.batch_size }}" class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              <input name="etl_batch" type="number" value="{{ etl.batch_size }}" class="mt-1.5 h-9 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-2.5 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
             <label class="block">
               <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">sync_window_days</span>
-              <input name="etl_sync_days" type="number" value="{{ etl.sync_window_days }}" class="mt-2 h-11 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-3 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              <input name="etl_sync_days" type="number" value="{{ etl.sync_window_days }}" class="mt-1.5 h-9 w-full rounded-lg bg-[#121826] border border-[#1B2940] px-2.5 font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
             <label class="block flex flex-col justify-center">
-              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563] mb-3">full_scan</span>
+              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563] mb-1.5">full_scan</span>
               <div class="flex items-center">
-                <input type="checkbox" name="etl_full_scan" value="1" {{ 'checked' if etl.full_scan else '' }} class="h-5 w-5 rounded border-[#1B2940] bg-[#121826] text-[#509EE3] focus:ring-[#509EE3] focus:ring-offset-[#0F1522]"/>
-                <span class="ml-2 text-sm text-[#9CA3AF]">Включить полный скан</span>
+                <input type="checkbox" name="etl_full_scan" value="1" {{ 'checked' if etl.full_scan else '' }} class="h-4 w-4 rounded border-[#1B2940] bg-[#121826] text-[#509EE3] focus:ring-[#509EE3] focus:ring-offset-[#0F1522]"/>
+                <span class="ml-2 text-xs text-[#9CA3AF]">Включить полный скан</span>
               </div>
             </label>
           </div>
         </div>
       </form>
 
-      <div class="pt-6 flex flex-wrap gap-3">
-        <button type="submit" form="configForm" class="inline-flex min-w-[160px] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-4 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white">
+      <div class="pt-3 flex flex-wrap gap-2">
+        <button type="submit" form="configForm" class="inline-flex min-w-[140px] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3 py-2 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white">
           Сохранить в YAML
         </button>
         <form method="post" action="{{ url_for('test_fb') }}">
-          <button type="submit" class="inline-flex min-w-[160px] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-4 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white">
+          <button type="submit" class="inline-flex min-w-[140px] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3 py-2 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white">
             Проверить Firebird
           </button>
         </form>
         <form method="post" action="{{ url_for('test_pg') }}">
-          <button type="submit" class="inline-flex min-w-[160px] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-4 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white">
+          <button type="submit" class="inline-flex min-w-[140px] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3 py-2 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white">
             Проверить PostgreSQL
           </button>
         </form>
       </div>
 
-      <div class="mt-10 pt-6 border-t border-[#1B2940]">
-        <div class="mb-4">
+      <div class="mt-4 pt-3 border-t border-[#1B2940]">
+        <div class="mb-2">
           <h2 class="text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">Синхронизация Firebird -&gt; PostgreSQL</h2>
-          <p class="mt-1 text-xs text-[#9CA3AF]">Запускает полный цикл ETL в фоне на сервере. Не закрывайте вкладку до завершения.</p>
+          <p class="mt-0.5 text-[11px] text-[#9CA3AF] leading-snug">Запускает полный цикл ETL в фоне на сервере. Не закрывайте вкладку до завершения.</p>
         </div>
-        
-        <div class="flex flex-col gap-4">
-          <div>
-            <button type="button" id="btnSync" class="inline-flex min-w-[220px] items-center justify-center rounded-md border border-[#F59F36] bg-[#F59F36] px-4 py-2.5 font-mono text-sm text-[#121826] transition hover:bg-[#FFB95D]">
+
+        <div class="grid grid-cols-1 gap-2 lg:grid-cols-2 lg:gap-3">
+          <div class="flex flex-col gap-2 min-w-0">
+            <button type="button" id="btnSync" class="inline-flex w-fit min-w-[200px] items-center justify-center rounded-md border border-[#F59F36] bg-[#F59F36] px-3 py-2 font-mono text-sm text-[#121826] transition hover:bg-[#FFB95D]">
               Запустить синхронизацию
             </button>
-          </div>
-
-          <div id="syncProgressWrap" class="hidden rounded-md bg-[#0B1120] px-4 py-3 border border-[#1B2940]">
-            <div class="flex justify-between items-baseline gap-3 mb-2">
-              <span id="syncProgressLabel" class="text-[11px] uppercase tracking-[0.16em] text-[#509EE3]">прогресс</span>
-              <span id="syncProgressFraction" class="font-mono text-xs text-[#D1D5DB]"></span>
+            <div id="syncProgressWrap" class="hidden rounded-md bg-[#0B1120] px-3 py-2 border border-[#1B2940]">
+              <div class="flex justify-between items-baseline gap-2 mb-1.5">
+                <span id="syncProgressLabel" class="text-[10px] uppercase tracking-[0.16em] text-[#509EE3]">прогресс</span>
+                <span id="syncProgressFraction" class="font-mono text-[11px] text-[#D1D5DB]"></span>
+              </div>
+              <div class="h-2 w-full rounded-full bg-[#1B2940] overflow-hidden">
+                <div id="syncProgressBar" class="h-full rounded-full bg-[#509EE3] transition-[width] duration-300 ease-out" style="width:0%"></div>
+              </div>
+              <p id="syncProgressMeta" class="mt-1.5 whitespace-pre-line font-mono text-[10px] text-[#9CA3AF] leading-relaxed"></p>
             </div>
-            <div class="h-2.5 w-full rounded-full bg-[#1B2940] overflow-hidden">
-              <div id="syncProgressBar" class="h-full rounded-full bg-[#509EE3] transition-[width] duration-300 ease-out" style="width:0%"></div>
-            </div>
-            <p id="syncProgressMeta" class="mt-2 whitespace-pre-line font-mono text-[11px] text-[#9CA3AF] leading-relaxed"></p>
           </div>
-          
-          <div class="rounded-md bg-[#0B1120] px-4 py-4 text-sm text-[#93A1B6] border border-[#1B2940]">
-            <div class="mb-2 text-[11px] uppercase tracking-[0.16em] text-[#509EE3]">system log</div>
-            <pre id="syncStatus" class="whitespace-pre-wrap font-mono text-xs text-[#D1D5DB] min-h-[4rem]"></pre>
+          <div class="rounded-md bg-[#0B1120] px-3 py-2 text-sm text-[#93A1B6] border border-[#1B2940] min-h-0 min-w-0">
+            <div class="mb-1 text-[10px] uppercase tracking-[0.16em] text-[#509EE3]">system log</div>
+            <pre id="syncStatus" class="whitespace-pre-wrap font-mono text-[11px] text-[#D1D5DB] min-h-[2.25rem] max-h-28 overflow-y-auto leading-relaxed"></pre>
           </div>
         </div>
       </div>

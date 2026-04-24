@@ -246,15 +246,24 @@ create_card() {
   local template_tags="$(echo "$parsed_json" | jq -c '.dataset_query.native["template-tags"] // {}')"
   local table_ref="$(echo "$parsed_json" | jq -r '.table_ref // empty')"
   local table_id=""
-  local visualization_settings="$(echo "$parsed_json" | jq -c '
+  local visualization_settings="$(echo "$parsed_json" | jq -c \
+    --arg display "$display" \
+    --arg query "$query" '
     (.visualization_settings // {}) as $vs
     | $vs
     | .table = (.table // {})
-    | .table.columns = ((.table.columns // {}) + {
-        "[\"name\",\"clinic_id\"]": { "display_as": null },
-        "[\"name\",\"service_id\"]": { "display_as": null },
-        "[\"name\",\"transaction_id\"]": { "display_as": null }
-      })
+    | .table.columns = (
+        if ($display == "table")
+           and ($query | test("v_egisz_transactions_enriched_ui|stg_parse_errors")) then
+          [ { "name": "Связанное сообщение", "enabled": false } ]
+        else
+          ((.table.columns // {}) + {
+            "[\"name\",\"clinic_id\"]": { "display_as": null },
+            "[\"name\",\"service_id\"]": { "display_as": null },
+            "[\"name\",\"transaction_id\"]": { "display_as": null }
+          })
+        end
+      )
   ')"
 
   if [ -n "${table_ref}" ]; then

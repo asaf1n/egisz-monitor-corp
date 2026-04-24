@@ -59,7 +59,10 @@ CREATE TABLE IF NOT EXISTS stg_parse_errors (
 
 COMMENT ON TABLE stg_parse_errors IS 'Rows where MSGTEXT could not yield relates_to_id or XML is unusable';
 
--- REPLACE VIEW нельзя использовать для смены имён/набора колонок; старые версии отчёта (кириллические AS) ломают повторный apply.
+-- REPLACE VIEW нельзя использовать для смены имён/набора колонок в базовой витрине (ломаются зависимости и ETL).
+-- Человекочитаемые имена — в отдельных *_ui представлениях и в dim_column_display_labels.
+DROP VIEW IF EXISTS v_rpt_documents_no_response_ui;
+DROP VIEW IF EXISTS v_egisz_transactions_enriched_ui;
 DROP VIEW IF EXISTS v_rpt_documents_no_response;
 DROP VIEW IF EXISTS v_egisz_transactions_enriched;
 
@@ -126,3 +129,73 @@ WHERE o.document_id IS NOT NULL
   );
 
 COMMENT ON VIEW v_rpt_documents_no_response IS 'Outbound EGISZ_MESSAGES (DOCUMENTID): no fact row with same local_uid_semd. Columns align with v_egisz_transactions_enriched (local_uid_semd, kind_code, kind_name, jid, clinic_name); gost_host = gost-*.infoclinica.lan or reply_to excerpt; sent_at = message row created at source (CREATEDATE).';
+
+-- Сопоставление имён колонок витрины (snake_case) с подписями в отчётах. Синхронизировано с представлениями *_ui.
+CREATE TABLE IF NOT EXISTS dim_column_display_labels (
+    source_object TEXT NOT NULL,
+    source_column TEXT NOT NULL,
+    display_label_ru TEXT NOT NULL,
+    PRIMARY KEY (source_object, source_column)
+);
+
+COMMENT ON TABLE dim_column_display_labels IS 'Имя колонки в представлении/таблице (source_object.source_column) → подпись для Metabase и UI';
+
+INSERT INTO dim_column_display_labels (source_object, source_column, display_label_ru) VALUES
+    ('v_egisz_transactions_enriched', 'relates_to_id', 'Связанное сообщение'),
+    ('v_egisz_transactions_enriched', 'local_uid_semd', 'localUid СЭМД'),
+    ('v_egisz_transactions_enriched', 'jid', 'JID клиники'),
+    ('v_egisz_transactions_enriched', 'gost_jid_token', 'Токен gost-хоста'),
+    ('v_egisz_transactions_enriched', 'org_oid', 'OID организации'),
+    ('v_egisz_transactions_enriched', 'kind_code', 'Код СЭМД'),
+    ('v_egisz_transactions_enriched', 'kind_name', 'Наименование СЭМД'),
+    ('v_egisz_transactions_enriched', 'status', 'Статус'),
+    ('v_egisz_transactions_enriched', 'emdr_id', 'EMDR ID'),
+    ('v_egisz_transactions_enriched', 'errors_json', 'Ошибки JSON'),
+    ('v_egisz_transactions_enriched', 'registration_date', 'Дата регистрации'),
+    ('v_egisz_transactions_enriched', 'processed_at', 'Обработано'),
+    ('v_egisz_transactions_enriched', 'clinic_name', 'Наименование клиники'),
+    ('v_egisz_transactions_enriched', 'clinic_inn', 'ИНН клиники'),
+    ('v_egisz_transactions_enriched', 'clinic_mo_oid', 'OID клиники'),
+    ('v_rpt_documents_no_response', 'local_uid_semd', 'localUid СЭМД'),
+    ('v_rpt_documents_no_response', 'kind_code', 'Код СЭМД'),
+    ('v_rpt_documents_no_response', 'kind_name', 'Наименование СЭМД'),
+    ('v_rpt_documents_no_response', 'jid', 'JID клиники'),
+    ('v_rpt_documents_no_response', 'clinic_name', 'Наименование клиники'),
+    ('v_rpt_documents_no_response', 'gost_host', 'Хост клиники (ГОСТ VPN)'),
+    ('v_rpt_documents_no_response', 'sent_at', 'Отправлено')
+ON CONFLICT (source_object, source_column) DO UPDATE SET display_label_ru = EXCLUDED.display_label_ru;
+
+-- Metabase / отчёты: те же данные, что v_egisz_transactions_enriched, с русскими именами колонок (ResultSet / «Спросить данные»).
+CREATE OR REPLACE VIEW v_egisz_transactions_enriched_ui AS
+SELECT
+    local_uid_semd AS "localUid СЭМД",
+    jid::text AS "JID клиники",
+    gost_jid_token AS "Токен gost-хоста",
+    org_oid AS "OID организации",
+    kind_code AS "Код СЭМД",
+    kind_name AS "Наименование СЭМД",
+    status AS "Статус",
+    emdr_id AS "EMDR ID",
+    errors_json AS "Ошибки JSON",
+    registration_date AS "Дата регистрации",
+    processed_at AS "Обработано",
+    clinic_name AS "Наименование клиники",
+    clinic_inn AS "ИНН клиники",
+    clinic_mo_oid AS "OID клиники",
+    relates_to_id AS "Связанное сообщение"
+FROM v_egisz_transactions_enriched;
+
+COMMENT ON VIEW v_egisz_transactions_enriched_ui IS 'Обёртка над v_egisz_transactions_enriched с подписями колонок для отчётов; см. dim_column_display_labels. JID клиники — TEXT (идентификатор, не суммируется в Metabase). Колонка «Связанное сообщение» (relates_to_id) — последняя для удобства витрин и Metabase.';
+
+CREATE OR REPLACE VIEW v_rpt_documents_no_response_ui AS
+SELECT
+    local_uid_semd AS "localUid СЭМД",
+    kind_code AS "Код СЭМД",
+    kind_name AS "Наименование СЭМД",
+    jid::text AS "JID клиники",
+    clinic_name AS "Наименование клиники",
+    gost_host AS "Хост клиники (ГОСТ VPN)",
+    sent_at AS "Отправлено"
+FROM v_rpt_documents_no_response;
+
+COMMENT ON VIEW v_rpt_documents_no_response_ui IS 'Обёртка над v_rpt_documents_no_response с подписями колонок для отчётов; см. dim_column_display_labels. JID клиники — TEXT (идентификатор, не суммируется в Metabase).';
