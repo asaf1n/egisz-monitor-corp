@@ -1,0 +1,45 @@
+{
+  "name": "Ошибки и разбор (Corp)",
+  "description": "Ошибки парсинга и последние ошибки факта (JSON).",
+  "parameters": [],
+  "cards": [
+    {
+      "name": "Ошибки парсинга (stg_parse_errors)",
+      "description": "Последние 100 записей staging.",
+      "table_ref": "stg_parse_errors",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT id, relates_to_id, error_code, left(message, 200) AS message, created_at FROM public.stg_parse_errors ORDER BY id DESC LIMIT 100",
+          "template-tags": {}
+        },
+        "database": 1
+      },
+      "display": "table",
+      "visualization_settings": {},
+      "sizeX": 24,
+      "sizeY": 8,
+      "row": 0,
+      "col": 0
+    },
+    {
+      "name": "Факты со статусом error",
+      "description": "Последние error-строки из витрины.",
+      "table_ref": "v_egisz_transactions_enriched",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT relates_to_id, kind_code, clinic_name, processed_at FROM public.v_egisz_transactions_enriched WHERE status = 'error' ORDER BY processed_at DESC NULLS LAST LIMIT 50",
+          "template-tags": {}
+        },
+        "database": 1
+      },
+      "display": "table",
+      "visualization_settings": {},
+      "sizeX": 24,
+      "sizeY": 8,
+      "row": 8,
+      "col": 0
+    }
+  ]
+}

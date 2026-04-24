@@ -1,0 +1,40 @@
+# Одноразовая инициализация: БД airflow на том же инстансе Postgres, что и витрина egisz_corp.
+# Применить после готовности StatefulSet postgres и секрета postgres-credentials:
+#   kubectl -n egisz-corp apply -f k8s/postgres/airflow-metadata-init-job.yaml
+# Повторный apply: Job с тем же именем — удалите завершённый Job перед повтором:
+#   kubectl -n egisz-corp delete job/airflow-metadata-db-init --ignore-not-found
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: airflow-metadata-db-init
+  namespace: egisz-corp
+spec:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: init
+          image: postgres:16-bookworm
+          envFrom:
+            - secretRef:
+                name: postgres-credentials
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              export PGPASSWORD="$POSTGRES_PASSWORD"
+              HOST="postgres"
+              until pg_isready -h "$HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do
+                echo "waiting for postgres..."
+                sleep 3
+              done
+              EXISTS=$(psql -h "$HOST" -U "$POSTGRES_USER" -d postgres -Atc "SELECT 1 FROM pg_database WHERE datname='airflow'")
+              if [ "$EXISTS" = "1" ]; then
+                echo "database airflow already exists"
+                exit 0
+              fi
+              psql -h "$HOST" -U "$POSTGRES_USER" -d postgres -c "CREATE DATABASE airflow;"
+              echo "created database airflow"

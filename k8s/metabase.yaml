@@ -1,0 +1,96 @@
+# Metabase OSS + провижининг (metabase/provision.sh, setup-dashboards.sh).
+# Перед первым запуском: схема витрины (egisz-corp Job или apply-schema) и секрет postgres.
+apiVersion: v1
+kind: Service
+metadata:
+  name: metabase
+  namespace: egisz-corp
+  labels:
+    app.kubernetes.io/name: metabase
+spec:
+  ports:
+    - port: 3000
+      targetPort: 3000
+      name: http
+  selector:
+    app.kubernetes.io/name: metabase
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metabase
+  namespace: egisz-corp
+  labels:
+    app.kubernetes.io/name: metabase
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: metabase
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: metabase
+    spec:
+      containers:
+        - name: metabase
+          image: egisz-corp-metabase:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: MB_URL
+              value: "http://127.0.0.1:3000"
+            - name: PGHOST
+              value: "postgres.egisz-corp.svc.cluster.local"
+            - name: METABASE_ADMIN_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: metabase-admin
+                  key: email
+            - name: METABASE_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: metabase-admin
+                  key: password
+            - name: APP_DATABASE_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_DB
+            - name: APP_DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_USER
+            - name: APP_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_PASSWORD
+            - name: APP_DATABASE_DISPLAY_NAME
+              value: "EGISZ Corp DWH"
+            - name: METABASE_SITE_NAME
+              value: "EGISZ Monitor Corp"
+          volumeMounts:
+            - name: shared
+              mountPath: /shared
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 90
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 20
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "2"
+      volumes:
+        - name: shared
+          emptyDir: {}

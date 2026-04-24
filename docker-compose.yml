@@ -1,0 +1,27 @@
+# Витрина PostgreSQL для пакета egisz-monitor-corp (ETL, дальнейший Metabase).
+# Порт на хосте по умолчанию 5433 — чтобы не занять 5432 другим Postgres на той же машине.
+name: egisz-monitor-corp
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: egisz-corp-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-egisz_corp}
+      POSTGRES_USER: ${POSTGRES_USER:-egisz_corp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-egisz_corp}
+    ports:
+      - "${CORP_DB_PORT:-5433}:5432"
+    volumes:
+      - egisz_corp_pgdata:/var/lib/postgresql/data
+    # Defaults match .env.example; if you change POSTGRES_USER/POSTGRES_DB, adjust this line too.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U egisz_corp -d egisz_corp"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+
+volumes:
+  egisz_corp_pgdata:

@@ -1,0 +1,35 @@
+# Copy to config/egisz_corp.yaml (or set EGISZ_CORP_CONFIG to absolute path).
+# start.ps1 creates egisz_corp.yaml from this file if missing.
+#
+# Firebird:
+# - С этой же машины Windows, где крутится Firebird: host localhost.
+# - Из Docker / Kubernetes на Windows к хосту: host.docker.internal (или IP хоста).
+# - Внутри кластера к сервису Postgres: имя сервиса из k8s (см. k8s/README.md).
+
+firebird:
+  host: "localhost"
+  port: 3050
+  database: "proxy_egisz"
+  user: "SYSDBA"
+  password: "masterkey"
+  charset: "UTF8"
+  page_size: 4096
+
+# Параметры ниже совпадают с docker-compose.yml + .env.example (порт 5433 на хосте).
+postgres:
+  host: "localhost"
+  port: 5433
+  database: "egisz_corp"
+  user: "egisz_corp"
+  password: "egisz_corp"
+  schema: "public"
+
+etl:
+  batch_size: 500
+  pipeline_name: "firebird_exchangelog"
+  sync_window_days: 30
+  full_scan: false
+  source_query: null
+
+metabase:
+  site_url: "http://localhost:3000"

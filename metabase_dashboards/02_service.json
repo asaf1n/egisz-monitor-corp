@@ -1,0 +1,51 @@
+{
+  "name": "Сервис интеграции (Corp)",
+  "description": "Активность по типам СЭМД (kind_code) и клиникам.",
+  "parameters": [],
+  "cards": [
+    {
+      "name": "Топ типов СЭМД",
+      "description": "Количество записей по kind_code.",
+      "table_ref": "v_egisz_transactions_enriched",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT COALESCE(NULLIF(TRIM(kind_code), ''), '(пусто)') AS kind_code, COUNT(*)::bigint AS n FROM public.v_egisz_transactions_enriched GROUP BY 1 ORDER BY 2 DESC LIMIT 25",
+          "template-tags": {}
+        },
+        "database": 1
+      },
+      "display": "bar",
+      "visualization_settings": {
+        "graph.dimensions": ["kind_code"],
+        "graph.metrics": ["n"]
+      },
+      "sizeX": 12,
+      "sizeY": 6,
+      "row": 0,
+      "col": 0
+    },
+    {
+      "name": "По клиникам (имя)",
+      "description": "Топ клиник по числу записей.",
+      "table_ref": "v_egisz_transactions_enriched",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT COALESCE(NULLIF(TRIM(clinic_name), ''), 'без имени') AS clinic, COUNT(*)::bigint AS n FROM public.v_egisz_transactions_enriched GROUP BY 1 ORDER BY 2 DESC LIMIT 20",
+          "template-tags": {}
+        },
+        "database": 1
+      },
+      "display": "bar",
+      "visualization_settings": {
+        "graph.dimensions": ["clinic"],
+        "graph.metrics": ["n"]
+      },
+      "sizeX": 12,
+      "sizeY": 6,
+      "row": 6,
+      "col": 0
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+.env
+
+# K8s secrets (created from *.example.yaml locally)
+k8s/postgres/postgres-secret.yaml
+k8s/postgres/postgres-credentials.yaml
+k8s/airflow/airflow-metadata-secret.yaml

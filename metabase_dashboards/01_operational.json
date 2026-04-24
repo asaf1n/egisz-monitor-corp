@@ -1,0 +1,49 @@
+{
+  "name": "Оперативный мониторинг (Corp)",
+  "description": "Статусы и последние записи витрины v_egisz_transactions_enriched.",
+  "parameters": [],
+  "cards": [
+    {
+      "name": "Распределение статусов",
+      "description": "Успех / ошибка / неизвестно по fact pipeline.",
+      "table_ref": "v_egisz_transactions_enriched",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT status AS status, COUNT(*)::bigint AS cnt FROM public.v_egisz_transactions_enriched GROUP BY 1 ORDER BY 2 DESC",
+          "template-tags": {}
+        },
+        "database": 1
+      },
+      "display": "pie",
+      "visualization_settings": {
+        "pie.show_legend": true,
+        "pie.dimension": ["status"],
+        "pie.metric": "cnt"
+      },
+      "sizeX": 8,
+      "sizeY": 6,
+      "row": 0,
+      "col": 0
+    },
+    {
+      "name": "Последние операции",
+      "description": "До 50 последних строк витрины.",
+      "table_ref": "v_egisz_transactions_enriched",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT relates_to_id, jid, kind_code, kind_name, status, processed_at, clinic_name FROM public.v_egisz_transactions_enriched ORDER BY processed_at DESC NULLS LAST LIMIT 50",
+          "template-tags": {}
+        },
+        "database": 1
+      },
+      "display": "table",
+      "visualization_settings": {},
+      "sizeX": 16,
+      "sizeY": 8,
+      "row": 0,
+      "col": 8
+    }
+  ]
+}

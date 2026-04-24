@@ -1,0 +1,23 @@
+firebird:
+  host: localhost
+  port: 3050
+  database: proxy_egisz
+  user: SYSDBA
+  password: masterkey
+  charset: UTF8
+  page_size: 4096
+postgres:
+  host: localhost
+  port: 5433
+  database: egisz_corp
+  user: egisz_corp
+  password: egisz_corp
+  schema: public
+etl:
+  batch_size: 500
+  pipeline_name: firebird_exchangelog
+  sync_window_days: 30
+  full_scan: true
+  source_query: null
+metabase:
+  site_url: http://localhost:3000

@@ -1,0 +1,55 @@
+# Пример values для официального Helm chart Apache Airflow.
+# Целевой контур: namespace egisz-corp — тот же, что и Postgres из k8s/postgres/.
+#
+# Перед установкой:
+#   1) Postgres + секрет postgres-credentials
+#   2) Job airflow-metadata-db-init (создаёт БД airflow)
+#   3) Секрет airflow-metadata-connection (скопируйте из airflow-metadata-secret.example.yaml)
+#   4) Соберите и опубликуйте образ (k8s/airflow/Dockerfile), укажите repository/tag ниже
+#   5) Секрет с egisz_corp.yaml для воркеров (см. k8s/README.md), при необходимости смонтируйте через workers.celery.extraVolumes
+#
+# Установка (актуализируйте версию chart):
+#   helm repo add apache-airflow https://airflow.apache.org/charts
+#   helm repo update
+#   helm upgrade --install airflow apache-airflow/airflow --namespace egisz-corp -f k8s/airflow/values-corp.example.yaml
+#
+useStandardNaming: true
+
+executor: CeleryExecutor
+
+postgresql:
+  enabled: false
+
+redis:
+  enabled: true
+
+airflowVersion: "2.9.3"
+
+# Образ по умолчанию — stock Airflow (DAG corp не выполнится без пакета egisz-monitor-corp).
+# Соберите k8s/airflow/Dockerfile и укажите свой registry/tag:
+images:
+  airflow:
+    repository: apache/airflow
+    tag: 2.9.3-python3.11
+
+data:
+  metadataSecretName: airflow-metadata-connection
+
+createUserJob:
+  defaultUser:
+    role: Admin
+    username: admin
+    email: admin@egisz-corp.local
+    firstName: Admin
+    lastName: User
+    password: CHANGEME_AIRFLOW_UI_PASSWORD
+
+ingress:
+  enabled: false
+
+# Доступ к UI без Ingress:
+#   kubectl -n egisz-corp port-forward svc/airflow-webserver 8080:8080
+
+workers:
+  celery:
+    replicas: 1
