@@ -1,95 +1,66 @@
-# egisz-monitor-corp
+# EGISZ Monitor Corp
 
-Корпоративное ядро ETL для мониторинга интеграции МИС с ЕГИСЗ (РЭМД): выгрузка из Firebird (`EXCHANGELOG` + `EGISZ_MESSAGES` + поля из `EGISZ_LICENSES`), разбор `LOGTEXT` (SOAP + транспорт), загрузка в PostgreSQL для Metabase.
+**EGISZ Monitor Corp** — это корпоративный ETL-сервис (Extract, Transform, Load) для централизованного мониторинга интеграции Медицинских Информационных Систем (МИС) с государственными сервисами ЕГИСЗ (в частности, РЭМД).
 
-## Отличия от `egisz-monitor`
+## 1. Цели и задачи
+* **Цель:** Обеспечение прозрачности процесса регистрации электронных медицинских документов (СЭМД) и оперативное выявление ошибок интеграции.
+* **Задачи:**
+    * Автоматический сбор логов из первичных баз данных Firebird.
+    * Глубокий разбор (парсинг) SOAP-ответов от ЕГИСЗ для извлечения статусов и идентификаторов.
+    * Обогащение данных информацией о клиниках и типах документов.
+    * Формирование аналитической витрины данных в PostgreSQL для визуализации в Metabase.
 
-- Только Python (без React и без TypeScript ETL).
-- Ключ витрины: `relates_to_id` ← `relatesToMessage`, UPSERT в `fact_egisz_transactions`.
-- Водяной знак инкремента: **`LOGID` в `etl_state`**, не `MODIFYDATE` (источник перезаписывается).
-- **KIND** только в `EGISZ_LICENSES` (см. дефолтный SQL в `egisz_monitor_corp/sql_util.py`).
+## 2. Стек технологий
+* **Язык:** Python 3.11+ (ядро ETL и CLI).
+* **Базы данных:**
+    * *Источник:* Firebird (таблицы `EXCHANGELOG`, `EGISZ_MESSAGES`, `EGISZ_LICENSES`).
+    * *Приемник (DWH):* PostgreSQL 15/16.
+* **Оркестрация:** Apache Airflow (запуск задач по расписанию).
+* **Визуализация:** Metabase.
+* **Инфраструктура:** Docker, Kubernetes (Helm), Flask (интерфейс настройки).
 
-## Установка
+## 3. Логика работы и парсинга
+Сервис работает по принципу инкрементальной загрузки:
+1.  **Захват данных:** Из Firebird выбираются новые записи, где `LOGID` больше последнего успешно обработанного значения (хранится в `etl_state`).
+2.  **Парсинг:** Из поля `LOGTEXT` извлекается XML-фрагмент. Парсер идентифицирует `relatesToMessage` (связующий ID), статус операции (`success`/`error`), код СЭМД и OID организации.
+3.  **Обогащение:** Код СЭМД сопоставляется со встроенным справочником НСИ, а OID — с реестром лицензий для определения конкретной клиники (JID).
+4.  **Загрузка:** Данные попадают в таблицу `fact_egisz_transactions`. Если XML поврежден, запись сохраняется в `stg_parse_errors` для последующего анализа техподдержкой.
 
+## 4. Настройки и реквизиты доступа
+
+### Среды развертывания
+* **Разработка (Локально):** Использование `docker-compose` и скрипта `start.ps1`. Порт БД по умолчанию — **5433**.
+* **Продакшен:** Kubernetes (namespace `egisz-corp`).
+
+### Основные адреса (внутри кластера/через port-forward)
+| Сервис | URL / Хост | Описание |
+| :--- | :--- | :--- |
+| **Web UI** | `http://127.0.0.1:8080` | Редактор конфигурации YAML |
+| **Metabase** | `http://127.0.0.1:3001` | Аналитические дашборды |
+| **PostgreSQL** | `postgres:5432` | Витрина данных (БД `egisz_corp`) |
+| **Airflow** | `http://127.0.0.1:8080` | Управление расписанием (DAG `egisz_corp_firebird_to_postgres`) |
+
+### Конфигурация
+Параметры хранятся в `config/egisz_corp.yaml` или передаются через переменные окружения:
+* `EGISZ_CORP_CONFIG` — путь к файлу настроек.
+* `POSTGRES_PASSWORD`, `POSTGRES_USER` — учетные данные БД (в K8s управляются через `Secrets`).
+
+## 5. Руководство для пользователей
+
+### ИТ-отдел (Администрирование)
+Для обновления схемы БД или ручной синхронизации используйте CLI внутри контейнера:
 ```bash
-cd egisz-monitor-corp
-pip install -e ".[dev]"
-python3 -m pytest
+egisz-corp apply-schema  # Применить миграции SQL
+egisz-corp sync          # Запустить ручной цикл ETL
 ```
 
-Требования к окружению: для `firebird-driver` на машине должен быть доступен **Firebird client** (`FB_CLIENT_LIBRARY` или библиотека в `PATH`).
+### Техподдержка (Troubleshooting)
+Если данные не отображаются в Metabase:
+1.  Проверьте статус DAG в Airflow.
+2.  Откройте Web UI настроек и нажмите **"Проверить Firebird"** и **"Проверить PostgreSQL"**.
+3.  Изучите таблицу `stg_parse_errors` в БД на предмет системных ошибок парсинга XML.
 
-## Среда из репозитория (`start.ps1`, Windows)
-
-Скрипт `start.ps1 -Action deploy` поднимает **только** витрину PostgreSQL из `docker-compose.yml` этого каталога (удобный dev на одной машине), при необходимости создаёт `.env` и `config/egisz_corp.yaml`, ставит **venv** и выполняет **`egisz-corp apply-schema`**. В конце выводится **справка** по сервисам и URL.
-
-**Продакшен:** витрина **PostgreSQL** и **Apache Airflow** размещаются в **Kubernetes** — см. **`k8s/README.md`** (Helm, Job для БД `airflow`, образ с DAG, секреты). **Metabase** в compose и в этом Helm-пакете не входит; подключайте к тому же Postgres в k8s (см. `docs/METABASE.md`). Синхронизация с Firebird — **`egisz-corp sync`** из venv или DAG в Airflow, не кнопка во Flask UI.
-
-```powershell
-cd egisz-monitor-corp
-.\start.ps1              # deploy (по умолчанию)
-.\start.ps1 -Action down
-.\start.ps1 -Action help
-```
-
-Порт Postgres на хосте по умолчанию **5433** (см. `CORP_DB_PORT` в `.env.example`), чтобы не пересечься с основным стеком на 5432. Дефолтный Firebird в `config/egisz_corp.example.yaml`: `localhost`, alias `proxy_egisz`, `SYSDBA` / `masterkey`; из контейнера/Kubernetes к хосту Windows используйте **`host.docker.internal`**.
-
-## Конфигурация
-
-1. Скопируйте `config/egisz_corp.example.yaml` → `config/egisz_corp.yaml`.
-2. Либо задайте `EGISZ_CORP_CONFIG=/abs/path/egisz_corp.yaml`.
-
-### Веб-страница настроек (Flask)
-
-Сервер нужно **запустить** (пока процесс работает, страница открывается; иначе браузер покажет `ERR_CONNECTION_REFUSED`).
-
-```powershell
-cd egisz-monitor-corp
-.\start.ps1 -Action ui
-```
-
-Либо из активированного venv:
-
-```bash
-export EGISZ_CORP_CONFIG=/path/to/egisz_corp.yaml   # опционально
-export CONFIG_WRITE_PATH=/path/to/egisz_corp.yaml   # куда писать при «Сохранить» (по умолчанию = EGISZ_CORP_CONFIG / config/egisz_corp.yaml)
-egisz-corp config-ui
-# http://127.0.0.1:8765/  — хост/порт через FLASK_RUN_HOST / FLASK_RUN_PORT
-```
-
-## CLI
-
-```bash
-egisz-corp test-fb
-egisz-corp test-pg
-egisz-corp apply-schema      # 001_schema + 002_etl_state
-egisz-corp sync              # полный цикл ETL
-egisz-corp sync --dry-run    # только разбор, без записи в PG
-```
-
-## Airflow
-
-DAG: `airflow/dags/egisz_corp_etl_dag.py` — задачи `test_connections` → `corp_sync`.
-
-- **Kubernetes:** развёртывание официальным Helm chart, образ с пакетом и DAG — см. **`k8s/README.md`**, **`k8s/airflow/Dockerfile`**, **`k8s/airflow/values-corp.example.yaml`**.
-- Переменные Airflow (опционально): `egisz_corp_project_root`, `egisz_corp_config_path`.
-- Расписание: env `EGISZ_CORP_AIRFLOW_SCHEDULE` (по умолчанию `@hourly`).
-
-## Metabase
-
-См. `docs/METABASE.md`: подключение к тому же PostgreSQL, объекты `v_egisz_transactions_enriched`, `stg_parse_errors`, `etl_state`.
-
-## Kubernetes (Postgres + Airflow)
-
-См. **`k8s/README.md`**: namespace `egisz-corp`, Postgres (`k8s/postgres/`), Job создания БД `airflow`, секрет метаданных Airflow, Helm. Секрет Postgres — из `k8s/postgres/postgres-secret.example.yaml` в файл вроде `postgres-credentials.yaml` (см. `.gitignore`).
-
-## Схема БД
-
-- `sql/001_schema.sql` — факты, измерения, витрина.
-- `sql/002_etl_state.sql` — курсор `last_log_id`.
-
-## API парсера
-
-Класс `EgiszMonitorParser` (`egisz_monitor_corp/parser.py`):
-
-- `parse_xml`, `extract_jid`, `resolve_clinic`, `build_record` — см. docstring в модуле.
+### Руководство (Аналитика)
+Все отчеты доступны в Metabase. Основные объекты:
+* `v_egisz_transactions_enriched` — сводная таблица со всеми именами клиник и типами документов.
+* **Дашборд "Оперативный мониторинг"** — текущий процент успешных регистраций.
