@@ -29,6 +29,13 @@ spec:
             - secretRef:
                 name: postgres-credentials
           env:
+            - name: LANG
+              value: C.UTF-8
+            - name: LC_ALL
+              value: C.UTF-8
+            # Явный UTF-8 при первом initdb (новый PVC); уже созданный кластер не перекодируется.
+            - name: POSTGRES_INITDB_ARGS
+              value: "--encoding=UTF8 --locale=C.UTF-8"
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
           volumeMounts:

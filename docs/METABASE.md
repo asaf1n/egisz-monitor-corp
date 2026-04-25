@@ -10,8 +10,9 @@
 
 Если в Metabase на осях или в таблице вместо русских букв отображаются знаки вопроса (`????`):
 
-1. **Firebird:** в `egisz_corp.yaml` задайте корректный `firebird.charset` для вашей БД. Для классических русскоязычных баз Infoclinica часто подходит **`WIN1251`** (значение по умолчанию в `egisz_corp.example.yaml` и в `k8s/local/egisz_corp.yaml`). После смены charset выполните полный цикл ETL, чтобы перезаписать `dim_clinics.jname` и связанные витрины.
-2. **Контейнер Metabase:** образ задаёт `LANG`/`LC_ALL` в `C.UTF-8`, чтобы скрипты провижининга и JDBC не ломали UTF-8 при передаче нативных SQL из `metabase_dashboards/`.
+1. **Firebird:** в `egisz_corp.yaml` задайте корректный `firebird.charset` для вашей БД. Для классических русскоязычных баз Infoclinica часто подходит **`WIN1251`**. Если ключ `charset` в YAML **не указан**, загрузчик конфигурации (`config_loader.py`) по умолчанию подставляет **`WIN1251`** (для БД в UTF8 явно укажите `UTF8`). После смены charset выполните полный цикл ETL, чтобы перезаписать `dim_clinics.jname` и связанные витрины.
+2. **PostgreSQL / ETL:** соединение ETL с витриной использует клиентскую кодировку **UTF8**; Job применения схемы и StatefulSet задают `LANG`/`LC_ALL` и при необходимости `POSTGRES_INITDB_ARGS` для нового PVC — см. `k8s/postgres/`.
+3. **Контейнер Metabase:** образ задаёт `LANG`/`LC_ALL` в `C.UTF-8`, чтобы скрипты провижининга и JDBC не ломали UTF-8 при передаче нативных SQL из `metabase_dashboards/`.
 
 ## Объекты для дашбордов
 

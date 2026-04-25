@@ -3,6 +3,7 @@
 #   docker build -f k8s/airflow/Dockerfile -t <registry>/egisz-corp-airflow:2.9.3 .
 #
 FROM apache/airflow:2.9.3-python3.11
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8 PYTHONUTF8=1
 USER root
 COPY . /opt/egisz-monitor-corp
 RUN pip install --no-cache-dir -e /opt/egisz-monitor-corp

@@ -25,6 +25,7 @@ def connect_pg(cfg: PostgresConfig):  # type: ignore[no-untyped-def]
         password=cfg.password,
         options=f"-c search_path={cfg.schema}",
     )
+    con.set_client_encoding("UTF8")
     con.autocommit = False
     return con
 

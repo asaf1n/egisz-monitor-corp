@@ -38,6 +38,12 @@ spec:
           ports:
             - containerPort: 8080
           env:
+            - name: LANG
+              value: C.UTF-8
+            - name: LC_ALL
+              value: C.UTF-8
+            - name: PYTHONUTF8
+              value: "1"
             - name: EGISZ_CORP_CONFIG
               value: /app/config/egisz_corp.yaml
             - name: FB_CLIENT_LIBRARY

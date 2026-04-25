@@ -1,9 +1,0 @@
-{
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/pbir/1.0.0/pbir.json",
-  "version": "2.0.0",
-  "datasetReference": {
-    "byPath": {
-      "path": "../egisz_corp.SemanticModel"
-    }
-  }
-}

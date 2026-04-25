@@ -13,8 +13,7 @@
 * **СУБД Источник:** Firebird (драйвер `firebird-driver`).
 * **Хранилище (DWH):** PostgreSQL 15/16.
 * **Оркестрация:** Apache Airflow (исполнение DAG `egisz_corp_firebird_to_postgres`).
-* **Визуализация:** Metabase (карточки в `metabase_dashboards/`; подписи колонок и осей — кириллические алиасы в SQL и `visualization_settings`). Кириллица из Firebird: см. `firebird.charset` в `egisz_corp.yaml` (часто `WIN1251`, см. `docs/METABASE.md`).
-* **Визуализация (опционально):** Power BI Desktop к тому же PostgreSQL без смены витрины — SQL 01–09 и доп. страницы в `powerbi/egisz-corp/sql/`, проект `powerbi/egisz-corp/egisz-corp.pbip`, инструкции в `docs/POWERBI.md` и `powerbi/egisz-corp/README.md`.
+* **Визуализация:** Metabase (карточки в `metabase_dashboards/`; подписи колонок и осей — кириллические алиасы в SQL и `visualization_settings`). **Кириллица в витрине:** драйвер Firebird должен декодировать исходную БД (`firebird.charset`, по умолчанию в коде и примерах — **`WIN1251`**); ETL пишет в PostgreSQL в **UTF-8** (`set_client_encoding` в `pg_warehouse.py`, локали в образах/k8s). После смены charset — полный прогон ETL. Подробнее: `docs/METABASE.md`.
 * **Инфраструктура:** Docker, Kubernetes (namespace `egisz-corp`).
 
 ### Техническая реализация и логика парсинга
@@ -27,7 +26,7 @@
 
 **1. Идентификация документа и корреляция:**
 * **Связь с ответом:** Тег `<relatesToMessage>` из SOAP-ответа в **`EXCHANGELOG.MSGTEXT`** сохраняется как основной ключ `relates_to_id`.
-* **Внутренний ID:** Идентификатор документа `DOCUMENTID` (также передается как `localUid`) извлекается из таблицы **`EGISZ_MESSAGES`**.
+* **localUid СЭМД:** Идентификатор документа `DOCUMENTID` (также передается как `localUid`) извлекается из таблицы **`EGISZ_MESSAGES`**.
 * **Сбор `local_uid_semd` в витрине:** сначала читается тег `<localUid>` из SOAP (**`MSGTEXT`**); при отсутствии тега подставляется **`DOCUMENTID`** из строки журнала. **Определение клиники:** хост из **`LOGTEXT`**, OID и таблицы **`EGISZ_LICENSES`** / **`JPERSONS`** (см. код парсера); цепочка опирается на эти источники.
 
 **2. Идентификация юридического лица (Клиники):**

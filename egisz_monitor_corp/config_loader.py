@@ -28,7 +28,8 @@ class FirebirdConfig:
     database: str
     user: str
     password: str
-    charset: str = "UTF8"
+    # Infoclinica / WIN1251 — типичный случай; для БД в UTF8 задайте в YAML firebird.charset: UTF8.
+    charset: str = "WIN1251"
     page_size: int = 4096
 
 
@@ -120,7 +121,7 @@ def load_corp_config(path: Path | None = None) -> CorpAppConfig:
             database=_str(fb.get("database")),
             user=_str(fb.get("user")),
             password=_str(fb.get("password")),
-            charset=_str(fb.get("charset"), "UTF8"),
+            charset=_str(fb.get("charset"), "WIN1251"),
             page_size=_int(fb.get("page_size"), 4096),
         ),
         postgres=PostgresConfig(

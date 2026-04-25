@@ -344,7 +344,7 @@ def create_app() -> Flask:
                 "database": request.form.get("fb_database", "").strip(),
                 "user": request.form.get("fb_user", "").strip(),
                 "password": request.form.get("fb_password", ""),
-                "charset": request.form.get("fb_charset", "UTF8").strip() or "UTF8",
+                "charset": request.form.get("fb_charset", "WIN1251").strip() or "WIN1251",
             }
         )
         old["postgres"].update(

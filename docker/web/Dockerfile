@@ -1,5 +1,6 @@
 # bookworm: стабильные пути libfbclient2; slim — меньше слоя.
 FROM python:3.11-slim-bookworm
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8 PYTHONUTF8=1
 WORKDIR /app
 
 # firebird-driver грузит libfbclient (env FB_CLIENT_LIBRARY). Реальный ELF лежит как libfbclient.so.X.Y.Z под triplet.

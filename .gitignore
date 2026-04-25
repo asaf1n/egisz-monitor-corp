@@ -14,6 +14,3 @@ k8s/postgres/postgres-secret.yaml
 k8s/postgres/postgres-credentials.yaml
 k8s/metabase-admin-secret.yaml
 k8s/airflow/airflow-metadata-secret.yaml
-
-# Power BI Project (PBIP) local tooling cache
-**/.pbi/
