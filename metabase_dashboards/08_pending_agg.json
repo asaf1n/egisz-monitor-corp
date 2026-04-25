@@ -37,7 +37,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT CASE WHEN EXTRACT(EPOCH FROM (NOW() - \"Отправлено\"))/3600 < 1 THEN '< 1 часа' WHEN EXTRACT(EPOCH FROM (NOW() - \"Отправлено\"))/3600 < 12 THEN '1-12 часов' WHEN EXTRACT(EPOCH FROM (NOW() - \"Отправлено\"))/3600 < 24 THEN '12-24 часа' ELSE '> 24 часов' END AS \"Время ожидания\", COUNT(*)::bigint AS \"Количество\" FROM public.v_rpt_documents_no_response_ui GROUP BY 1 ORDER BY 1",
+          "query": "SELECT CASE WHEN EXTRACT(EPOCH FROM (NOW() - \"Отправлено\"))/3600 < 1 THEN 'менее 1 часа' WHEN EXTRACT(EPOCH FROM (NOW() - \"Отправлено\"))/3600 < 12 THEN '1–12 часов' WHEN EXTRACT(EPOCH FROM (NOW() - \"Отправлено\"))/3600 < 24 THEN '12–24 часа' ELSE 'свыше 24 часов' END AS \"Время ожидания\", COUNT(*)::bigint AS \"Количество\" FROM public.v_rpt_documents_no_response_ui WHERE \"Отправлено\" IS NOT NULL GROUP BY 1 ORDER BY MIN(EXTRACT(EPOCH FROM (NOW() - \"Отправлено\")))",
           "template-tags": {}
         },
         "database": 1

@@ -3,7 +3,8 @@ ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 RUN apk add --no-cache jq curl postgresql-client bash
 COPY metabase/provision.sh /app/provision.sh
 COPY metabase/setup-dashboards.sh /app/setup-dashboards.sh
+COPY metabase/verify-corp-stack.sh /app/verify-corp-stack.sh
 COPY metabase_dashboards/ /app/metabase_dashboards/
 COPY metabase/entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/provision.sh /app/setup-dashboards.sh /app/entrypoint.sh && chmod -R a+r /app/metabase_dashboards/
+RUN chmod +x /app/provision.sh /app/setup-dashboards.sh /app/verify-corp-stack.sh /app/entrypoint.sh && chmod -R a+r /app/metabase_dashboards/
 ENTRYPOINT ["/bin/bash", "/app/entrypoint.sh"]

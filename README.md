@@ -16,6 +16,11 @@
 * **Визуализация:** Metabase (карточки в `metabase_dashboards/`; подписи колонок и осей — кириллические алиасы в SQL и `visualization_settings`). **Кириллица в витрине:** драйвер Firebird должен декодировать исходную БД (`firebird.charset`, по умолчанию в коде и примерах — **`WIN1251`**); ETL пишет в PostgreSQL в **UTF-8** (`set_client_encoding` в `pg_warehouse.py`, локали в образах/k8s). После смены charset — полный прогон ETL. Подробнее: `docs/METABASE.md`.
 * **Инфраструктура:** Docker, Kubernetes (namespace `egisz-corp`).
 
+### Тесты и проверка стека
+
+* **Юнит-тесты (Python):** каталог **`tests/`**; локально: **`.\start.ps1 -Action test`** (или `py -3 -m pip install -e ".[dev]"` и **`py -3 -m pytest`**).
+* **Проверка витрины + Metabase в Kubernetes:** **`.\start.ps1 -Action verify`** (внутри пода Metabase: `metabase/verify-corp-stack.sh` — Postgres и число дашбордов в личной коллекции).
+
 ### Техническая реализация и логика парсинга
 
 #### Инкрементальная загрузка
@@ -71,7 +76,9 @@
 | :--- | :--- | :--- |
 | **PostgreSQL** | `postgres:5432` | Основное хранилище витрин данных. |
 | **Metabase** | `metabase:3000` | Аналитические дашборды и визуализация. |
-| **Config UI** | `corp-web:8080` | Интерфейс управления YAML-конфигурацией. |
+| **Config UI** | `conf-ui:8080` | Интерфейс управления YAML-конфигурацией. |
+
+Проверка витрины Postgres и дашбордов Metabase после деплоя: **`.\start.ps1 -Action verify`**. Полный пересоздать namespace и данные: **`.\start.ps1 -Action reset-deploy`**. В Metabase дашборды — **в корне персональной коллекции** администратора (пункт в сайдбаре «Персональная коллекция …»).
 
 ---
 *Для получения подробной информации по развертыванию в конкретных окружениях обратитесь к файлу `k8s/README.md`.*

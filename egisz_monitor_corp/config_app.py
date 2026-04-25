@@ -7,7 +7,12 @@ from pathlib import Path
 
 from flask import Flask, render_template_string, request, url_for
 
-from egisz_monitor_corp.config_loader import default_config_path, load_corp_config, save_corp_config
+from egisz_monitor_corp.config_loader import (
+    default_config_path,
+    load_corp_config,
+    logical_config_path,
+    save_corp_config,
+)
 from egisz_monitor_corp.fb_client import fetch_all
 from egisz_monitor_corp.pg_warehouse import test_pg_connection
 
@@ -32,6 +37,14 @@ PAGE = """
     pre::-webkit-scrollbar-track { background: #0F1522; }
     pre::-webkit-scrollbar-thumb { background: #2D3F5E; border-radius: 4px; }
     pre::-webkit-scrollbar-thumb:hover { background: #3E5A85; }
+    #syncProgressBar.sync-progress-indeterminate {
+      width: 32% !important;
+      animation: sync-bar-pulse 1.05s ease-in-out infinite alternate;
+    }
+    @keyframes sync-bar-pulse {
+      from { opacity: 0.4; }
+      to { opacity: 1; }
+    }
   </style>
 </head>
 <body class="min-h-screen bg-[#121826] text-white">
@@ -139,59 +152,55 @@ PAGE = """
         </div>
         </div>
 
-        <!-- ETL Section -->
-        <div class="pt-3 border-t border-[#1B2940]">
-          <div class="mb-2">
-            <h2 class="text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">ETL Configuration</h2>
-          </div>
+        <div class="pt-3 flex flex-wrap gap-2 border-t border-[#1B2940]">
+          <button type="submit" class="inline-flex min-h-[2.875rem] min-w-[140px] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3.5 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white">
+            Сохранить в YAML
+          </button>
+          <button type="submit" formmethod="post" formaction="{{ url_for('test_fb') }}" class="inline-flex min-h-[2.875rem] min-w-[140px] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3.5 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white">
+            Проверить Firebird
+          </button>
+          <button type="submit" formmethod="post" formaction="{{ url_for('test_pg') }}" class="inline-flex min-h-[2.875rem] min-w-[140px] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3.5 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white">
+            Проверить PostgreSQL
+          </button>
+        </div>
 
-          <div class="grid gap-2.5 grid-cols-1 sm:grid-cols-[minmax(0,6.5rem)_minmax(0,7.5rem)_minmax(0,1fr)] sm:items-end">
-            <label class="block w-full max-w-[6.5rem] sm:max-w-none">
-              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">batch_size</span>
-              <input name="etl_batch" type="number" value="{{ etl.batch_size }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
-            </label>
-            <label class="block w-full max-w-[7.5rem] sm:max-w-none">
-              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">sync_window_days</span>
-              <input name="etl_sync_days" type="number" value="{{ etl.sync_window_days }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
-            </label>
-            <label class="block flex flex-col justify-end pb-0.5">
-              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563] mb-1.5">full_scan</span>
-              <div class="flex items-center min-h-[3.125rem] sm:min-h-0 sm:items-center sm:pb-1.5">
-                <input type="checkbox" name="etl_full_scan" value="1" {{ 'checked' if etl.full_scan else '' }} class="h-4 w-4 rounded border-[#1B2940] bg-[#121826] text-[#509EE3] focus:ring-[#509EE3] focus:ring-offset-[#0F1522]"/>
-                <span class="ml-2 text-xs text-[#9CA3AF]">Включить полный скан</span>
-              </div>
-            </label>
+        <!-- ETL + sync trigger: fields left, button right on large screens -->
+        <div class="pt-3 border-t border-[#1B2940] flex flex-col gap-4 lg:flex-row lg:items-stretch lg:gap-6">
+          <div class="min-w-0 flex-1">
+            <div class="mb-2">
+              <h2 class="text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">ETL Configuration</h2>
+            </div>
+            <div class="grid gap-2.5 grid-cols-1 sm:grid-cols-[minmax(0,6.5rem)_minmax(0,7.5rem)_minmax(0,1fr)] sm:items-end">
+              <label class="block w-full max-w-[6.5rem] sm:max-w-none">
+                <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">batch_size</span>
+                <input name="etl_batch" type="number" value="{{ etl.batch_size }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              </label>
+              <label class="block w-full max-w-[7.5rem] sm:max-w-none">
+                <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">sync_window_days</span>
+                <input name="etl_sync_days" type="number" value="{{ etl.sync_window_days }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              </label>
+              <label class="block flex flex-col justify-end pb-0.5">
+                <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563] mb-1.5">full_scan</span>
+                <div class="flex items-center min-h-[3.125rem] sm:min-h-0 sm:items-center sm:pb-1.5">
+                  <input type="checkbox" name="etl_full_scan" value="1" {{ 'checked' if etl.full_scan else '' }} class="h-4 w-4 rounded border-[#1B2940] bg-[#121826] text-[#509EE3] focus:ring-[#509EE3] focus:ring-offset-[#0F1522]"/>
+                  <span class="ml-2 text-xs text-[#9CA3AF]">Включить полный скан</span>
+                </div>
+              </label>
+            </div>
+          </div>
+          <div class="lg:flex-shrink-0 lg:border-l lg:border-[#1B2940] lg:pl-6 flex flex-col justify-start gap-2 min-w-[12rem]">
+            <h2 class="text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">Синхронизация Firebird -&gt; PostgreSQL</h2>
+            <p class="text-[11px] text-[#9CA3AF] leading-snug">Полный цикл ETL в фоне. Не закрывайте вкладку до завершения.</p>
+            <button type="button" id="btnSync" class="inline-flex w-full sm:w-fit min-h-[2.875rem] min-w-[200px] items-center justify-center rounded-md border border-[#F59F36] bg-[#F59F36] px-3.5 py-2.5 font-mono text-sm text-[#121826] transition hover:bg-[#FFB95D]">
+              Запустить синхронизацию
+            </button>
           </div>
         </div>
       </form>
 
-      <div class="pt-3 flex flex-wrap gap-2">
-        <button type="submit" form="configForm" class="inline-flex min-h-[2.875rem] min-w-[140px] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3.5 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white">
-          Сохранить в YAML
-        </button>
-        <form method="post" action="{{ url_for('test_fb') }}">
-          <button type="submit" class="inline-flex min-h-[2.875rem] min-w-[140px] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3.5 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white">
-            Проверить Firebird
-          </button>
-        </form>
-        <form method="post" action="{{ url_for('test_pg') }}">
-          <button type="submit" class="inline-flex min-h-[2.875rem] min-w-[140px] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3.5 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white">
-            Проверить PostgreSQL
-          </button>
-        </form>
-      </div>
-
       <div class="mt-4 pt-3 border-t border-[#1B2940]">
-        <div class="mb-2">
-          <h2 class="text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">Синхронизация Firebird -&gt; PostgreSQL</h2>
-          <p class="mt-0.5 text-[11px] text-[#9CA3AF] leading-snug">Запускает полный цикл ETL в фоне на сервере. Не закрывайте вкладку до завершения.</p>
-        </div>
-
         <div class="grid grid-cols-1 gap-2 lg:grid-cols-2 lg:gap-3">
           <div class="flex flex-col gap-2 min-w-0">
-            <button type="button" id="btnSync" class="inline-flex w-fit min-h-[2.875rem] min-w-[200px] items-center justify-center rounded-md border border-[#F59F36] bg-[#F59F36] px-3.5 py-2.5 font-mono text-sm text-[#121826] transition hover:bg-[#FFB95D]">
-              Запустить синхронизацию
-            </button>
             <div id="syncProgressWrap" class="hidden rounded-md bg-[#0B1120] px-3 py-2 border border-[#1B2940]">
               <div class="flex justify-between items-baseline gap-2 mb-1.5">
                 <span id="syncProgressLabel" class="text-[10px] uppercase tracking-[0.16em] text-[#509EE3]">прогресс</span>
@@ -220,9 +229,16 @@ PAGE = """
     parsing: 'Парсинг SOAP / журнал…',
     page_done: 'Сохранение страницы в PostgreSQL…',
     exchangelog_done: 'Журнал обработан',
+    outbound_firebird: 'Исходящие: чтение Firebird…',
     outbound_fetch: 'Исходящие сообщения (EGISZ_MESSAGES)…',
     outbound_parse: 'Разбор исходящих…',
+    outbound_postgres: 'Исходящие: запись в PostgreSQL…',
+    outbound_done: 'Исходящие: готово',
   };
+  function setBarIndeterminate(bar, on) {
+    if (on) bar.classList.add('sync-progress-indeterminate');
+    else bar.classList.remove('sync-progress-indeterminate');
+  }
   function renderProgress(j) {
     const wrap = document.getElementById('syncProgressWrap');
     const bar = document.getElementById('syncProgressBar');
@@ -230,33 +246,131 @@ PAGE = """
     const label = document.getElementById('syncProgressLabel');
     const meta = document.getElementById('syncProgressMeta');
     const p = j.progress;
-    const active = j.running && p && typeof p === 'object';
-    if (!active) {
+
+    if (!j.running) {
       wrap.classList.add('hidden');
+      setBarIndeterminate(bar, false);
       return;
     }
+
     wrap.classList.remove('hidden');
+
+    if (!p || typeof p !== 'object') {
+      label.textContent = 'ПОДГОТОВКА';
+      bar.style.width = '';
+      setBarIndeterminate(bar, true);
+      frac.textContent = '…';
+      meta.textContent =
+        'Запуск пайплайна: конфигурация, курсор ETL, справочники из Firebird…' +
+        String.fromCharCode(10) +
+        'Детальный прогресс появится после подсчёта объёма журнала.';
+      return;
+    }
+
     const phase = p.phase || '';
+
+    function totalRowsState(pp) {
+      if (!Object.prototype.hasOwnProperty.call(pp, 'total_rows') || pp.total_rows === null || pp.total_rows === undefined) {
+        return { kind: 'absent' };
+      }
+      const n = Number(pp.total_rows);
+      if (!Number.isFinite(n)) return { kind: 'absent' };
+      if (n > 0) return { kind: 'positive', n };
+      return { kind: 'zero' };
+    }
+
+    function journalFacts(pp) {
+      const j = Number(pp.journal_facts);
+      if (Number.isFinite(j) && j >= 0) return j;
+      return Number(pp.parsed_facts) || 0;
+    }
+
+    if (phase === 'outbound_firebird') {
+      label.textContent = (PHASE_RU[phase] || phase || 'прогресс').toUpperCase();
+      bar.style.width = '';
+      setBarIndeterminate(bar, true);
+      frac.textContent = '…';
+      const tr = totalRowsState(p);
+      const jlo = Number(p.loaded_rows) || 0;
+      let lineA = 'Чтение EGISZ_MESSAGES из Firebird (окно sync_window_days). Пока идёт запрос, факты журнала уже в витрине.';
+      let lineB = 'Фактов в fact_egisz_transactions: ' + journalFacts(p) + ' · staging ошибок (журнал): ' + (Number(p.staging_errors) || 0);
+      if (tr.kind === 'positive') lineB += ' · журнал: ' + jlo + ' / ' + tr.n + ' строк';
+      else if (tr.kind === 'zero') lineB += ' · журнал: новых строк не было';
+      meta.textContent = lineA + String.fromCharCode(10) + lineB;
+      return;
+    }
+
+    setBarIndeterminate(bar, false);
+
     label.textContent = (PHASE_RU[phase] || phase || 'прогресс').toUpperCase();
     let pct = 0;
     let lineA = '';
     let lineB = '';
-    if (phase === 'outbound_fetch' || phase === 'outbound_parse') {
-      const tot = Number(p.outbound_total) || 0;
-      const lo = Number(p.outbound_loaded) || 0;
-      pct = tot > 0 ? Math.min(100, Math.round((lo / tot) * 100)) : 0;
-      lineA = 'Исходящие: просмотрено ' + lo + ' из ' + tot + ' строк выборки';
-      lineB = 'В staging документов: ' + (Number(p.parsed_facts) || 0);
+
+    if (phase === 'outbound_fetch' || phase === 'outbound_parse' || phase === 'outbound_postgres' || phase === 'outbound_done') {
+      const otot = Number(p.outbound_total) || 0;
+      const olo = Number(p.outbound_loaded) || 0;
+      if (phase === 'outbound_postgres' && otot === 0) {
+        pct = 100;
+        lineA = 'Запись stg_egisz_outbound_documents: нет строк для вставки.';
+      } else if (otot > 0) {
+        pct = Math.min(100, Math.round((olo / otot) * 100));
+        if (phase === 'outbound_fetch') lineA = 'Исходящие: выборка из Firebird, подготовка списка…';
+        else if (phase === 'outbound_parse') lineA = 'Исходящие: разбор ' + olo + ' / ' + otot + ' строк выборки';
+        else if (phase === 'outbound_postgres') lineA = 'Исходящие: запись staging в PostgreSQL…';
+        else lineA = 'Исходящие: staging обновлён (' + olo + ' строк).';
+      } else {
+        if (phase === 'outbound_done') {
+          pct = 100;
+          lineA = 'Исходящие: обновление staging завершено (строк для вставки не было).';
+        } else {
+          pct = 0;
+          lineA = 'Исходящие: в окне нет строк EGISZ_MESSAGES.';
+        }
+      }
+      const tr = totalRowsState(p);
+      const jlo = Number(p.loaded_rows) || 0;
+      const stgOut = Number(p.parsed_facts) || 0;
+      lineB =
+        'Фактов в витрине (журнал): ' +
+        journalFacts(p) +
+        ' · staging исходящих (строк): ' +
+        stgOut +
+        ' · staging ошибок (журнал): ' +
+        (Number(p.staging_errors) || 0);
+      if (tr.kind === 'positive') lineB += ' · журнал EXCHANGELOG: ' + jlo + ' / ' + tr.n + ' строк';
+      else if (tr.kind === 'zero') lineB += ' · журнал: 0 строк к загрузке';
     } else {
-      const tot = Number(p.total_rows) || 0;
+      const tr = totalRowsState(p);
       const lo = Number(p.loaded_rows) || 0;
-      pct = tot > 0 ? Math.min(100, Math.round((lo / tot) * 100)) : (phase === 'counting' ? 3 : 0);
-      lineA = tot > 0
-        ? ('Загружено из журнала: ' + lo + ' / ' + tot + ' строк')
-        : 'Ожидаемый объём журнала: подсчёт неизвестен';
-      lineB = 'После парсинга в витрину: ' + (Number(p.parsed_facts) || 0) + ' фактов · staging: ' + (Number(p.staging_errors) || 0);
+
+      if (phase === 'counting') {
+        lineA =
+          'Выполняется подсчёт строк EXCHANGELOG в Firebird (на большой базе это может занять время)…';
+        pct = 14;
+      } else if (tr.kind === 'positive') {
+        pct = Math.min(100, Math.round((lo / tr.n) * 100));
+        lineA = 'Загружено из журнала: ' + lo + ' / ' + tr.n + ' строк';
+      } else if (tr.kind === 'zero') {
+        pct = phase === 'exchangelog_done' ? 100 : Math.min(100, lo > 0 ? 50 : 100);
+        if (phase === 'exchangelog_ready' || phase === 'fetch_page' || phase === 'parsing') {
+          lineA = 'Новых строк журнала нет (0 к обработке по курсору и окну sync_window_days).';
+        } else {
+          lineA = 'Строк журнала к загрузке: 0.';
+        }
+      } else {
+        lineA = 'Объём журнала пока не передан сервером (редкий переход между фазами).';
+        pct = 12;
+      }
+
+      lineB =
+        'Фактов в витрине (после парсинга журнала): ' +
+        journalFacts(p) +
+        ' · staging ошибок: ' +
+        (Number(p.staging_errors) || 0);
       if (p.page) lineB += ' · страница ' + p.page;
     }
+
     bar.style.width = pct + '%';
     frac.textContent = pct + '%';
     meta.textContent = lineA + String.fromCharCode(10) + lineB;
@@ -283,6 +397,12 @@ PAGE = """
   };
   setInterval(pollSync, 1200);
   pollSync();
+  window.addEventListener('pageshow', function () {
+    pollSync();
+  });
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') pollSync();
+  });
   </script>
 </body>
 </html>
@@ -307,14 +427,14 @@ def create_app() -> Flask:
         p = config_path()
         if not p.is_file():
             return (
-                f"<p>Нет файла конфигурации: <code>{p}</code>. Скопируйте "
+                f"<p>Нет файла конфигурации: <code>{logical_config_path()}</code>. Скопируйте "
                 f"<code>config/egisz_corp.example.yaml</code> → <code>config/egisz_corp.yaml</code>.</p>",
                 404,
             )
         cfg = load_corp_config(p)
         return render_template_string(
             PAGE,
-            path=str(p),
+            path=str(logical_config_path()),
             fb=cfg.firebird,
             pg=cfg.postgres,
             etl=cfg.etl,
@@ -362,11 +482,11 @@ def create_app() -> Flask:
         old["etl"]["full_scan"] = bool(request.form.get("etl_full_scan"))
 
         save_corp_config(old, p)
-        os.environ["EGISZ_CORP_CONFIG"] = str(p)
+        os.environ["EGISZ_CORP_CONFIG"] = str(logical_config_path())
         cfg = load_corp_config(p)
         return render_template_string(
             PAGE,
-            path=str(p),
+            path=str(logical_config_path()),
             fb=cfg.firebird,
             pg=cfg.postgres,
             etl=cfg.etl,
@@ -385,7 +505,13 @@ def create_app() -> Flask:
             msg, ok = f"Firebird: {e}", False
         cfg = load_corp_config(p)
         return render_template_string(
-            PAGE, path=str(p), fb=cfg.firebird, pg=cfg.postgres, etl=cfg.etl, message=msg, ok=ok
+            PAGE,
+            path=str(logical_config_path()),
+            fb=cfg.firebird,
+            pg=cfg.postgres,
+            etl=cfg.etl,
+            message=msg,
+            ok=ok,
         )
 
     @app.post("/test-pg")
@@ -399,7 +525,13 @@ def create_app() -> Flask:
             msg, ok = f"PostgreSQL: {e}", False
         cfg = load_corp_config(p)
         return render_template_string(
-            PAGE, path=str(p), fb=cfg.firebird, pg=cfg.postgres, etl=cfg.etl, message=msg, ok=ok
+            PAGE,
+            path=str(logical_config_path()),
+            fb=cfg.firebird,
+            pg=cfg.postgres,
+            etl=cfg.etl,
+            message=msg,
+            ok=ok,
         )
 
     from egisz_monitor_corp.sync_routes import register_sync_routes

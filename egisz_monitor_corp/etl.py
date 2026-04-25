@@ -52,6 +52,7 @@ class EtlProgressPayload(TypedDict, total=False):
     page: int
     outbound_loaded: int
     outbound_total: int
+    journal_facts: int
 
 
 def _to_int(v: Any) -> int | None:
@@ -195,6 +196,7 @@ def run_sync(
                 "total_rows": total_exchangelog,
                 "loaded_rows": 0,
                 "parsed_facts": 0,
+                "journal_facts": 0,
                 "staging_errors": staging_n,
             }
         )
@@ -220,6 +222,7 @@ def run_sync(
                     "total_rows": total_exchangelog,
                     "loaded_rows": fetched,
                     "parsed_facts": facts,
+                    "journal_facts": facts,
                     "staging_errors": staging_n,
                     "page": page,
                 }
@@ -265,6 +268,7 @@ def run_sync(
                             "total_rows": total_exchangelog,
                             "loaded_rows": fetched,
                             "parsed_facts": facts,
+                            "journal_facts": facts,
                             "staging_errors": staging_n,
                             "page": page,
                         }
@@ -329,6 +333,7 @@ def run_sync(
                     "total_rows": total_exchangelog,
                     "loaded_rows": fetched,
                     "parsed_facts": facts,
+                    "journal_facts": facts,
                     "staging_errors": staging_n,
                     "page": page,
                 }
@@ -343,6 +348,7 @@ def run_sync(
                 "total_rows": total_exchangelog,
                 "loaded_rows": fetched,
                 "parsed_facts": facts,
+                "journal_facts": facts,
                 "staging_errors": staging_n,
             }
         )
@@ -356,6 +362,16 @@ def run_sync(
 
         if pg is not None and not dry_run:
             log("Refreshing stg_egisz_outbound_documents (v_rpt_documents_no_response)...")
+            detail(
+                {
+                    "phase": "outbound_firebird",
+                    "total_rows": total_exchangelog,
+                    "loaded_rows": fetched,
+                    "parsed_facts": facts,
+                    "journal_facts": facts,
+                    "staging_errors": staging_n,
+                }
+            )
             omsg = fetch_all(cfg.firebird, outbound_documents_staging_select(cfg.etl.sync_window_days))
             omsg_sorted = sorted(
                 omsg,
@@ -363,7 +379,17 @@ def run_sync(
                 reverse=True,
             )
             outbound_n = len(omsg_sorted)
-            detail({"phase": "outbound_fetch", "outbound_total": outbound_n, "outbound_loaded": 0})
+            detail(
+                {
+                    "phase": "outbound_fetch",
+                    "outbound_total": outbound_n,
+                    "outbound_loaded": 0,
+                    "journal_facts": facts,
+                    "total_rows": total_exchangelog,
+                    "loaded_rows": fetched,
+                    "staging_errors": staging_n,
+                }
+            )
             parser_oob = EgiszMonitorParser()
             stg_out: list[dict[str, Any]] = []
             seen_doc: set[str] = set()
@@ -398,10 +424,39 @@ def run_sync(
                             "outbound_total": outbound_n,
                             "outbound_loaded": oi,
                             "parsed_facts": len(stg_out),
+                            "journal_facts": facts,
+                            "total_rows": total_exchangelog,
+                            "loaded_rows": fetched,
+                            "staging_errors": staging_n,
                         }
                     )
+            og_total = len(stg_out)
+            detail(
+                {
+                    "phase": "outbound_postgres",
+                    "outbound_total": og_total,
+                    "outbound_loaded": 0,
+                    "parsed_facts": og_total,
+                    "journal_facts": facts,
+                    "total_rows": total_exchangelog,
+                    "loaded_rows": fetched,
+                    "staging_errors": staging_n,
+                }
+            )
             refresh_outbound_documents_staging(pg, stg_out)
             pg.commit()
+            detail(
+                {
+                    "phase": "outbound_done",
+                    "outbound_total": og_total,
+                    "outbound_loaded": og_total,
+                    "parsed_facts": og_total,
+                    "journal_facts": facts,
+                    "total_rows": total_exchangelog,
+                    "loaded_rows": fetched,
+                    "staging_errors": staging_n,
+                }
+            )
 
         cursor_after = get_last_log_id(pg, pipeline) if pg is not None else last_id
         return EtlRunStats(

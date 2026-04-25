@@ -6,7 +6,7 @@
 # schema for egisz_reports, airflow DB, Metabase default admin + provision dashboards.
 
 param(
-    [ValidateSet("deploy", "reset-deploy", "build", "apply", "status", "web", "forward", "stop-forward", "compose-up", "compose-down", "test", "help")]
+    [ValidateSet("deploy", "reset-deploy", "build", "apply", "status", "verify", "web", "forward", "stop-forward", "compose-up", "compose-down", "test", "help")]
     [string]$Action = "deploy",
     [switch]$SkipKindCluster,
     # With -Action compose-down: also remove Compose volumes (wipes corp Postgres data volume).
@@ -125,6 +125,7 @@ egisz-monitor-corp\start.ps1
   SkipPostgresPortForward   only with web/forward: omit Postgres forward if port 5432 is busy on the host
   BackgroundPortForward     only with web/forward: hidden kubectl.exe (no extra PS windows); PIDs in .egisz-corp-port-forward.pids
   test              pip install -e ".[dev]" && pytest
+  verify            полная проверка в кластере: Postgres (витрина) + Metabase (дашборды в корне личной коллекции); kubectl exec в под metabase (см. metabase/verify-corp-stack.sh)
   help
 
 Parameters:
@@ -449,6 +450,36 @@ function Invoke-KubectlApply {
     Write-Host "[kubectl] Apply finished." -ForegroundColor Green
 }
 
+function Invoke-K8sCorpStackVerify {
+    Write-Banner "Full stack verify (Postgres DWH + Metabase EGISZ)"
+    if (-not (Test-KubectlResponds)) {
+        Write-Host "ERROR: kubectl cluster-info failed." -ForegroundColor Red
+        exit 1
+    }
+    cmd /c 'kubectl -n egisz-corp get deploy metabase 1>nul 2>nul'
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERROR: deployment/metabase not found in egisz-corp. Run deploy first." -ForegroundColor Red
+        exit 1
+    }
+    $max = 90
+    $prevEaVerify = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    for ($i = 0; $i -lt $max; $i++) {
+        kubectl -n egisz-corp exec deploy/metabase -- /bin/bash /app/verify-corp-stack.sh
+        if ($LASTEXITCODE -eq 0) {
+            $ErrorActionPreference = $prevEaVerify
+            Write-Host "[verify] OK (Postgres tables + Metabase dashboards in personal collection root)" -ForegroundColor Green
+            Write-Host "  Metabase: open Personal collection in sidebar - dashboards are on that page." -ForegroundColor DarkGray
+            return
+        }
+        Write-Host ("[verify] attempt {0}/{1} failed; retry in 10s (provision may still be running)..." -f ($i + 1), $max) -ForegroundColor Yellow
+        Start-Sleep -Seconds 10
+    }
+    $ErrorActionPreference = $prevEaVerify
+    Write-Host "ERROR: verify failed after $max attempts. Logs: kubectl -n egisz-corp logs deploy/metabase --tail=200" -ForegroundColor Red
+    exit 1
+}
+
 function Invoke-K8sSmokeTests {
     # NodePort на 127.0.0.1 из IDE/агента часто недоступен; проверяем сервисы по DNS внутри кластера (тот же kube API).
     Write-Banner "Smoke tests (in-cluster HTTP)"
@@ -693,7 +724,7 @@ function Show-DeployInfo {
     Show-K8sNetworkLegend
     Write-Host "Credentials (local dev):" -ForegroundColor Cyan
     Write-Host "  Postgres: db=egisz_reports user=egisz pass=egisz (in cluster: postgres:5432)" -ForegroundColor White
-    Write-Host '  Metabase: admin@egisz.local / egisz  (MB_PASSWORD_COMPLEXITY=weak; dashboards via provision.sh in metabase pod logs)' -ForegroundColor White
+    Write-Host '  Metabase: admin@egisz.local / egisz - dashboards in root of Personal collection' -ForegroundColor White
     Write-Host "  Firebird: host.docker.internal:3050 in k8s\local\egisz_corp.yaml (rebuild conf-ui image for libfbclient)" -ForegroundColor White
     Write-Host "  Standard ports on PC:  .\start.ps1 -Action web   (optional: web -BackgroundPortForward, no extra PS windows)" -ForegroundColor White
     Write-Host ""
@@ -707,6 +738,10 @@ switch ($Action) {
     "compose-up" { Invoke-CorpComposeUp }
     "compose-down" { Invoke-CorpComposeDown }
     "test" { Invoke-PythonTests }
+    "verify" {
+        Warn-IfNestedUnderSiblingMonitor
+        Invoke-K8sCorpStackVerify
+    }
     "apply" {
         Warn-IfNestedUnderSiblingMonitor
         Ensure-LocalKubernetesCluster
@@ -714,6 +749,7 @@ switch ($Action) {
         Invoke-KubectlApply
         Show-DeployInfo
         Invoke-K8sSmokeTests
+        Invoke-K8sCorpStackVerify
         Invoke-CorpPortForwardIfRequestedAfterK8s -BackgroundSwitchPresent:$PSBoundParameters.ContainsKey('BackgroundPortForward') -BackgroundEnabled:$BackgroundPortForward
     }
     "status" {
@@ -741,6 +777,7 @@ switch ($Action) {
         Invoke-KubectlApply
         Show-DeployInfo
         Invoke-K8sSmokeTests
+        Invoke-K8sCorpStackVerify
         Invoke-CorpPortForwardIfRequestedAfterK8s -BackgroundSwitchPresent:$PSBoundParameters.ContainsKey('BackgroundPortForward') -BackgroundEnabled:$BackgroundPortForward
     }
     "reset-deploy" {
@@ -752,6 +789,7 @@ switch ($Action) {
         Invoke-KubectlApply -ResetNamespace
         Show-DeployInfo
         Invoke-K8sSmokeTests
+        Invoke-K8sCorpStackVerify
         Invoke-CorpPortForwardIfRequestedAfterK8s -BackgroundSwitchPresent:$PSBoundParameters.ContainsKey('BackgroundPortForward') -BackgroundEnabled:$BackgroundPortForward
     }
 }

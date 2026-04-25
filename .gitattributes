@@ -1,0 +1,2 @@
+# Shell in Docker must stay LF-only (CRLF breaks `set -o pipefail` in Linux).
+*.sh text eol=lf

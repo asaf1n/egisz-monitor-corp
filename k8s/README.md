@@ -158,7 +158,17 @@ kubectl -n egisz-corp port-forward svc/airflow-webserver 8080:8080
 
 ## 7. Metabase
 
-Metabase в репозитории: манифест `k8s/metabase.yaml`, описание полей витрины — `docs/METABASE.md`. Подключение Metabase к PostgreSQL в кластере: хост `postgres` (или FQDN сервиса), порт `5432`, имя БД из секрета `postgres-credentials`.
+Манифест: `k8s/metabase.yaml`. Витрина и поля: `docs/METABASE.md`. Подключение к PostgreSQL из пода: хост `postgres`, порт `5432`, БД/пользователь из `postgres-credentials`.
+
+После старта пода выполняются `metabase/provision.sh` → `setup-dashboards.sh` (JSON из `metabase_dashboards/`). Дашборды создаются **в корне личной коллекции** администратора (`/api/user/current` → `personal_collection_id`), чтобы они отображались сразу при открытии **«Персональная коллекция …»** в сайдбаре.
+
+Полная проверка витрины + Metabase из репозитория:
+
+```powershell
+.\start.ps1 -Action verify
+```
+
+(внутри кластера: `kubectl -n egisz-corp exec deploy/metabase -- /bin/bash /app/verify-corp-stack.sh`).
 
 ---
 

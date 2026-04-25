@@ -3,14 +3,40 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+# Kubernetes Secret volume: real path contains a rotated directory like ..2026_04_25_03_31_35.*
+_K8S_SECRET_TS_DIR = re.compile(r"^\.\.\d{4}_\d{2}_\d{2}_")
+
+
+def _strip_k8s_secret_timestamp_dir(p: Path) -> Path:
+    """Collapse ..YYYY_MM_DD_* path segment to parent + basename (stable mount path for UI)."""
+    parts = p.parts
+    for i, part in enumerate(parts):
+        if _K8S_SECRET_TS_DIR.match(part):
+            prefix = Path(*parts[:i]) if i else Path(".")
+            return prefix / parts[-1]
+    return p
 
 try:
     import yaml
 except ImportError as e:  # pragma: no cover
     raise ImportError("PyYAML is required. Install egisz-monitor-corp with dependencies.") from e
+
+
+def logical_config_path() -> Path:
+    """Path for UI and EGISZ_CORP_CONFIG: does not resolve symlinks (K8s Secret mounts use ..date.. dirs)."""
+    w = os.environ.get("CONFIG_WRITE_PATH")
+    if w:
+        return _strip_k8s_secret_timestamp_dir(Path(w).expanduser())
+    env = os.environ.get("EGISZ_CORP_CONFIG")
+    if env:
+        return _strip_k8s_secret_timestamp_dir(Path(env).expanduser())
+    root = Path(__file__).resolve().parents[1]
+    return root / "config" / "egisz_corp.yaml"
 
 
 def default_config_path() -> Path:

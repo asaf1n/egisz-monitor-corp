@@ -1,19 +1,41 @@
 {
   "name": "Управленческий дашборд (Corp)",
   "description": "Ключевые показатели системы (Executive Summary).",
-  "parameters": [],
+  "parameters": [
+    {
+      "id": "a8f3c2b1-4d5e-6f70-a8b9-c0d1e2f3a4b5",
+      "name": "Период (дата обработки)",
+      "slug": "period_filter",
+      "type": "date/all-options",
+      "sectionId": "date"
+    }
+  ],
   "cards": [
     {
-      "name": "Всего обработано за сегодня",
-      "description": "Количество транзакций за текущие сутки.",
+      "name": "Всего обработано за период",
+      "description": "Количество транзакций за выбранный период (дата обработки). В фильтре доступны одна дата, диапазон и относительные периоды, например «Предыдущие 7 дней» / «Предыдущие 30 дней».",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE DATE(\"Обработано\") = CURRENT_DATE",
-          "template-tags": {}
+          "query": "SELECT COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE {{period}}",
+          "template-tags": {
+            "period": {
+              "id": "b1c2d3e4-f5a6-7890-bcde-f12345678901",
+              "name": "period",
+              "display-name": "Период (дата обработки)",
+              "type": "dimension",
+              "widget-type": "date/all-options"
+            }
+          }
         },
         "database": 1
+      },
+      "metabase-field-filters": {
+        "period": {
+          "table_ref": "v_egisz_transactions_enriched_ui",
+          "field_name": "Обработано"
+        }
       },
       "display": "scalar",
       "visualization_settings": {
@@ -27,16 +49,30 @@
       "col": 0
     },
     {
-      "name": "Успешно за сегодня",
-      "description": "Количество успешных транзакций за текущие сутки.",
+      "name": "Успешно за период",
+      "description": "Количество успешных транзакций за выбранный период (дата обработки).",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE DATE(\"Обработано\") = CURRENT_DATE AND \"Статус\" = 'success'",
-          "template-tags": {}
+          "query": "SELECT COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE {{period}} AND \"Статус\" = 'success'",
+          "template-tags": {
+            "period": {
+              "id": "b1c2d3e4-f5a6-7890-bcde-f12345678902",
+              "name": "period",
+              "display-name": "Период (дата обработки)",
+              "type": "dimension",
+              "widget-type": "date/all-options"
+            }
+          }
         },
         "database": 1
+      },
+      "metabase-field-filters": {
+        "period": {
+          "table_ref": "v_egisz_transactions_enriched_ui",
+          "field_name": "Обработано"
+        }
       },
       "display": "scalar",
       "visualization_settings": {
@@ -50,21 +86,35 @@
       "col": 6
     },
     {
-      "name": "% Ошибок за сегодня",
-      "description": "Доля ошибочных транзакций за текущие сутки.",
+      "name": "% Ошибок за период",
+      "description": "Доля ошибочных транзакций за выбранный период (дата обработки). В фильтре: одна дата, диапазон или относительный период (в т.ч. последние 7 и 30 дней).",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT ROUND(SUM(CASE WHEN \"Статус\"='error' THEN 1 ELSE 0 END)*100.0 / NULLIF(COUNT(*), 0), 2) AS \"Процент ошибок\" FROM public.v_egisz_transactions_enriched_ui WHERE DATE(\"Обработано\") = CURRENT_DATE",
-          "template-tags": {}
+          "query": "SELECT ROUND(SUM(CASE WHEN \"Статус\"='error' THEN 1 ELSE 0 END)*100.0 / NULLIF(COUNT(*), 0), 2) AS \"Процент ошибок\" FROM public.v_egisz_transactions_enriched_ui WHERE {{period}}",
+          "template-tags": {
+            "period": {
+              "id": "b1c2d3e4-f5a6-7890-bcde-f12345678903",
+              "name": "period",
+              "display-name": "Период (дата обработки)",
+              "type": "dimension",
+              "widget-type": "date/all-options"
+            }
+          }
         },
         "database": 1
+      },
+      "metabase-field-filters": {
+        "period": {
+          "table_ref": "v_egisz_transactions_enriched_ui",
+          "field_name": "Обработано"
+        }
       },
       "display": "scalar",
       "visualization_settings": {
         "column_settings": {
-          "[\"name\",\"Процент ошибок\"]": { "column_title": "% ошибок за сегодня" }
+          "[\"name\",\"Процент ошибок\"]": { "column_title": "% ошибок за период" }
         }
       },
       "sizeX": 6,

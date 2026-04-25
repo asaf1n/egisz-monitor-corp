@@ -17,6 +17,11 @@ log_info() {
   echo "[dashboards] $1" >&2
 }
 
+# Metabase 0.49+ часто отдаёт списки как { "data": [ ... ] }; без нормализации jq '.[]' ломается и провижининг молча пропускается.
+mb_normalize_list() {
+  jq -c 'if type == "array" then . elif (.data | type == "array") then .data else [] end'
+}
+
 api_request() {
   local method="$1"
   local path="$2"
@@ -44,6 +49,9 @@ api_request() {
     if [[ "${method}" == "POST" && ( "${path}" == "/api/card" || "${path}" == "/api/dashboard" ) ]]; then
       echo "Metabase API ${method} ${path} successful with HTTP ${HTTP_CODE} OK" >&2
     fi
+    if [[ "${method}" == "PUT" && "${path}" =~ ^/api/dashboard/[0-9]+/cards$ ]]; then
+      echo "Metabase API ${method} ${path} successful with HTTP ${HTTP_CODE} OK" >&2
+    fi
   fi
 
   printf '%s' "${RESPONSE_BODY}"
@@ -66,17 +74,17 @@ delete_collection_tree() {
 
   children_json="$(api_request GET "/api/collection/${collection_id}/items")"
 
-  child_ids="$(echo "${children_json}" | jq -r '.data[]? | select(.model == "collection") | .id')"
+  child_ids="$(echo "${children_json}" | mb_normalize_list | jq -r '.[]? | select(.model == "collection") | .id')"
   for child_id in ${child_ids}; do
     delete_collection_tree "${child_id}"
   done
 
-  dashboard_ids="$(echo "${children_json}" | jq -r '.data[]? | select(.model == "dashboard") | .id')"
+  dashboard_ids="$(echo "${children_json}" | mb_normalize_list | jq -r '.[]? | select(.model == "dashboard") | .id')"
   for dashboard_id in ${dashboard_ids}; do
     api_request DELETE "/api/dashboard/${dashboard_id}" >/dev/null
   done
 
-  card_ids="$(echo "${children_json}" | jq -r '.data[]? | select(.model == "card") | .id')"
+  card_ids="$(echo "${children_json}" | mb_normalize_list | jq -r '.[]? | select(.model == "card") | .id')"
   for card_id in ${card_ids}; do
     api_request DELETE "/api/card/${card_id}" >/dev/null
   done
@@ -86,24 +94,51 @@ delete_collection_tree() {
 }
 
 delete_demo_content() {
-  local collections_json dashboards_json databases_json example_ids dashboard_ids sample_ids
+  local collections_raw collections_json dashboards_raw dashboards_json databases_json example_ids dashboard_ids sample_ids
 
-  collections_json="$(api_request GET "/api/collection")"
+  collections_raw="$(api_request GET "/api/collection")"
+  collections_json="$(echo "${collections_raw}" | mb_normalize_list)"
   example_ids="$(echo "${collections_json}" | jq -r '.[] | select(.name == "Examples") | .id')"
   for example_id in ${example_ids}; do
     delete_collection_tree "${example_id}"
   done
 
-  dashboards_json="$(api_request GET "/api/dashboard")"
+  dashboards_raw="$(api_request GET "/api/dashboard")"
+  dashboards_json="$(echo "${dashboards_raw}" | mb_normalize_list)"
   dashboard_ids="$(echo "${dashboards_json}" | jq -r '.[] | select(.name == "E-commerce Insights") | .id')"
   for dashboard_id in ${dashboard_ids}; do
     api_request DELETE "/api/dashboard/${dashboard_id}" >/dev/null
   done
 
   databases_json="$(api_request GET "/api/database")"
-  sample_ids="$(echo "${databases_json}" | jq -r '.data[] | select(.is_sample == true or .name == "Sample Database") | .id')"
+  sample_ids="$(echo "${databases_json}" | jq -r '.data[]? | select(.is_sample == true or .name == "Sample Database") | .id')"
   for sample_id in ${sample_ids}; do
     api_request DELETE "/api/database/${sample_id}" >/dev/null
+  done
+}
+
+# Сохранённые вопросы вне коллекции EGISZ (старые SQL к snake_case-витрине) не обновляются при деплое.
+delete_legacy_corp_cards() {
+  local cards_raw ids
+  if ! cards_raw="$(api_request GET "/api/card")"; then
+    log_info "GET /api/card failed; skip legacy card cleanup"
+    return 0
+  fi
+  ids="$(echo "${cards_raw}" | mb_normalize_list | jq -r '
+    .[]
+    | select(
+        (.name == "Факты со статусом error")
+        or (
+          ((.dataset_query.native.query // "") | test("v_egisz_transactions_enriched"))
+          and ((.dataset_query.native.query // "") | (test("v_egisz_transactions_enriched_ui") | not))
+        )
+      )
+    | .id
+  ')"
+  for card_id in ${ids}; do
+    [ -z "${card_id}" ] || [ "${card_id}" = "null" ] && continue
+    log_info "Deleting legacy saved question card id=${card_id}"
+    api_request DELETE "/api/card/${card_id}" >/dev/null || true
   done
 }
 
@@ -243,7 +278,36 @@ create_card() {
   local description="$(echo "$parsed_json" | jq -r '.description')"
   local query="$(echo "$parsed_json" | jq -r '.dataset_query.native.query')"
   local display="$(echo "$parsed_json" | jq -r '.display')"
-  local template_tags="$(echo "$parsed_json" | jq -c '.dataset_query.native["template-tags"] // {}')"
+  local meta_json
+  meta_json="$(get_database_metadata)"
+  local template_tags
+  template_tags="$(
+    echo "$parsed_json" | jq -c --argjson meta "$meta_json" '
+      def resolve_field_id($meta; $tr; $fn):
+        [
+          $meta.tables[]?
+          | select(.name == $tr or ((.schema // "public") + "." + .name) == $tr)
+          | .fields[]?
+          | select(.name == $fn)
+          | .id
+        ] | first;
+      (.dataset_query.native["template-tags"] // {}) as $tags
+      | (.["metabase-field-filters"] // {}) as $ff
+      | if ($ff | length) == 0 then
+          $tags
+        else
+          ($ff | keys_unsorted) as $keys
+          | reduce $keys[] as $k ($tags;
+              resolve_field_id($meta; $ff[$k].table_ref; $ff[$k].field_name) as $fid
+              | if $fid == null then
+                  error("metabase-field-filters: field not found: \($ff[$k].table_ref).\($ff[$k].field_name)")
+                else
+                  .[$k] = ($tags[$k] // {}) + { dimension: ["field", $fid, null] }
+                end
+            )
+        end
+    '
+  )"
   local table_ref="$(echo "$parsed_json" | jq -r '.table_ref // empty')"
   local table_id=""
   local visualization_settings="$(echo "$parsed_json" | jq -c \
@@ -350,7 +414,8 @@ create_dashboard() {
       
       local mappings
       mappings="$(echo "$parsed_json" | jq -c --argjson cardIndex "$i" '
-        (.cards[$cardIndex].dataset_query.native["template-tags"] // {} | keys) as $cardTags
+        (.cards[$cardIndex].dataset_query.native["template-tags"] // {}) as $cardTemplateTags
+        | ($cardTemplateTags | keys) as $cardTags
         | [
             (.parameters // [])[] as $param
             | (
@@ -361,7 +426,12 @@ create_dashboard() {
                 end
               ) as $tagName
             | if (($cardTags | index($tagName)) != null) then
-                { parameter_id: $param.id, target: ["variable", ["template-tag", $tagName]] }
+                ($cardTemplateTags[$tagName].type // "") as $ttype
+                | if $ttype == "dimension" then
+                    { parameter_id: $param.id, target: ["dimension", ["template-tag", $tagName]] }
+                  else
+                    { parameter_id: $param.id, target: ["variable", ["template-tag", $tagName]] }
+                  end
               else
                 empty
               end
@@ -385,16 +455,20 @@ create_dashboard() {
           size_y: ($sizeY | tonumber),
           row: ($row | tonumber),
           col: ($col | tonumber),
-          parameter_mappings: ($mappings | fromjson)
+          parameter_mappings: ($mappings | fromjson),
+          series: [],
+          visualization_settings: {}
         }')"
 
       cards="$(echo "$cards" | jq --arg dc "$dashcard" '. + [($dc | fromjson)]')"
     done
   fi
 
-  local cards_payload
-  cards_payload="$(jq -n --arg cards "${cards}" '{cards: ($cards | fromjson)}')"
-  api_request PUT "/api/dashboard/${dashboard_id}/cards" "${cards_payload}" >/dev/null
+  if [ "$num_cards" -gt 0 ]; then
+    local cards_payload
+    cards_payload="$(jq -n --arg cards "${cards}" '{cards: ($cards | fromjson)}')"
+    api_request PUT "/api/dashboard/${dashboard_id}/cards" "${cards_payload}" >/dev/null
+  fi
 
   printf '%s' "${dashboard_id}"
 }
@@ -407,14 +481,72 @@ done
 authenticate
 delete_demo_content
 
-for collection_id in $(api_request GET "/api/collection" | jq -r '.[] | select(.name | test("^EGISZ")) | .id' | sort -nr); do
+collections_for_delete="$(api_request GET "/api/collection" | mb_normalize_list)"
+for collection_id in $(echo "${collections_for_delete}" | jq -r '.[] | select(.name | test("^EGISZ")) | .id' | sort -nr); do
   delete_collection_tree "${collection_id}"
 done
 
 authenticate
+delete_legacy_corp_cards
+
+authenticate
 APP_DB_ID="$(ensure_app_database)"
 
-ROOT_COLLECTION_ID="$(create_collection "${ROOT_COLLECTION_NAME}" "EGISZ dashboards collection" "#509EE3")"
+# Дашборды в корне личной коллекции (тот же URL, что «Персональная коллекция …»), иначе вложенная папка не видна на главном экране коллекции.
+PERSONAL_ID="$(api_request GET "/api/user/current" | jq -r '.personal_collection_id // empty')"
+if [ -n "${PERSONAL_ID}" ] && [ "${PERSONAL_ID}" != "null" ]; then
+  log_info "Provisioning into admin personal_collection_id=${PERSONAL_ID} (root of personal collection in UI)"
+  ROOT_COLLECTION_ID="${PERSONAL_ID}"
+else
+  log_info "WARN: personal_collection_id missing from /api/user/current; creating ${ROOT_COLLECTION_NAME} at default root"
+  ROOT_COLLECTION_ID="$(create_collection "${ROOT_COLLECTION_NAME}" "EGISZ dashboards collection" "#509EE3")"
+fi
+
+# Повторный provision без сброса namespace создавал дубликаты дашбордов и saved questions в той же коллекции.
+delete_existing_corp_dashboards_and_cards() {
+  local coll="${1:-}"
+  if [ -z "${coll}" ] || [ "${coll}" = "null" ]; then
+    return 0
+  fi
+  local items_json jq_items dname dash_id cname cid
+
+  items_json="$(api_request GET "/api/collection/${coll}/items")"
+  jq_items="$(echo "${items_json}" | mb_normalize_list)"
+
+  for dashboard_file in /app/metabase_dashboards/*.json; do
+    [ -f "${dashboard_file}" ] || continue
+    dname="$(jq -r '.name' "${dashboard_file}")"
+    for dash_id in $(echo "${jq_items}" | jq -r --arg n "$dname" '.[] | select(.model == "dashboard" and .name == $n) | .id'); do
+      [ -z "${dash_id}" ] || [ "${dash_id}" = "null" ] && continue
+      log_info "Removing stale dashboard id=${dash_id} (${dname})"
+      api_request DELETE "/api/dashboard/${dash_id}" >/dev/null || true
+    done
+  done
+
+  items_json="$(api_request GET "/api/collection/${coll}/items")"
+  jq_items="$(echo "${items_json}" | mb_normalize_list)"
+
+  local card_names
+  card_names="$(
+    {
+      for dashboard_file in /app/metabase_dashboards/*.json; do
+        [ -f "${dashboard_file}" ] || continue
+        jq -r '.cards[]?.name // empty' "${dashboard_file}" 2>/dev/null || true
+      done
+      printf '%s\n' "Всего обработано за сегодня" "Успешно за сегодня" "% Ошибок за сегодня"
+    } | sort -u
+  )"
+  while IFS= read -r cname; do
+    [ -z "${cname}" ] && continue
+    for cid in $(echo "${jq_items}" | jq -r --arg n "$cname" '.[] | select(.model == "card" and .name == $n) | .id'); do
+      [ -z "${cid}" ] || [ "${cid}" = "null" ] && continue
+      log_info "Removing stale card id=${cid} (${cname})"
+      api_request DELETE "/api/card/${cid}" >/dev/null || true
+    done
+  done <<< "${card_names}"
+}
+
+delete_existing_corp_dashboards_and_cards "${ROOT_COLLECTION_ID}"
 
 for dashboard_file in /app/metabase_dashboards/*.json; do
   if [ -f "$dashboard_file" ]; then

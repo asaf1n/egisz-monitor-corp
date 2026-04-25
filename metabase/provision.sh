@@ -11,6 +11,7 @@ APP_DB_PASSWORD="${APP_DATABASE_PASSWORD:-egisz}"
 PGHOST="${PGHOST:-postgres}"
 SITE_NAME="${METABASE_SITE_NAME:-EGISZ Monitor Corp}"
 PUBLIC_UUID_FILE="${METABASE_PUBLIC_UUID_FILE:-/shared/main-dashboard-public-uuid}"
+SCHEMA_CHECK=0
 
 log_info() {
   echo "[provision] $1"
@@ -136,14 +137,15 @@ fi
 
 DASHBOARD_ID="$(curl -s "${MB_URL}/api/dashboard" \
   -H "X-Metabase-Session: ${SESSION_TOKEN}" | jq -r '
-    [
-      .[]
-      | select(
-          .name == "Оперативный мониторинг (Corp)"
-          or .name == "Сервис интеграции (Corp)"
-          or .name == "Ошибки и разбор (Corp)"
-        )
-    ]
+    (if type == "array" then . elif (.data | type == "array") then .data else [] end)
+    | [
+        .[]
+        | select(
+            .name == "Оперативный мониторинг (Corp)"
+            or .name == "Сервис интеграции (Corp)"
+            or .name == "Ошибки и разбор (Corp)"
+          )
+      ]
     | sort_by(.id)
     | last
     | .id // empty
@@ -170,5 +172,19 @@ else
   log_info "No primary dashboard found for publishing; stale public UUID removed."
 fi
 
+# Проверку не гоняем, если схему так и не дождались — иначе ложный FAIL при первом старте до Job схемы.
+if [ -x /app/verify-corp-stack.sh ]; then
+  if [ "${SCHEMA_CHECK:-0}" -ge 4 ]; then
+    log_info "Running full stack verify (Postgres + Metabase EGISZ dashboards)..."
+    if ! /app/verify-corp-stack.sh; then
+      echo "[provision] ERROR: verify-corp-stack.sh failed (см. вывод выше)"
+      exit 1
+    fi
+  else
+    log_info "Skipping verify: DWH schema not ready (dashboard provisioning was skipped)."
+  fi
+fi
+
 log_info "Metabase provisioning finished successfully"
+log_info "Дашборды: в корне персональной коллекции администратора Metabase (тот же пункт в сайдбаре)."
 

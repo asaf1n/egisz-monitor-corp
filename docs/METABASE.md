@@ -1,5 +1,7 @@
 # Metabase на корпоративном DWH
 
+**Где искать дашборды:** провижининг кладёт дашборды **в корень личной коллекции** пользователя Metabase, под которым идёт API-сессия (обычно первый администратор): `GET /api/user/current` → `personal_collection_id`. В UI это тот же пункт **«Персональная коллекция …»** / **Your personal collection** — откройте его: дашборды должны быть **на этой странице**, без отдельной вложенной папки. Проверка после деплоя: `.\start.ps1 -Action verify` или логи пода `metabase` (`provision.sh`, `verify-corp-stack.sh`).
+
 ## Подключение
 
 1. В Metabase: **Admin → Databases → Add database → PostgreSQL**.
