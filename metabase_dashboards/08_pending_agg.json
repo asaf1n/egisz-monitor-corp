@@ -42,14 +42,14 @@
         },
         "database": 1
       },
-      "display": "pie",
+      "display": "bar",
       "visualization_settings": {
-        "pie.show_legend": true,
-        "pie.dimension": ["Время ожидания"],
-        "pie.metric": ["Количество"],
+        "graph.dimensions": ["Время ожидания"],
+        "graph.metrics": ["Количество"],
+        "graph.x_axis.axis_enabled": "rotate-45",
         "column_settings": {
           "[\"name\",\"Время ожидания\"]": { "column_title": "Время ожидания" },
-          "[\"name\",\"Количество\"]": { "column_title": "Количество" }
+          "[\"name\",\"Количество\"]": { "column_title": "Количество", "number_separators": ".", "decimals": 0 }
         }
       },
       "sizeX": 12,

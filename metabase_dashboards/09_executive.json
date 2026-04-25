@@ -144,6 +144,129 @@
       "sizeY": 4,
       "row": 0,
       "col": 18
+    },
+    {
+      "name": "Ошибки по типу (код ЕГИСЗ)",
+      "description": "Распределение ошибочных транзакций по коду из ответа ЕГИСЗ (ns2:code в JSON); если кода нет — по началу текста сообщения. Тот же период (дата обработки), что у KPI выше.",
+      "table_ref": "v_egisz_transactions_enriched_ui",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT (\n  CASE\n    WHEN NULLIF(TRIM(err->>'code'), '') IS NOT NULL THEN TRIM(err->>'code')\n    ELSE LEFT(COALESCE(NULLIF(TRIM(err->>'message'), ''), '(нет текста)'), 120)\n  END\n) AS \"Тип ошибки\",\nCOUNT(*)::bigint AS \"Количество\"\nFROM public.v_egisz_transactions_enriched_ui,\njsonb_array_elements(\"Ошибки JSON\") AS e(err)\nWHERE {{period}} AND \"Статус\" = 'error'\n  AND (NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL)\nGROUP BY 1\nORDER BY 2 DESC\nLIMIT 20",
+          "template-tags": {
+            "period": {
+              "id": "b1c2d3e4-f5a6-7890-bcde-f12345678904",
+              "name": "period",
+              "display-name": "Период (дата обработки)",
+              "type": "dimension",
+              "widget-type": "date/all-options"
+            }
+          }
+        },
+        "database": 1
+      },
+      "metabase-field-filters": {
+        "period": {
+          "table_ref": "v_egisz_transactions_enriched_ui",
+          "field_name": "Обработано"
+        }
+      },
+      "display": "row",
+      "visualization_settings": {
+        "graph.dimensions": ["Тип ошибки"],
+        "graph.metrics": ["Количество"],
+        "column_settings": {
+          "[\"name\",\"Тип ошибки\"]": { "column_title": "Тип ошибки" },
+          "[\"name\",\"Количество\"]": { "column_title": "Количество", "number_separators": ".", "decimals": 0 }
+        }
+      },
+      "sizeX": 8,
+      "sizeY": 7,
+      "row": 4,
+      "col": 0
+    },
+    {
+      "name": "Ошибки по типу СЭМД",
+      "description": "Число ошибочных транзакций за период по коду и наименованию СЭМД.",
+      "table_ref": "v_egisz_transactions_enriched_ui",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE {{period}} AND \"Статус\" = 'error' GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 25",
+          "template-tags": {
+            "period": {
+              "id": "b1c2d3e4-f5a6-7890-bcde-f12345678905",
+              "name": "period",
+              "display-name": "Период (дата обработки)",
+              "type": "dimension",
+              "widget-type": "date/all-options"
+            }
+          }
+        },
+        "database": 1
+      },
+      "metabase-field-filters": {
+        "period": {
+          "table_ref": "v_egisz_transactions_enriched_ui",
+          "field_name": "Обработано"
+        }
+      },
+      "display": "bar",
+      "visualization_settings": {
+        "graph.dimensions": ["Наименование СЭМД"],
+        "graph.metrics": ["Количество"],
+        "graph.x_axis.axis_enabled": "rotate-45",
+        "column_settings": {
+          "[\"name\",\"Код СЭМД\"]": { "column_title": "Код СЭМД" },
+          "[\"name\",\"Наименование СЭМД\"]": { "column_title": "Наименование СЭМД" },
+          "[\"name\",\"Количество\"]": { "column_title": "Количество", "number_separators": ".", "decimals": 0 }
+        }
+      },
+      "sizeX": 8,
+      "sizeY": 7,
+      "row": 4,
+      "col": 8
+    },
+    {
+      "name": "Клиники с ошибками",
+      "description": "Топ клиник по числу ошибочных транзакций за период (JID отличает одинаковые наименования).",
+      "table_ref": "v_egisz_transactions_enriched_ui",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT \"JID клиники\", \"Наименование клиники\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE {{period}} AND \"Статус\" = 'error' GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 25",
+          "template-tags": {
+            "period": {
+              "id": "b1c2d3e4-f5a6-7890-bcde-f12345678906",
+              "name": "period",
+              "display-name": "Период (дата обработки)",
+              "type": "dimension",
+              "widget-type": "date/all-options"
+            }
+          }
+        },
+        "database": 1
+      },
+      "metabase-field-filters": {
+        "period": {
+          "table_ref": "v_egisz_transactions_enriched_ui",
+          "field_name": "Обработано"
+        }
+      },
+      "display": "row",
+      "visualization_settings": {
+        "graph.dimensions": ["Наименование клиники"],
+        "graph.metrics": ["Количество"],
+        "column_settings": {
+          "[\"name\",\"JID клиники\"]": { "column_title": "JID клиники" },
+          "[\"name\",\"Наименование клиники\"]": { "column_title": "Наименование клиники" },
+          "[\"name\",\"Количество\"]": { "column_title": "Количество", "number_separators": ".", "decimals": 0 }
+        }
+      },
+      "sizeX": 8,
+      "sizeY": 7,
+      "row": 4,
+      "col": 16
     }
   ]
 }
