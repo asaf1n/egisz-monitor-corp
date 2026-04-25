@@ -313,9 +313,29 @@ create_dashboard() {
   local name="$(echo "$parsed_json" | jq -r '.name')"
   local description="$(echo "$parsed_json" | jq -r '.description')"
   local parameters_json="$(echo "$parsed_json" | jq -c '.parameters // []')"
-  
-  # First, create cards and build dashcards array
-  local dashcards="[]"
+
+  local dashboard_payload dashboard_id
+  dashboard_payload="$(jq -n \
+    --arg name "${name}" \
+    --arg description "${description}" \
+    --arg collectionId "${collection_id}" \
+    --arg parameters "${parameters_json}" \
+    '{
+      name: $name,
+      description: $description,
+      collection_id: ($collectionId | tonumber),
+      cacheables: [],
+      parameters: ($parameters | fromjson)
+    }')"
+
+  dashboard_id="$(api_request POST "/api/dashboard" "${dashboard_payload}" | jq -r '.id')"
+  if [ -z "${dashboard_id}" ] || [ "${dashboard_id}" = "null" ]; then
+    echo "Failed to create dashboard ${name}" >&2
+    exit 1
+  fi
+
+  # Metabase v0.47+ attaches dashboard cards via PUT /api/dashboard/:id/cards.
+  local cards="[]"
   local num_cards="$(echo "$parsed_json" | jq '.cards | length')"
   if [ "$num_cards" -gt 0 ]; then
     for i in $(seq 0 $((num_cards - 1))); do
@@ -347,8 +367,11 @@ create_dashboard() {
               end
           ]
       ')"
-      
+
+      # Negative IDs mean "new dashboard card" for the bulk update endpoint.
+      local dashcard_id=$((-(i + 1)))
       local dashcard="$(jq -n \
+        --arg dashcardId "$dashcard_id" \
         --arg cardId "$card_id" \
         --arg sizeX "$sizeX" \
         --arg sizeY "$sizeY" \
@@ -356,6 +379,7 @@ create_dashboard() {
         --arg col "$col" \
         --arg mappings "$mappings" \
         '{
+          id: ($dashcardId | tonumber),
           card_id: ($cardId | tonumber),
           size_x: ($sizeX | tonumber),
           size_y: ($sizeY | tonumber),
@@ -363,28 +387,16 @@ create_dashboard() {
           col: ($col | tonumber),
           parameter_mappings: ($mappings | fromjson)
         }')"
-        
-      dashcards="$(echo "$dashcards" | jq --arg dc "$dashcard" '. + [($dc | fromjson)]')"
+
+      cards="$(echo "$cards" | jq --arg dc "$dashcard" '. + [($dc | fromjson)]')"
     done
   fi
 
-  local payload
-  payload="$(jq -n \
-    --arg name "${name}" \
-    --arg description "${description}" \
-    --arg collectionId "${collection_id}" \
-    --arg dashcards "${dashcards}" \
-    --arg parameters "${parameters_json}" \
-    '{
-      name: $name,
-      description: $description,
-      collection_id: ($collectionId | tonumber),
-      cacheables: [],
-      dashcards: ($dashcards | fromjson),
-      parameters: ($parameters | fromjson)
-    }')"
+  local cards_payload
+  cards_payload="$(jq -n --arg cards "${cards}" '{cards: ($cards | fromjson)}')"
+  api_request PUT "/api/dashboard/${dashboard_id}/cards" "${cards_payload}" >/dev/null
 
-  api_request POST "/api/dashboard" "${payload}" | jq -r '.id'
+  printf '%s' "${dashboard_id}"
 }
 
 log_info "Waiting for Metabase at ${METABASE_URL}..."

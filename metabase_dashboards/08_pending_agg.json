@@ -5,12 +5,12 @@
   "cards": [
     {
       "name": "Топ клиник с зависшими документами",
-      "description": "Клиники с наибольшим количеством документов без ответа.",
+      "description": "Клиники с наибольшим количеством документов без ответа, с JID для различения одинаковых наименований.",
       "table_ref": "v_rpt_documents_no_response_ui",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT \"Наименование клиники\", COUNT(*)::bigint AS \"Количество\" FROM public.v_rpt_documents_no_response_ui GROUP BY 1 ORDER BY 2 DESC LIMIT 20",
+          "query": "SELECT \"JID клиники\", \"Наименование клиники\", COUNT(*)::bigint AS \"Количество\" FROM public.v_rpt_documents_no_response_ui GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20",
           "template-tags": {}
         },
         "database": 1
@@ -20,6 +20,7 @@
         "graph.dimensions": ["Наименование клиники"],
         "graph.metrics": ["Количество"],
         "column_settings": {
+          "[\"name\",\"JID клиники\"]": { "column_title": "JID клиники" },
           "[\"name\",\"Наименование клиники\"]": { "column_title": "Наименование клиники" },
           "[\"name\",\"Количество\"]": { "column_title": "Количество", "number_separators": ".", "decimals": 0 }
         }
@@ -55,6 +56,34 @@
       "sizeY": 8,
       "row": 0,
       "col": 12
+    },
+    {
+      "name": "Зависшие документы по типам СЭМД",
+      "description": "Распределение документов без ответа по коду и наименованию СЭМД.",
+      "table_ref": "v_rpt_documents_no_response_ui",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(*)::bigint AS \"Количество\" FROM public.v_rpt_documents_no_response_ui GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 25",
+          "template-tags": {}
+        },
+        "database": 1
+      },
+      "display": "bar",
+      "visualization_settings": {
+        "graph.dimensions": ["Наименование СЭМД"],
+        "graph.metrics": ["Количество"],
+        "graph.x_axis.axis_enabled": "rotate-45",
+        "column_settings": {
+          "[\"name\",\"Код СЭМД\"]": { "column_title": "Код СЭМД" },
+          "[\"name\",\"Наименование СЭМД\"]": { "column_title": "Наименование СЭМД" },
+          "[\"name\",\"Количество\"]": { "column_title": "Количество", "number_separators": ".", "decimals": 0 }
+        }
+      },
+      "sizeX": 24,
+      "sizeY": 8,
+      "row": 8,
+      "col": 0
     }
   ]
 }

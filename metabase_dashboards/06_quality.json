@@ -5,12 +5,12 @@
   "cards": [
     {
       "name": "Успешность по клиникам",
-      "description": "Процент успешных отправок по клиникам.",
+      "description": "Процент успешных отправок по клиникам с JID для различения одинаковых наименований.",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT \"Наименование клиники\", COUNT(*)::bigint AS \"Всего отправлено\", SUM(CASE WHEN \"Статус\"='success' THEN 1 ELSE 0 END)::bigint AS \"Успешно\", SUM(CASE WHEN \"Статус\"='error' THEN 1 ELSE 0 END)::bigint AS \"Ошибок\", ROUND(SUM(CASE WHEN \"Статус\"='success' THEN 1 ELSE 0 END)*100.0 / NULLIF(COUNT(*), 0), 2) AS \"Процент успешных\" FROM public.v_egisz_transactions_enriched_ui GROUP BY 1 ORDER BY 5 ASC, 2 DESC LIMIT 50",
+          "query": "SELECT \"JID клиники\", \"Наименование клиники\", COUNT(*)::bigint AS \"Всего отправлено\", SUM(CASE WHEN \"Статус\"='success' THEN 1 ELSE 0 END)::bigint AS \"Успешно\", SUM(CASE WHEN \"Статус\"='error' THEN 1 ELSE 0 END)::bigint AS \"Ошибок\", ROUND(SUM(CASE WHEN \"Статус\"='success' THEN 1 ELSE 0 END)*100.0 / NULLIF(COUNT(*), 0), 2) AS \"Процент успешных\" FROM public.v_egisz_transactions_enriched_ui GROUP BY 1, 2 ORDER BY 6 ASC, 3 DESC LIMIT 50",
           "template-tags": {}
         },
         "database": 1
@@ -18,6 +18,7 @@
       "display": "table",
       "visualization_settings": {
         "column_settings": {
+          "[\"name\",\"JID клиники\"]": { "column_title": "JID клиники" },
           "[\"name\",\"Наименование клиники\"]": { "column_title": "Наименование клиники" },
           "[\"name\",\"Всего отправлено\"]": { "column_title": "Всего отправлено", "number_separators": ".", "decimals": 0 },
           "[\"name\",\"Успешно\"]": { "column_title": "Успешно", "number_separators": ".", "decimals": 0 },
@@ -37,7 +38,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(*)::bigint AS \"Всего отправлено\", ROUND(SUM(CASE WHEN \"Статус\"='success' THEN 1 ELSE 0 END)*100.0 / NULLIF(COUNT(*), 0), 2) AS \"Процент успешных\" FROM public.v_egisz_transactions_enriched_ui GROUP BY 1, 2 ORDER BY 4 ASC, 3 DESC LIMIT 50",
+          "query": "SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(*)::bigint AS \"Всего отправлено\", SUM(CASE WHEN \"Статус\"='success' THEN 1 ELSE 0 END)::bigint AS \"Успешно\", SUM(CASE WHEN \"Статус\"='error' THEN 1 ELSE 0 END)::bigint AS \"Ошибок\", ROUND(SUM(CASE WHEN \"Статус\"='success' THEN 1 ELSE 0 END)*100.0 / NULLIF(COUNT(*), 0), 2) AS \"Процент успешных\" FROM public.v_egisz_transactions_enriched_ui GROUP BY 1, 2 ORDER BY 6 ASC, 3 DESC LIMIT 50",
           "template-tags": {}
         },
         "database": 1
@@ -48,6 +49,8 @@
           "[\"name\",\"Код СЭМД\"]": { "column_title": "Код СЭМД" },
           "[\"name\",\"Наименование СЭМД\"]": { "column_title": "Наименование СЭМД" },
           "[\"name\",\"Всего отправлено\"]": { "column_title": "Всего отправлено", "number_separators": ".", "decimals": 0 },
+          "[\"name\",\"Успешно\"]": { "column_title": "Успешно", "number_separators": ".", "decimals": 0 },
+          "[\"name\",\"Ошибок\"]": { "column_title": "Ошибок", "number_separators": ".", "decimals": 0 },
           "[\"name\",\"Процент успешных\"]": { "column_title": "% успешных" }
         }
       },

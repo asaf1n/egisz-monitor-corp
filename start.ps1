@@ -297,6 +297,20 @@ function Publish-ConfUiImageToDockerDesktopK8s {
     Write-Host "[docker-desktop] conf-ui -> $img (local image digest refresh)" -ForegroundColor DarkGray
 }
 
+function Publish-MetabaseImageToDockerDesktopK8s {
+    $ctx = (kubectl config current-context 2>$null | Out-String).Trim()
+    if ($ctx -ne "docker-desktop") { return }
+    kubectl -n egisz-corp get deploy metabase -o name 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { return }
+    $stamp = [DateTime]::UtcNow.ToString("yyyyMMddHHmmss")
+    $img = "egisz-corp-metabase:latest-$stamp"
+    docker tag egisz-corp-metabase:latest $img
+    if ($LASTEXITCODE -ne 0) { return }
+    kubectl -n egisz-corp set image deployment/metabase "metabase=$img"
+    if ($LASTEXITCODE -ne 0) { return }
+    Write-Host "[docker-desktop] metabase -> $img (local image digest refresh)" -ForegroundColor DarkGray
+}
+
 function Invoke-PostgresSchemaInit {
     Write-Host "[kubectl] ConfigMap + Job: apply schema to egisz_reports..." -ForegroundColor Cyan
     $sql1 = Join-Path $Root "sql\001_schema.sql"
@@ -305,10 +319,13 @@ function Invoke-PostgresSchemaInit {
         Write-Host "ERROR: Missing sql\001_schema.sql or sql\002_etl_state.sql" -ForegroundColor Red
         exit 1
     }
+    # Do not pipe ConfigMap YAML through PowerShell: it can transcode UTF-8 SQL aliases to '?'.
+    # Create the ConfigMap directly from files so Russian UI column names stay byte-exact.
+    kubectl -n egisz-corp delete configmap/egisz-reports-schema --ignore-not-found
+    if ($LASTEXITCODE -ne 0) { exit 1 }
     kubectl -n egisz-corp create configmap egisz-reports-schema `
         --from-file=001_schema.sql=$sql1 `
-        --from-file=002_etl_state.sql=$sql2 `
-        --dry-run=client -o yaml | kubectl apply -f -
+        --from-file=002_etl_state.sql=$sql2
     if ($LASTEXITCODE -ne 0) { exit 1 }
     kubectl -n egisz-corp delete job/egisz-reports-schema-init --ignore-not-found
     kubectl apply -f (Join-Path $Root "k8s\postgres\egisz-reports-schema-job.yaml")
@@ -405,6 +422,7 @@ function Invoke-KubectlApply {
     if ($LASTEXITCODE -ne 0) { exit 1 }
     kubectl apply -f (Join-Path $Root "k8s\metabase.yaml")
     if ($LASTEXITCODE -ne 0) { exit 1 }
+    Publish-MetabaseImageToDockerDesktopK8s
 
     Invoke-WebConfigSecret
 
