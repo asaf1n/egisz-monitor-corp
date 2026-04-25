@@ -14,6 +14,7 @@
 * **Хранилище (DWH):** PostgreSQL 15/16.
 * **Оркестрация:** Apache Airflow (исполнение DAG `egisz_corp_firebird_to_postgres`).
 * **Визуализация:** Metabase (карточки в `metabase_dashboards/`; подписи колонок и осей — кириллические алиасы в SQL и `visualization_settings`). Кириллица из Firebird: см. `firebird.charset` в `egisz_corp.yaml` (часто `WIN1251`, см. `docs/METABASE.md`).
+* **Визуализация (опционально):** Power BI Desktop к тому же PostgreSQL без смены витрины — SQL 01–09 и доп. страницы в `powerbi/egisz-corp/sql/`, проект `powerbi/egisz-corp/egisz-corp.pbip`, инструкции в `docs/POWERBI.md` и `powerbi/egisz-corp/README.md`.
 * **Инфраструктура:** Docker, Kubernetes (namespace `egisz-corp`).
 
 ### Техническая реализация и логика парсинга

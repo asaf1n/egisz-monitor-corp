@@ -1,0 +1,9 @@
+{
+  "themeCollection": {
+    "baseTheme": {
+      "name": "CY24SU04",
+      "type": "SharedResources",
+      "path": "BuiltInThemes/CY24SU04.json"
+    }
+  }
+}

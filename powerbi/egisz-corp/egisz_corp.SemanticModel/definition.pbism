@@ -1,0 +1,5 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/pbism/1.0.0/pbism.json",
+  "version": "1.0",
+  "settings": {}
+}

@@ -1,0 +1,5 @@
+model
+	culture: ru-RU
+	defaultPowerBIDataSourceVersion: powerBI_V3
+
+	ref table ReadmePlaceholder

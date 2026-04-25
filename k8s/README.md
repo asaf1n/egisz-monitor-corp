@@ -160,6 +160,10 @@ kubectl -n egisz-corp port-forward svc/airflow-webserver 8080:8080
 
 Metabase в репозитории: манифест `k8s/metabase.yaml`, описание полей витрины — `docs/METABASE.md`. Подключение Metabase к PostgreSQL в кластере: хост `postgres` (или FQDN сервиса), порт `5432`, имя БД из секрета `postgres-credentials`.
 
+### 7.1. Power BI (рядом с Metabase, без нового пода)
+
+Отдельного сервиса Power BI в Kubernetes нет: аналитика строится в **Power BI Desktop** на рабочей машине (или в облаке Microsoft с шлюзом при корпоративной публикации). Данные — **тот же** Postgres: `kubectl port-forward` на сервис `postgres` (см. раздел 8) и параметры из `postgres-credentials`. SQL и заготовка проекта (PBIP): `powerbi/egisz-corp/`, документация — `docs/POWERBI.md`.
+
 ---
 
 ## 8. Port-forward с рабочей машины

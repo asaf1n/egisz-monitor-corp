@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/pbip/1.0.0/pbip.json",
+  "version": "1.0",
+  "artifacts": [
+    { "path": "egisz_corp.SemanticModel" },
+    { "path": "egisz_corp.Report" }
+  ],
+  "settings": {
+    "enableAutoRecovery": true
+  }
+}
