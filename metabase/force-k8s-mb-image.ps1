@@ -1,6 +1,6 @@
 #!/usr/bin/env powershell
-# Восстановление: под Metabase ссылается на :local, но в кластере устаревший кэш / нет скриптов в /app.
-# Собирает образ, тегирует :local, выставляет уникальный тег deployment и ждёт rollout.
+# Восстановление: в поде нет /app/verify-corp-stack.sh — обычно на ноде устарел образ :latest; в манифесте используется :local.
+# Сборка, тег :local, apply и rollout restart.
 $ErrorActionPreference = "Stop"
 $Root = Split-Path $PSScriptRoot -Parent
 Set-Location $Root
@@ -9,10 +9,9 @@ docker build -f metabase/Dockerfile -t egisz-corp-metabase:latest $Root
 if ($LASTEXITCODE -ne 0) { exit 1 }
 docker tag egisz-corp-metabase:latest egisz-corp-metabase:local
 if ($LASTEXITCODE -ne 0) { exit 1 }
-$stamp = [DateTime]::UtcNow.ToString("yyyyMMddHHmmss")
-$img = "egisz-corp-metabase:fix-$stamp"
-docker tag egisz-corp-metabase:local $img
-kubectl -n egisz-corp set image deployment/metabase "metabase=$img"
+kubectl apply -f k8s/metabase.yaml
+if ($LASTEXITCODE -ne 0) { exit 1 }
+kubectl -n egisz-corp rollout restart deployment/metabase
 if ($LASTEXITCODE -ne 0) { exit 1 }
 kubectl -n egisz-corp rollout status deployment/metabase --timeout=300s
 if ($LASTEXITCODE -ne 0) { exit 1 }

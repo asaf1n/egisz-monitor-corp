@@ -58,9 +58,9 @@ spec:
       containers:
         - name: metabase
           # Сборка: docker build -f metabase/Dockerfile -t egisz-corp-metabase:latest . && docker tag egisz-corp-metabase:latest egisz-corp-metabase:local
-          # Не используем :latest в кластере: кэш ноды (IfNotPresent) оставлял старый digest без /app/verify-corp-stack.sh. Тег :local — только из вашей docker build.
+          # В манифесте не :latest (кэш ноды тянул устаревший digest). :local — всегда после `start.ps1 -Action build`. imagePullPolicy: Never — не тянуть с Docker Hub; Never ломал теги set image fix-* на node.
           image: egisz-corp-metabase:local
-          imagePullPolicy: Never
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000
               name: http

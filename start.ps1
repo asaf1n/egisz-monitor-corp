@@ -311,17 +311,10 @@ function Publish-MetabaseImageToDockerDesktopK8s {
     if ($ctx -ne "docker-desktop") { return }
     kubectl -n egisz-corp get deploy metabase -o name 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) { return }
-    $stamp = [DateTime]::UtcNow.ToString("yyyyMMddHHmmss")
-    $img = "egisz-corp-metabase:latest-$stamp"
-    # Предпочитаем :local (см. Invoke-DockerBuild) — тот же digest, что свежая сборка; иначе :latest
-    $base = "egisz-corp-metabase:local"
-    cmd /c "docker image inspect $($base) 1>nul 2>nul"
-    if ($LASTEXITCODE -ne 0) { $base = "egisz-corp-metabase:latest" }
-    docker tag $base $img
+    # С deployment на :local + IfNotPresent kubelet подхватывает новый digest на новом pod после `docker build`+`tag :local`. Уникальные теги + imagePullPolicy: Never давали ErrImageNeverPull на node.
+    kubectl -n egisz-corp rollout restart deployment/metabase
     if ($LASTEXITCODE -ne 0) { return }
-    kubectl -n egisz-corp set image deployment/metabase "metabase=$img"
-    if ($LASTEXITCODE -ne 0) { return }
-    Write-Host "[docker-desktop] metabase -> $img (local image digest refresh)" -ForegroundColor DarkGray
+    Write-Host "[docker-desktop] deployment/metabase rollout restart (use egisz-corp-metabase:local from host build)" -ForegroundColor DarkGray
 }
 
 function Invoke-PostgresSchemaInit {
