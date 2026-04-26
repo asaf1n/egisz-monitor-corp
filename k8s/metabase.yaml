@@ -1,5 +1,6 @@
 # Metabase OSS + провижининг (metabase/provision.sh, setup-dashboards.sh).
 # Перед первым запуском: схема витрины (egisz-corp Job или apply-schema) и секрет postgres.
+# Первый администратор UI: email/password из Secret metabase-admin (репозиторий: admin@egisz.local / egisz, см. metabase-admin-secret.example.yaml).
 apiVersion: v1
 kind: Service
 metadata:
@@ -84,6 +85,11 @@ spec:
               value: "EGISZ Corp DWH"
             - name: METABASE_SITE_NAME
               value: "EGISZ Monitor Corp"
+            # Если на главной Metabase (/) постоянно «Произошла ошибка», а коллекции открываются:
+            # выставьте тот же origin, что в адресной строке браузера (см. docs/METABASE.md).
+            # Примеры: port-forward http://127.0.0.1:3000 ; NodePort http://127.0.0.1:30300
+            # - name: MB_SITE_URL
+            #   value: "http://127.0.0.1:3000"
           volumeMounts:
             - name: shared
               mountPath: /shared

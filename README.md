@@ -63,10 +63,11 @@
     * **database / user / password:** `egisz_corp` / `egisz_corp` / `egisz_corp`.
 
 **3. Учетные данные Metabase:**
-* **Администрирование:** `email: admin@egisz-corp.local`, `password: ChangeMeMetabase123!`.
+* **Администрирование (UI и API провижининга):** `admin@egisz.local` / `egisz` (секрет `metabase-admin` в k8s; пример — `k8s/metabase-admin-secret.example.yaml`, при локальном деплое тот же набор пишет `start.ps1` в `k8s/metabase-admin-secret.yaml`).
 
 **4. Управление в Kubernetes (Secrets):**
 * **`postgres-credentials`:** Содержит параметры доступа к PostgreSQL.
+* **`metabase-admin`:** Email и пароль администратора Metabase (`admin@egisz.local` / `egisz`; пример `k8s/metabase-admin-secret.example.yaml`).
 * **`airflow-metadata-connection`:** SQLAlchemy-строка для метаданных Airflow.
 * **`egisz-corp-web-config`:** Файл `egisz_corp.yaml` для приложения.
 
@@ -78,7 +79,7 @@
 | **Metabase** | `metabase:3000` | Аналитические дашборды и визуализация. |
 | **Config UI** | `conf-ui:8080` | Интерфейс управления YAML-конфигурацией. |
 
-Проверка витрины Postgres и дашбордов Metabase после деплоя: **`.\start.ps1 -Action verify`**. Полный пересоздать namespace и данные: **`.\start.ps1 -Action reset-deploy`**. В Metabase дашборды — **в корне персональной коллекции** администратора (пункт в сайдбаре «Персональная коллекция …»).
+Проверка витрины Postgres и дашбордов Metabase после деплоя: **`.\start.ps1 -Action verify`**. Полный пересоздать namespace и данные: **`.\start.ps1 -Action reset-deploy`**. После **`deploy` / `apply` / `reset-deploy`** по умолчанию поднимается **port-forward** на `http://127.0.0.1:8080/` (Config UI) и `:3000/` (Metabase, без `5432`); отключить: **`-SkipPortForwardAfterDeploy`**. Полный форвард с Postgres: **`.\start.ps1 -Action web`**. В Metabase дашборды — **в корне персональной коллекции** администратора (пункт в сайдбаре «Персональная коллекция …»).
 
 ---
 *Для получения подробной информации по развертыванию в конкретных окружениях обратитесь к файлу `k8s/README.md`.*

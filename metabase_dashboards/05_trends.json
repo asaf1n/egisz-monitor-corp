@@ -1,16 +1,24 @@
 {
   "name": "Динамика и тренды (Corp)",
   "description": "Оценка нагрузки на систему и выявление массовых сбоев во времени.",
-  "parameters": [],
+  "parameters": [
+    {
+      "id": "e7f8a9b0-c1d2-4e3f-a5b6-c7d8e9f0a1b2",
+      "name": "Период (ось даты графика)",
+      "slug": "trend_period_filter",
+      "type": "date/all-options",
+      "sectionId": "date"
+    }
+  ],
   "cards": [
     {
       "name": "Транзакции по дням и статусам",
-      "description": "Количество обработанных сообщений по дням, разбитое по статусам.",
+      "description": "Количество сообщений по календарным дням: дата из ответа ЕГИСЗ (Дата регистрации / registrationDate), при отсутствии — дата загрузки в витрину (Обработано). Не использовать только «Обработано» для трендов — при пакетной загрузке ETL все точки съезжают в один день.",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT DATE(\"Обработано\") AS \"Дата\", \"Статус\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui GROUP BY 1, 2 ORDER BY 1 ASC",
+          "query": "SELECT DATE(COALESCE(\"Дата регистрации\", \"Обработано\")) AS \"Дата\", \"Статус\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui GROUP BY 1, 2 ORDER BY 1 ASC",
           "template-tags": {}
         },
         "database": 1
@@ -34,15 +42,29 @@
     },
     {
       "name": "Динамика по типам СЭМД",
-      "description": "Тренд отправки документов по дням с кодом и наименованием СЭМД.",
+      "description": "Тренд по календарным дням: дата из ответа ЕГИСЗ (Дата регистрации), иначе дата попадания в витрину (Обработано). Отражает динамику ответов/регистрации, а не момент срабатывания ETL. Фильтр периода привязан к той же логике (колонка «День (тренд)» в витрине). В легенде: код и наименование СЭМД, например «227. Протокол Консультации».",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT DATE(\"Обработано\") AS \"Дата\", COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui GROUP BY 1, 2, 3 ORDER BY 1 ASC",
-          "template-tags": {}
+          "query": "SELECT \"День (тренд)\" AS \"Дата\", CASE WHEN NULLIF(TRIM(\"Код СЭМД\"), '') IS NULL THEN initcap(COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)')) ELSE NULLIF(TRIM(\"Код СЭМД\"), '') || '. ' || initcap(COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)')) END AS \"Наименование СЭМД\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE {{trend_period}} GROUP BY 1, 2 ORDER BY 1 ASC",
+          "template-tags": {
+            "trend_period": {
+              "id": "f8a9b0c1-d2e3-4f5a-b6c7-d8e9f0a1b2c3",
+              "name": "trend_period",
+              "display-name": "Период (ось даты графика)",
+              "type": "dimension",
+              "widget-type": "date/all-options"
+            }
+          }
         },
         "database": 1
+      },
+      "metabase-field-filters": {
+        "trend_period": {
+          "table_ref": "v_egisz_transactions_enriched_ui",
+          "field_name": "День (тренд)"
+        }
       },
       "display": "line",
       "visualization_settings": {
@@ -50,7 +72,6 @@
         "graph.metrics": ["Количество"],
         "column_settings": {
           "[\"name\",\"Дата\"]": { "column_title": "Дата" },
-          "[\"name\",\"Код СЭМД\"]": { "column_title": "Код СЭМД" },
           "[\"name\",\"Наименование СЭМД\"]": { "column_title": "Наименование СЭМД" },
           "[\"name\",\"Количество\"]": { "column_title": "Количество" }
         }

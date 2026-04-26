@@ -1,6 +1,6 @@
 {
   "name": "Оперативный мониторинг (Corp)",
-  "description": "Статусы, топы по СЭМД и клиникам, последние записи и ошибки витрины (представление v_egisz_transactions_enriched_ui).",
+  "description": "Статусы, топы по СЭМД и клиникам, последние записи витрины (v_egisz_transactions_enriched_ui). Детальный список ошибок СЭМД — на дашборде «Ошибки и разбор (Corp)», чтобы не дублировать карточки в коллекции.",
   "parameters": [],
   "cards": [
     {
@@ -121,42 +121,6 @@
       "sizeY": 8,
       "row": 6,
       "col": 8
-    },
-    {
-      "name": "Ошибки СЭМД",
-      "description": "Последние error-строки из витрины.",
-      "table_ref": "v_egisz_transactions_enriched_ui",
-      "dataset_query": {
-        "type": "native",
-        "native": {
-          "query": "SELECT \"localUid СЭМД\", \"JID клиники\", \"Токен gost-хоста\", \"OID организации\", \"Код СЭМД\", \"Наименование СЭМД\", \"Наименование клиники\", \"ИНН клиники\", \"OID клиники\", \"EMDR ID\", \"Дата регистрации\", (SELECT LEFT(string_agg(NULLIF(err->>'message', ''), '; ' ORDER BY ord), 500) FROM jsonb_array_elements(\"Ошибки JSON\") WITH ORDINALITY AS e(err, ord) WHERE NULLIF(err->>'message', '') IS NOT NULL) AS \"Текст ошибки\", \"Обработано\", \"Связанное сообщение\" FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' ORDER BY \"Обработано\" DESC NULLS LAST LIMIT 50",
-          "template-tags": {}
-        },
-        "database": 1
-      },
-      "display": "table",
-      "visualization_settings": {
-        "column_settings": {
-          "[\"name\",\"Связанное сообщение\"]": { "column_title": "Связанное сообщение (relatesToMessage)" },
-          "[\"name\",\"localUid СЭМД\"]": { "column_title": "localUid СЭМД" },
-          "[\"name\",\"JID клиники\"]": { "column_title": "JID клиники" },
-          "[\"name\",\"Токен gost-хоста\"]": { "column_title": "Токен gost-хоста" },
-          "[\"name\",\"OID организации\"]": { "column_title": "OID организации" },
-          "[\"name\",\"Код СЭМД\"]": { "column_title": "Код СЭМД" },
-          "[\"name\",\"Наименование СЭМД\"]": { "column_title": "Наименование СЭМД" },
-          "[\"name\",\"Наименование клиники\"]": { "column_title": "Наименование клиники" },
-          "[\"name\",\"ИНН клиники\"]": { "column_title": "ИНН клиники" },
-          "[\"name\",\"OID клиники\"]": { "column_title": "OID клиники" },
-          "[\"name\",\"EMDR ID\"]": { "column_title": "EMDR ID" },
-          "[\"name\",\"Дата регистрации\"]": { "column_title": "Дата регистрации" },
-          "[\"name\",\"Текст ошибки\"]": { "column_title": "Текст ошибки" },
-          "[\"name\",\"Обработано\"]": { "column_title": "Обработано" }
-        }
-      },
-      "sizeX": 24,
-      "sizeY": 8,
-      "row": 14,
-      "col": 0
     }
   ]
 }

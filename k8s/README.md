@@ -160,6 +160,8 @@ kubectl -n egisz-corp port-forward svc/airflow-webserver 8080:8080
 
 Манифест: `k8s/metabase.yaml`. Витрина и поля: `docs/METABASE.md`. Подключение к PostgreSQL из пода: хост `postgres`, порт `5432`, БД/пользователь из `postgres-credentials`.
 
+Вход в UI Metabase (первый администратор): **`admin@egisz.local`** / **`egisz`** — Secret `metabase-admin` (пример: `k8s/metabase-admin-secret.example.yaml`).
+
 После старта пода выполняются `metabase/provision.sh` → `setup-dashboards.sh` (JSON из `metabase_dashboards/`). Дашборды создаются **в корне личной коллекции** администратора (`/api/user/current` → `personal_collection_id`), чтобы они отображались сразу при открытии **«Персональная коллекция …»** в сайдбаре.
 
 Полная проверка витрины + Metabase из репозитория:
@@ -182,7 +184,10 @@ kubectl -n egisz-corp port-forward svc/postgres 5432:5432
 
 ### Config UI и Metabase (localhost)
 
-В `k8s/conf-ui.yaml` и `k8s/metabase.yaml` сервисы объявлены как **NodePort**: `8080:30808/TCP`, `3000:30300/TCP` (см. `kubectl -n egisz-corp get svc`). Для доступа с Windows через **стандартные порты localhost** (`5432`, `8080`, `3000`) без ручного набора NodePort:
+В `k8s/conf-ui.yaml` и `k8s/metabase.yaml` сервисы объявлены как **NodePort**: `8080:30808/TCP`, `3000:30300/TCP` (см. `kubectl -n egisz-corp get svc`). Для доступа с Windows через **стандартные порты localhost** `8080` и `3000`:
+
+- **`.\start.ps1 -Action deploy`**, **`apply`** и **`reset-deploy`** по завершении сами поднимают `kubectl port-forward` на **conf-ui:8080 → localhost:8080** и **metabase:3000 → localhost:3000** (без Postgres на `5432`, чтобы не конфликтовать с локальным экземпляром; в фоне, как `web -BackgroundPortForward`) и открывают браузер. Чтобы этого не делать (например, CI): **`-SkipPortForwardAfterDeploy`**.
+- Вручную в любой момент:
 
 ```powershell
 .\start.ps1 -Action web
@@ -190,7 +195,7 @@ kubectl -n egisz-corp port-forward svc/postgres 5432:5432
 .\start.ps1 -Action forward
 ```
 
-Скрипт запускает три окна PowerShell с `kubectl port-forward` (сервисы `postgres`, `conf-ui`, `metabase`) и открывает браузер на `http://127.0.0.1:8080/` и `http://127.0.0.1:3000/`. Окна держите открытыми на время работы. Если порт `5432` на ПК занят другим процессом: `.\start.ps1 -Action web -SkipPostgresPortForward`.
+Команда **`web` / `forward`** поднимает ещё и **postgres:5432 → localhost:5432** (три процесса kubectl; при `-BackgroundPortForward` — без лишних окон). Окна держите открытыми на время работы, если не использовали фон. Если порт `5432` на ПК занят: `.\start.ps1 -Action web -SkipPostgresPortForward`.
 
 ### Firebird с хоста Windows в под Config UI
 

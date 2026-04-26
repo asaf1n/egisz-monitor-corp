@@ -1,5 +1,6 @@
 #!/bin/bash
 set -euo pipefail
+# Администратор Metabase: из k8s Secret metabase-admin → METABASE_ADMIN_EMAIL / METABASE_ADMIN_PASSWORD (репозиторий: admin@egisz.local / egisz).
 
 MB_URL="${MB_URL:-http://metabase:3000}"
 ADMIN_EMAIL="${METABASE_ADMIN_EMAIL:-${METABASE_ADMIN_USER:-}}"

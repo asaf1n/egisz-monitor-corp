@@ -29,5 +29,5 @@ etl:
   source_query: null
 
 metabase:
-  # С ПК при port-forward Metabase на localhost:3000 (см. .\start.ps1 -Action web)
+  # С ПК при port-forward Metabase на localhost:3000 (см. .\start.ps1 -Action web). Вход в Metabase: admin@egisz.local / egisz.
   site_url: "http://127.0.0.1:3000"

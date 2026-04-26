@@ -33,4 +33,5 @@ etl:
   source_query: null
 
 metabase:
+  # Site URL в настройках Metabase. Учётка администратора UI: admin@egisz.local / egisz (k8s: Secret metabase-admin).
   site_url: "http://localhost:3000"

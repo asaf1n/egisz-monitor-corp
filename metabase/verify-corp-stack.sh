@@ -1,5 +1,6 @@
 #!/bin/bash
 # Проверка витрины Postgres + наличия коллекции/дашбордов EGISZ в Metabase (запуск из пода Metabase).
+# Логин API: METABASE_ADMIN_EMAIL / METABASE_ADMIN_PASSWORD из Secret metabase-admin (репозиторий: admin@egisz.local / egisz).
 set -euo pipefail
 
 MB_URL="${MB_URL:-http://localhost:3000}"
@@ -81,4 +82,30 @@ fi
 
 log "Metabase OK (${ND} dashboard(s) in personal collection root, expected files=${EXPECTED})"
 log "В UI: откройте «Персональная коллекция …» (collection_id=${ROOT_ID}) — дашборды на этой странице."
+
+# Сверка числа карточек на управленческом дашборде с JSON в образе (ловит старый image :latest без пересборки).
+EXEC_JSON="/app/metabase_dashboards/09_executive.json"
+if [ -f "${EXEC_JSON}" ]; then
+  EXP_CARDS="$(jq '.cards | length' "${EXEC_JSON}")"
+  EXEC_NAME="$(jq -r '.name' "${EXEC_JSON}")"
+  EXEC_DID="$(echo "${ITEMS}" | mb_list | jq -r --arg n "${EXEC_NAME}" '.[] | select(.model == "dashboard" and .name == $n) | .id' | head -n1)"
+  if [ -z "${EXEC_DID}" ] || [ "${EXEC_DID}" = "null" ]; then
+    log "FAIL: dashboard \"${EXEC_NAME}\" not in personal collection (provisioning may have failed)"
+    exit 1
+  fi
+  DASH_JSON="$(curl -sS "${MB_URL}/api/dashboard/${EXEC_DID}" -H "X-Metabase-Session: ${TOKEN}")"
+  GOT_CARDS="$(echo "${DASH_JSON}" | jq '
+    if (.dashcards | type == "array") and ((.dashcards | length) > 0) then (.dashcards | length)
+    elif (.ordered_cards | type == "array") then (.ordered_cards | length)
+    else 0 end
+  ')"
+  GOT_CARDS="$(echo "${GOT_CARDS}" | tr -d '[:space:]')"
+  GOT_CARDS="${GOT_CARDS:-0}"
+  if ! [ "${GOT_CARDS}" -eq "${EXP_CARDS}" ] 2>/dev/null; then
+    log "FAIL: \"${EXEC_NAME}\" has ${GOT_CARDS} dashcards, image JSON expects ${EXP_CARDS} — пересоберите образ Metabase (metabase_dashboards внутри образа) и перезапустите deployment."
+    exit 1
+  fi
+  log "Dashboard \"${EXEC_NAME}\" OK (${GOT_CARDS} dashcards)"
+fi
+
 exit 0

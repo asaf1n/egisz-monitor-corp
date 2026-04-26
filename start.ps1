@@ -3,10 +3,10 @@
 # Requires: Docker, kubectl; optional: kind (https://kind.sigs.k8s.io/) for auto cluster create.
 #
 # deploy: kind cluster egisz-local if needed, docker build, load images into kind, apply manifests,
-# schema for egisz_reports, airflow DB, Metabase default admin + provision dashboards.
+# schema for egisz_reports, airflow DB, Metabase default admin + provision dashboards; then port-forward 8080/3000 + browser (unless -SkipPortForwardAfterDeploy).
 
 param(
-    [ValidateSet("deploy", "reset-deploy", "build", "apply", "status", "verify", "web", "forward", "stop-forward", "compose-up", "compose-down", "test", "help")]
+    [ValidateSet("deploy", "reset-deploy", "build", "apply", "status", "verify", "web", "forward", "stop-forward", "compose-up", "compose-down", "metabase-provision-local", "test", "help")]
     [string]$Action = "deploy",
     [switch]$SkipKindCluster,
     # With -Action compose-down: also remove Compose volumes (wipes corp Postgres data volume).
@@ -15,8 +15,8 @@ param(
     [switch]$SkipPostgresPortForward,
     # With -Action web / forward: kubectl port-forward in background (hidden kubectl.exe, no extra PS windows). PIDs: .egisz-corp-port-forward.pids; stop: -Action stop-forward
     [switch]$BackgroundPortForward,
-    # With -Action deploy / apply / reset-deploy: after smoke tests, start port-forward (default: same as web -BackgroundPortForward). Use -BackgroundPortForward:$false for three visible PS windows.
-    [switch]$WithPortForward
+    # With -Action deploy / apply / reset-deploy: skip automatic port-forward (conf-ui 8080, Metabase 3000 on localhost + open browser). By default those actions always start forward (background kubectl unless -BackgroundPortForward:$false).
+    [switch]$SkipPortForwardAfterDeploy
 )
 
 $ErrorActionPreference = "Stop"
@@ -113,12 +113,13 @@ function Show-Help {
     Write-Host @'
 egisz-monitor-corp\start.ps1
 
-  deploy (default)  kind (if needed) + docker build + kubectl apply + DB schema + smoke HTTP + summary (optional: -WithPortForward)
-  reset-deploy      delete namespace egisz-corp (full reset), then same as deploy + smoke tests (optional: -WithPortForward)
+  deploy (default)  kind (if needed) + docker build + kubectl apply + DB schema + smoke HTTP + port-forward 8080/3000 + browser
+  reset-deploy      delete namespace egisz-corp (full reset), then same as deploy + smoke tests + port-forward 8080/3000 + browser
   build             docker build only (K8s images)
-  apply             kubectl only (images already built / loaded into kind if needed) (optional: -WithPortForward)
+  apply             kubectl only (images already built / loaded into kind if needed) + port-forward 8080/3000 + browser
   compose-up        Postgres from THIS repo only: docker compose --project-directory <repo>
   compose-down      docker compose down (use -RemoveComposeVolumes to wipe corp DB volume)
+  metabase-provision-local  docker build Metabase + setup-dashboards.sh к Metabase на localhost:3000 (см. metabase/provision-local.ps1 - параметры)
   status            kubectl get pods,svc -n egisz-corp
   web | forward     port-forward to localhost (Postgres 5432, conf-ui 8080, Metabase 3000); opens browser (Docker Desktop)
   stop-forward      stop background kubectl port-forwards started with web -BackgroundPortForward
@@ -131,12 +132,13 @@ egisz-monitor-corp\start.ps1
 Parameters:
   -SkipKindCluster         do not run kind create; kubectl cluster-info must work
   -RemoveComposeVolumes    only with compose-down: docker compose down -v
-  -WithPortForward         with deploy / apply / reset-deploy: after smoke, kubectl port-forward to localhost + open browser (default: background kubectl). Optional -BackgroundPortForward:$false for three PS windows instead.
+  -SkipPortForwardAfterDeploy   only with deploy / apply / reset-deploy: do not start kubectl port-forward or open browser after verify
+  (after deploy/apply/reset-deploy: conf-ui 8080 + Metabase 3000 only, not Postgres 5432; use -BackgroundPortForward:$false for three visible PS windows; full stack incl. Postgres: .\start.ps1 -Action web)
 
 Compose always uses COMPOSE_PROJECT_NAME=egisz-monitor-corp and repo root; DB volume is
   egisz_monitor_corp_postgres_data (not the sibling egisz-monitor stack).
 
-K8s from your PC (Docker Desktop / kind): browser uses NodePorts 30808 (conf-ui) and 30300 (Metabase), not 8080/3000 on localhost unless you port-forward. Inside the cluster, services stay on 8080 / 3000 / 5432 (see deploy summary).
+K8s from your PC (Docker Desktop / kind): after deploy/apply, start.ps1 runs port-forward so http://127.0.0.1:8080 and :3000 work. Alternatively use NodePorts 30808 / 30300 without port-forward (see deploy summary).
 
 Generated each deploy/apply (under k8s\):
   Postgres: database egisz_reports, user egisz, password egisz
@@ -233,6 +235,7 @@ stringData:
   POSTGRES_DB: "egisz_reports"
 '@
     $mb = @'
+# Metabase UI / API провижининг (совпадает с k8s/metabase-admin-secret.example.yaml).
 apiVersion: v1
 kind: Secret
 metadata:
@@ -498,9 +501,7 @@ function Invoke-K8sSmokeTests {
         Write-Host ('[smoke] OK {0} -> {1}' -f $t.Name, $t.Url) -ForegroundColor Green
     }
     Write-Host ""
-    Write-Host "From this PC's browser: apply/deploy only update the cluster; they do NOT start port-forward." -ForegroundColor Yellow
-    Write-Host "  .\start.ps1 -Action web -BackgroundPortForward" -ForegroundColor White
-    Write-Host "  then http://127.0.0.1:8080/ (Config UI) and http://127.0.0.1:3000/ (Metabase)." -ForegroundColor White
+    Write-Host "Next: deploy/apply/reset-deploy start port-forward to http://127.0.0.1:8080/ and :3000/ automatically (unless -SkipPortForwardAfterDeploy)." -ForegroundColor DarkGray
     Write-Host ""
 }
 
@@ -508,8 +509,8 @@ function Show-K8sNetworkLegend {
     Write-Host ""
     Write-Host "==================================================================" -ForegroundColor Yellow
     Write-Host " Docker Desktop (Windows): NodePort on 127.0.0.1 often does NOT work." -ForegroundColor Yellow
-    Write-Host " Open Config UI + Metabase in your browser with standard ports:" -ForegroundColor Yellow
-    Write-Host "   .\start.ps1 -Action web -BackgroundPortForward   (recommended: no extra PS windows)" -ForegroundColor White
+    Write-Host " Standard ports 8080 / 3000: already started after deploy/apply (or run web / forward)." -ForegroundColor Yellow
+    Write-Host "   .\start.ps1 -Action web -BackgroundPortForward   (background kubectl, no extra PS windows)" -ForegroundColor White
     Write-Host "   .\start.ps1 -Action web   (alias: forward; opens 3 PS windows with port-forward)" -ForegroundColor DarkGray
     Write-Host "==================================================================" -ForegroundColor Yellow
     Write-Host ""
@@ -565,21 +566,24 @@ function Invoke-CorpStopPortForward {
 function Invoke-CorpPortForwardIfRequestedAfterK8s {
     param(
         [bool]$BackgroundSwitchPresent,
-        [bool]$BackgroundEnabled
+        [bool]$BackgroundEnabled,
+        # After deploy/apply: forward only conf-ui + Metabase (8080, 3000), not Postgres — avoids localhost:5432 clashes.
+        [switch]$ConfAndMetabaseOnly
     )
-    if (-not $WithPortForward) { return }
     if ($BackgroundSwitchPresent -and -not $BackgroundEnabled) {
-        Invoke-CorpWebPortForward
+        Invoke-CorpWebPortForward -ConfAndMetabaseOnly:$ConfAndMetabaseOnly
     } else {
-        Invoke-CorpWebPortForward -ForceBackground
+        Invoke-CorpWebPortForward -ForceBackground -ConfAndMetabaseOnly:$ConfAndMetabaseOnly
     }
 }
 
 function Invoke-CorpWebPortForward {
     param(
-        [switch]$ForceBackground
+        [switch]$ForceBackground,
+        [switch]$ConfAndMetabaseOnly
     )
     $useBackground = [bool]($ForceBackground -or $BackgroundPortForward)
+    $forwardPostgres = (-not $ConfAndMetabaseOnly) -and (-not $SkipPostgresPortForward)
     Write-Banner "EGISZ Corp - standard ports (kubectl port-forward)"
     if (-not (Test-KubectlResponds)) {
         Write-Host "ERROR: kubectl cluster-info failed." -ForegroundColor Red
@@ -605,7 +609,7 @@ function Invoke-CorpWebPortForward {
         Write-Host "  Stop: .\start.ps1 -Action stop-forward" -ForegroundColor Gray
         Invoke-CorpStopPortForward -Quiet
         $startedPids = New-Object System.Collections.ArrayList
-        if (-not $SkipPostgresPortForward) {
+        if ($forwardPostgres) {
             cmd /c 'kubectl -n egisz-corp get svc postgres 1>nul 2>nul'
             if ($LASTEXITCODE -eq 0) {
                 Write-Host "  Postgres -> localhost:5432" -ForegroundColor Gray
@@ -619,6 +623,8 @@ function Invoke-CorpWebPortForward {
             } else {
                 Write-Host "WARN: svc/postgres not found; skipping Postgres port-forward." -ForegroundColor Yellow
             }
+        } elseif ($ConfAndMetabaseOnly) {
+            Write-Host "Postgres port-forward skipped (deploy/apply default: conf-ui + Metabase only)." -ForegroundColor DarkGray
         } else {
             Write-Host "SkipPostgresPortForward: conf-ui + Metabase only." -ForegroundColor Yellow
         }
@@ -641,7 +647,7 @@ function Invoke-CorpWebPortForward {
         Set-Content -LiteralPath $pidFile -Value (($startedPids | ForEach-Object { $_.ToString() }) -join "`n") -Encoding ascii
         Write-Host ("[forward] PIDs saved to {0}" -f $pidFile) -ForegroundColor DarkGray
     } else {
-        if (-not $SkipPostgresPortForward) {
+        if ($forwardPostgres) {
             cmd /c 'kubectl -n egisz-corp get svc postgres 1>nul 2>nul'
             if ($LASTEXITCODE -eq 0) {
                 Write-Host "Starting three PowerShell windows (leave them open while you use the stack)." -ForegroundColor Cyan
@@ -657,7 +663,11 @@ function Invoke-CorpWebPortForward {
                 Write-Host "  Window 2: $pfMeta" -ForegroundColor Gray
             }
         } else {
-            Write-Host "SkipPostgresPortForward: starting two windows (conf-ui + Metabase only)." -ForegroundColor Yellow
+            if ($ConfAndMetabaseOnly) {
+                Write-Host "Postgres port-forward skipped (conf-ui + Metabase only)." -ForegroundColor DarkGray
+            } else {
+                Write-Host "SkipPostgresPortForward: starting two windows (conf-ui + Metabase only)." -ForegroundColor Yellow
+            }
             Write-Host "  Window 1: $pfConf" -ForegroundColor Gray
             Write-Host "  Window 2: $pfMeta" -ForegroundColor Gray
         }
@@ -726,7 +736,7 @@ function Show-DeployInfo {
     Write-Host "  Postgres: db=egisz_reports user=egisz pass=egisz (in cluster: postgres:5432)" -ForegroundColor White
     Write-Host '  Metabase: admin@egisz.local / egisz - dashboards in root of Personal collection' -ForegroundColor White
     Write-Host "  Firebird: host.docker.internal:3050 in k8s\local\egisz_corp.yaml (rebuild conf-ui image for libfbclient)" -ForegroundColor White
-    Write-Host "  Standard ports on PC:  .\start.ps1 -Action web   (optional: web -BackgroundPortForward, no extra PS windows)" -ForegroundColor White
+    Write-Host "  Standard ports: deploy/apply already forwarded 8080/3000 unless you used -SkipPortForwardAfterDeploy; or run: .\start.ps1 -Action web" -ForegroundColor White
     Write-Host ""
     Write-Host "ETL: kubectl -n egisz-corp exec -it deploy/conf-ui -- egisz-corp sync" -ForegroundColor Yellow
     Write-Banner "Complete" Green
@@ -737,6 +747,16 @@ switch ($Action) {
     "build" { Invoke-DockerBuild }
     "compose-up" { Invoke-CorpComposeUp }
     "compose-down" { Invoke-CorpComposeDown }
+    "metabase-provision-local" {
+        Warn-IfNestedUnderSiblingMonitor
+        $prov = Join-Path $Root "metabase\provision-local.ps1"
+        if (-not (Test-Path $prov)) {
+            Write-Host "ERROR: Missing $prov" -ForegroundColor Red
+            exit 1
+        }
+        & $prov
+        if ($LASTEXITCODE -ne 0) { exit 1 }
+    }
     "test" { Invoke-PythonTests }
     "verify" {
         Warn-IfNestedUnderSiblingMonitor
@@ -750,7 +770,9 @@ switch ($Action) {
         Show-DeployInfo
         Invoke-K8sSmokeTests
         Invoke-K8sCorpStackVerify
-        Invoke-CorpPortForwardIfRequestedAfterK8s -BackgroundSwitchPresent:$PSBoundParameters.ContainsKey('BackgroundPortForward') -BackgroundEnabled:$BackgroundPortForward
+        if (-not $SkipPortForwardAfterDeploy) {
+            Invoke-CorpPortForwardIfRequestedAfterK8s -BackgroundSwitchPresent:$PSBoundParameters.ContainsKey('BackgroundPortForward') -BackgroundEnabled:$BackgroundPortForward -ConfAndMetabaseOnly
+        }
     }
     "status" {
         kubectl -n egisz-corp get pods,svc -o wide
@@ -778,7 +800,9 @@ switch ($Action) {
         Show-DeployInfo
         Invoke-K8sSmokeTests
         Invoke-K8sCorpStackVerify
-        Invoke-CorpPortForwardIfRequestedAfterK8s -BackgroundSwitchPresent:$PSBoundParameters.ContainsKey('BackgroundPortForward') -BackgroundEnabled:$BackgroundPortForward
+        if (-not $SkipPortForwardAfterDeploy) {
+            Invoke-CorpPortForwardIfRequestedAfterK8s -BackgroundSwitchPresent:$PSBoundParameters.ContainsKey('BackgroundPortForward') -BackgroundEnabled:$BackgroundPortForward -ConfAndMetabaseOnly
+        }
     }
     "reset-deploy" {
         Warn-IfNestedUnderSiblingMonitor
@@ -790,6 +814,8 @@ switch ($Action) {
         Show-DeployInfo
         Invoke-K8sSmokeTests
         Invoke-K8sCorpStackVerify
-        Invoke-CorpPortForwardIfRequestedAfterK8s -BackgroundSwitchPresent:$PSBoundParameters.ContainsKey('BackgroundPortForward') -BackgroundEnabled:$BackgroundPortForward
+        if (-not $SkipPortForwardAfterDeploy) {
+            Invoke-CorpPortForwardIfRequestedAfterK8s -BackgroundSwitchPresent:$PSBoundParameters.ContainsKey('BackgroundPortForward') -BackgroundEnabled:$BackgroundPortForward -ConfAndMetabaseOnly
+        }
     }
 }

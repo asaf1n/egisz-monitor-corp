@@ -80,6 +80,7 @@ SELECT
     f.errors_json,
     f.registration_date,
     f.processed_at,
+    DATE(COALESCE(f.registration_date, f.processed_at)) AS chart_day,
     COALESCE(NULLIF(TRIM(dc.jname), ''), 'Клиника JID: ' || COALESCE(f.jid::varchar, 'неизвестен')) AS clinic_name,
     dc.jinn AS clinic_inn,
     dc.fir_oid AS clinic_mo_oid
@@ -153,6 +154,7 @@ INSERT INTO dim_column_display_labels (source_object, source_column, display_lab
     ('v_egisz_transactions_enriched', 'errors_json', 'Ошибки JSON'),
     ('v_egisz_transactions_enriched', 'registration_date', 'Дата регистрации'),
     ('v_egisz_transactions_enriched', 'processed_at', 'Обработано'),
+    ('v_egisz_transactions_enriched', 'chart_day', 'День (тренд)'),
     ('v_egisz_transactions_enriched', 'clinic_name', 'Наименование клиники'),
     ('v_egisz_transactions_enriched', 'clinic_inn', 'ИНН клиники'),
     ('v_egisz_transactions_enriched', 'clinic_mo_oid', 'OID клиники'),
@@ -179,6 +181,7 @@ SELECT
     errors_json AS "Ошибки JSON",
     registration_date AS "Дата регистрации",
     processed_at AS "Обработано",
+    chart_day AS "День (тренд)",
     clinic_name AS "Наименование клиники",
     clinic_inn AS "ИНН клиники",
     clinic_mo_oid AS "OID клиники",

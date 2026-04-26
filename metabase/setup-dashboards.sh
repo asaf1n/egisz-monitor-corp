@@ -2,14 +2,17 @@
 set -euo pipefail
 
 METABASE_URL="${METABASE_URL:-http://localhost:3000}"
-ADMIN_EMAIL="${ADMIN_EMAIL:-admin@egisz-corp.local}"
-ADMIN_PASSWORD="${ADMIN_PASSWORD:-ChangeMeNow123!}"
+# Fallback, если переменные не заданы (в поде k8s задаются из Secret metabase-admin).
+ADMIN_EMAIL="${ADMIN_EMAIL:-admin@egisz.local}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-egisz}"
 DB_NAME="${DB_NAME:-egisz_reports}"
 DB_USER="${DB_USER:-egisz}"
 DB_PASSWORD="${DB_PASSWORD:-egisz}"
 DB_DISPLAY_NAME="${DB_DISPLAY_NAME:-EGISZ Corp DWH}"
 PGHOST="${PGHOST:-postgres}"
 PGPORT="${PGPORT:-5432}"
+# Каталог с JSON дашбордов (в образе /app/metabase_dashboards; локально можно смонтировать репозиторий).
+DASHBOARDS_DIR="${METABASE_DASHBOARDS_DIR:-/app/metabase_dashboards}"
 
 ROOT_COLLECTION_NAME="EGISZ Corp Monitoring"
 
@@ -513,7 +516,7 @@ delete_existing_corp_dashboards_and_cards() {
   items_json="$(api_request GET "/api/collection/${coll}/items")"
   jq_items="$(echo "${items_json}" | mb_normalize_list)"
 
-  for dashboard_file in /app/metabase_dashboards/*.json; do
+  for dashboard_file in "${DASHBOARDS_DIR}"/*.json; do
     [ -f "${dashboard_file}" ] || continue
     dname="$(jq -r '.name' "${dashboard_file}")"
     for dash_id in $(echo "${jq_items}" | jq -r --arg n "$dname" '.[] | select(.model == "dashboard" and .name == $n) | .id'); do
@@ -529,7 +532,7 @@ delete_existing_corp_dashboards_and_cards() {
   local card_names
   card_names="$(
     {
-      for dashboard_file in /app/metabase_dashboards/*.json; do
+      for dashboard_file in "${DASHBOARDS_DIR}"/*.json; do
         [ -f "${dashboard_file}" ] || continue
         jq -r '.cards[]?.name // empty' "${dashboard_file}" 2>/dev/null || true
       done
@@ -548,7 +551,7 @@ delete_existing_corp_dashboards_and_cards() {
 
 delete_existing_corp_dashboards_and_cards "${ROOT_COLLECTION_ID}"
 
-for dashboard_file in /app/metabase_dashboards/*.json; do
+for dashboard_file in "${DASHBOARDS_DIR}"/*.json; do
   if [ -f "$dashboard_file" ]; then
     log_info "Provisioning $dashboard_file..."
     create_dashboard "$dashboard_file" "$ROOT_COLLECTION_ID"
