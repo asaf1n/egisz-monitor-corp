@@ -64,3 +64,5 @@
 | **Metabase** | `metabase:3000` | Аналитическая платформа и дашборды. |
 | **Config UI** | `corp-web:8080` | Веб-интерфейс управления конфигурацией. |
 | **Airflow** | `airflow-webserver` | Планировщик и мониторинг ETL-задач. |
+
+**Образ Metabase в k8s:** `egisz-corp-metabase:local`, `IfNotPresent` — из локального `docker build` и тега `:local` (см. `start.ps1 -Action build`). Нет `/app/verify-corp-stack.sh` в поде: `.\metabase\force-k8s-mb-image.ps1` или `build` + `apply`/`deploy`.
