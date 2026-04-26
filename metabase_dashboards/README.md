@@ -1,19 +1,17 @@
-# Первичный набор дашбордов Metabase (Corp)
+# Первичный набор дашбордов (EGISZ, Metabase)
 
-Каталог **целиком копируется в Docker-образ** (`../metabase/Dockerfile` → `/app/metabase_dashboards/`). Скрипт `../metabase/setup-dashboards.sh` (вызов из `../metabase/provision.sh` при старте пода) читает **все** `*.json` здесь и создаёт дашборды с вложенными native SQL-карточками в **корне** личной коллекции администратора Metabase.
+Каталог **целиком копируется в Docker-образ** (`../metabase/Dockerfile` → `/app/metabase_dashboards/`). Скрипт `../metabase/setup-dashboards.sh` (вызов из `../metabase/provision.sh` при старте пода) читает **все** `*.json` и создаёт дашборды в **корне** личной коллекции администратора. Перед импортом в коллекции удаляются все существовавшие дашборды и сохранённые вопросы (см. `wipe_corp_root_collection` в `setup-dashboards.sh`).
 
-Для смены отчётов правьте эти файлы, затем пересоберите образ `egisz-corp-metabase` и перезапустите Metabase, либо для локального цикла без пересборки k8s используйте `../metabase/provision-local.ps1` (примонтированный каталог `metabase_dashboards`).
-
-| Файл | `name` в JSON (как в UI) |
-|------|-------------------------|
-| `01_operational.json` | Оперативный мониторинг (Corp) |
-| `02_service.json` | Сервис интеграции (Corp) |
-| `03_errors.json` | Ошибки и разбор (Corp) |
-| `04_documents_no_response.json` | Документы без ответа (Corp) |
-| `05_trends.json` | Динамика и тренды (Corp) |
-| `06_quality.json` | Качество интеграции (Corp) |
-| `07_errors_deep.json` | Глубокий анализ ошибок (Corp) |
-| `08_pending_agg.json` | Аналитика зависших документов (Corp) |
-| `09_executive.json` | Управленческий дашборд (Corp) |
+| Файл | Имя дашборда в Metabase (`name`) |
+|------|----------------------------------|
+| `01_operational.json` | Оперативный мониторинг |
+| `02_service.json` | Сервис интеграции |
+| `03_errors.json` | Ошибки и разбор |
+| `04_documents_no_response.json` | Документы без ответа |
+| `05_trends.json` | Тренды и динамика |
+| `06_quality.json` | Качество данных |
+| `07_errors_deep.json` | Глубокий анализ ошибок |
+| `08_pending_agg.json` | Агрегация ожидающих |
+| `09_executive.json` | Управленческий дашборд |
 
 Подробности: `../docs/METABASE.md`.

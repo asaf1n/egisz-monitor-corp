@@ -159,6 +159,9 @@ function Invoke-DockerBuild {
     Write-Host "[Docker] Building egisz-corp-metabase..." -ForegroundColor Yellow
     docker build -f metabase/Dockerfile -t egisz-corp-metabase:latest $Root
     if ($LASTEXITCODE -ne 0) { exit 1 }
+    # Тег :local = тот же digest, что и только что собранный :latest. В k8s/metabase.yaml deployment ссылается на :local (imagePullPolicy: Never), иначе нода держит устаревший :latest.
+    docker tag egisz-corp-metabase:latest egisz-corp-metabase:local
+    if ($LASTEXITCODE -ne 0) { exit 1 }
     Write-Host "[Docker] OK" -ForegroundColor Green
 }
 
@@ -217,6 +220,8 @@ function Invoke-KindLoadImagesIfNeeded {
     kind load docker-image egisz-conf-ui:corp-web --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }
     kind load docker-image egisz-corp-metabase:latest --name $name
+    if ($LASTEXITCODE -ne 0) { exit 1 }
+    kind load docker-image egisz-corp-metabase:local --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }
     Write-Host "[kind] Images loaded." -ForegroundColor Green
 }
@@ -308,7 +313,11 @@ function Publish-MetabaseImageToDockerDesktopK8s {
     if ($LASTEXITCODE -ne 0) { return }
     $stamp = [DateTime]::UtcNow.ToString("yyyyMMddHHmmss")
     $img = "egisz-corp-metabase:latest-$stamp"
-    docker tag egisz-corp-metabase:latest $img
+    # Предпочитаем :local (см. Invoke-DockerBuild) — тот же digest, что свежая сборка; иначе :latest
+    $base = "egisz-corp-metabase:local"
+    cmd /c "docker image inspect $($base) 1>nul 2>nul"
+    if ($LASTEXITCODE -ne 0) { $base = "egisz-corp-metabase:latest" }
+    docker tag $base $img
     if ($LASTEXITCODE -ne 0) { return }
     kubectl -n egisz-corp set image deployment/metabase "metabase=$img"
     if ($LASTEXITCODE -ne 0) { return }

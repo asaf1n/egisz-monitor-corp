@@ -1,6 +1,6 @@
 {
-  "name": "Качество интеграции (Corp)",
-  "description": "Относительные метрики успешности (Success Rate) по клиникам и типам СЭМД.",
+  "name": "Качество данных",
+  "description": "Success rate по клиникам и типам СЭМД; контроль сопоставлений JID и согласованности OID в факте с справочником клиник.",
   "parameters": [],
   "cards": [
     {
@@ -58,6 +58,30 @@
       "sizeY": 8,
       "row": 0,
       "col": 12
+    },
+    {
+      "name": "JID / OID: целостность",
+      "description": "Счётчики строк без JID и с расхождением OID в факте (OID организации) и в справочнике (OID клиники), оба заданы.",
+      "table_ref": "v_egisz_transactions_enriched_ui",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT (SELECT COUNT(*)::bigint FROM public.v_egisz_transactions_enriched_ui WHERE NULLIF(BTRIM(\"JID клиники\"::text), '') IS NULL) AS \"Транз. без JID\", (SELECT COUNT(*)::bigint FROM public.v_egisz_transactions_enriched_ui WHERE NULLIF(BTRIM(\"OID организации\"::text), '') IS NOT NULL AND NULLIF(BTRIM(\"OID клиники\"::text), '') IS NOT NULL AND BTRIM(COALESCE(\"OID организации\"::text, '')) <> BTRIM(COALESCE(\"OID клиники\"::text, ''))) AS \"Несовпадение OID факта и клиники\"",
+          "template-tags": {}
+        },
+        "database": 1
+      },
+      "display": "table",
+      "visualization_settings": {
+        "column_settings": {
+          "[\"name\",\"Транз. без JID\"]": { "column_title": "Транз. без JID", "number_separators": ".", "decimals": 0 },
+          "[\"name\",\"Несовпадение OID факта и клиники\"]": { "column_title": "Несовп. OID", "number_separators": ".", "decimals": 0 }
+        }
+      },
+      "sizeX": 24,
+      "sizeY": 3,
+      "row": 8,
+      "col": 0
     }
   ]
 }

@@ -1,6 +1,6 @@
 {
-  "name": "Ошибки и разбор (Corp)",
-  "description": "Ошибки парсинга и последние ошибки факта (JSON).",
+  "name": "Ошибки и разбор",
+  "description": "Ошибки парсинга (stg_parse_errors) и последние строки витрины со статусом error (текст из errors_json).",
   "parameters": [],
   "cards": [
     {

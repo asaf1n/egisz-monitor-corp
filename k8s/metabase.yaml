@@ -18,6 +18,23 @@ spec:
   selector:
     app.kubernetes.io/name: metabase
 ---
+# Docker Desktop / k8s: внешний порт 3000 на 127.0.0.1 (бес kubectl port-forward). Если 3000 занят на хосте — порт-форвард: sm. docs/METABASE.md
+apiVersion: v1
+kind: Service
+metadata:
+  name: metabase-lb
+  namespace: egisz-corp
+  labels:
+    app.kubernetes.io/name: metabase
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 3000
+      targetPort: 3000
+      name: http
+  selector:
+    app.kubernetes.io/name: metabase
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -27,6 +44,9 @@ metadata:
     app.kubernetes.io/name: metabase
 spec:
   replicas: 1
+  # hostPort:3000 не совместим с RollingUpdate: следующий pod не сможет занять порт, пока жив старый.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: metabase
@@ -37,11 +57,15 @@ spec:
     spec:
       containers:
         - name: metabase
-          image: egisz-corp-metabase:latest
-          imagePullPolicy: IfNotPresent
+          # Сборка: docker build -f metabase/Dockerfile -t egisz-corp-metabase:latest . && docker tag egisz-corp-metabase:latest egisz-corp-metabase:local
+          # Не используем :latest в кластере: кэш ноды (IfNotPresent) оставлял старый digest без /app/verify-corp-stack.sh. Тег :local — только из вашей docker build.
+          image: egisz-corp-metabase:local
+          imagePullPolicy: Never
           ports:
             - containerPort: 3000
               name: http
+              # Локальная отладка (Docker Desktop / kind): с хоста — http://127.0.0.1:3000/ без port-forward
+              hostPort: 3000
           env:
             - name: LANG
               value: "C.UTF-8"
@@ -85,11 +109,8 @@ spec:
               value: "EGISZ Corp DWH"
             - name: METABASE_SITE_NAME
               value: "EGISZ Monitor Corp"
-            # Если на главной Metabase (/) постоянно «Произошла ошибка», а коллекции открываются:
-            # выставьте тот же origin, что в адресной строке браузера (см. docs/METABASE.md).
-            # Примеры: port-forward http://127.0.0.1:3000 ; NodePort http://127.0.0.1:30300
-            # - name: MB_SITE_URL
-            #   value: "http://127.0.0.1:3000"
+            - name: MB_SITE_URL
+              value: "http://127.0.0.1:3000"
           volumeMounts:
             - name: shared
               mountPath: /shared

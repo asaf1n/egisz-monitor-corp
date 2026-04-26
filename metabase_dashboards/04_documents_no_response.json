@@ -1,6 +1,6 @@
 {
-  "name": "Документы без ответа (Corp)",
-  "description": "СЭМД с DOCUMENTID в EGISZ_MESSAGES за окно ETL, без совпадения local_uid_semd в fact_egisz_transactions.",
+  "name": "Документы без ответа",
+  "description": "Исходящие с localUid, по которым в витрине нет зарегистрированного callback (нет строки fact с тем же local_uid_semd).",
   "parameters": [],
   "cards": [
     {

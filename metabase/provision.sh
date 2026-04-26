@@ -142,9 +142,9 @@ DASHBOARD_ID="$(curl -s "${MB_URL}/api/dashboard" \
     | [
         .[]
         | select(
-            .name == "Оперативный мониторинг (Corp)"
-            or .name == "Сервис интеграции (Corp)"
-            or .name == "Ошибки и разбор (Corp)"
+            .name == "Оперативный мониторинг"
+            or .name == "Сервис интеграции"
+            or .name == "Ошибки и разбор"
           )
       ]
     | sort_by(.id)

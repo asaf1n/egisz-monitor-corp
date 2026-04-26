@@ -509,51 +509,34 @@ else
   ROOT_COLLECTION_ID="$(create_collection "${ROOT_COLLECTION_NAME}" "EGISZ dashboards collection" "#509EE3")"
 fi
 
-# Повторный provision без сброса namespace создавал дубликаты дашбордов и saved questions в той же коллекции.
-delete_existing_corp_dashboards_and_cards() {
+# Очистка личной коллекции от всех дашбордов и карточек: при смене «имя в JSON» выборочное
+# удаление по старым названиям оставляло дубликаты; тут полный сброс перед импортом.
+wipe_corp_root_collection() {
   local coll="${1:-}"
   if [ -z "${coll}" ] || [ "${coll}" = "null" ]; then
     return 0
   fi
-  local items_json jq_items dname dash_id cname cid
-
-  items_json="$(api_request GET "/api/collection/${coll}/items")"
-  jq_items="$(echo "${items_json}" | mb_normalize_list)"
-
-  for dashboard_file in "${DASHBOARDS_DIR}"/*.json; do
-    [ -f "${dashboard_file}" ] || continue
-    dname="$(jq -r '.name' "${dashboard_file}")"
-    for dash_id in $(echo "${jq_items}" | jq -r --arg n "$dname" '.[] | select(.model == "dashboard" and .name == $n) | .id'); do
-      [ -z "${dash_id}" ] || [ "${dash_id}" = "null" ] && continue
-      log_info "Removing stale dashboard id=${dash_id} (${dname})"
-      api_request DELETE "/api/dashboard/${dash_id}" >/dev/null || true
-    done
+  local _pass items list id
+  for _pass in 1 2 3; do
+    items="$(api_request GET "/api/collection/${coll}/items")"
+    list="$(echo "${items}" | mb_normalize_list)"
+    while IFS= read -r id; do
+      [ -z "${id}" ] && continue
+      log_info "Removing prior dashboard id=${id}"
+      api_request DELETE "/api/dashboard/${id}" >/dev/null || true
+    done < <(echo "${list}" | jq -r '.[] | select(.model == "dashboard") | .id')
+    items="$(api_request GET "/api/collection/${coll}/items")"
+    list="$(echo "${items}" | mb_normalize_list)"
+    while IFS= read -r id; do
+      [ -z "${id}" ] && continue
+      log_info "Removing prior saved question (card) id=${id}"
+      api_request DELETE "/api/card/${id}" >/dev/null || true
+    done < <(echo "${list}" | jq -r '.[] | select(.model == "card") | .id')
   done
-
-  items_json="$(api_request GET "/api/collection/${coll}/items")"
-  jq_items="$(echo "${items_json}" | mb_normalize_list)"
-
-  local card_names
-  card_names="$(
-    {
-      for dashboard_file in "${DASHBOARDS_DIR}"/*.json; do
-        [ -f "${dashboard_file}" ] || continue
-        jq -r '.cards[]?.name // empty' "${dashboard_file}" 2>/dev/null || true
-      done
-      printf '%s\n' "Всего обработано за сегодня" "Успешно за сегодня" "% Ошибок за сегодня"
-    } | sort -u
-  )"
-  while IFS= read -r cname; do
-    [ -z "${cname}" ] && continue
-    for cid in $(echo "${jq_items}" | jq -r --arg n "$cname" '.[] | select(.model == "card" and .name == $n) | .id'); do
-      [ -z "${cid}" ] || [ "${cid}" = "null" ] && continue
-      log_info "Removing stale card id=${cid} (${cname})"
-      api_request DELETE "/api/card/${cid}" >/dev/null || true
-    done
-  done <<< "${card_names}"
+  log_info "Root collection ${coll} cleared; importing from ${DASHBOARDS_DIR}"
 }
 
-delete_existing_corp_dashboards_and_cards "${ROOT_COLLECTION_ID}"
+wipe_corp_root_collection "${ROOT_COLLECTION_ID}"
 
 for dashboard_file in "${DASHBOARDS_DIR}"/*.json; do
   if [ -f "$dashboard_file" ]; then
