@@ -1,4 +1,8 @@
 #!/bin/bash
+# Единственный путь поставки отчётов EGISZ в Metabase: все дашборды и native-карточки из
+# DASHBOARDS_DIR/*.json (см. metabase_dashboards/README.md). Пустой инстанс после первой настройки
+# админа + готовой схемы Postgres — этот скрипт создаёт весь набор. Повторы: удаление одноимённых
+# сущностей в персональной коллекции, затем повторный импорт.
 set -euo pipefail
 
 METABASE_URL="${METABASE_URL:-http://localhost:3000}"

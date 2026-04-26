@@ -2,6 +2,14 @@
 
 **Где искать дашборды:** провижининг кладёт дашборды **в корень личной коллекции** пользователя Metabase, под которым идёт API-сессия (обычно первый администратор): `GET /api/user/current` → `personal_collection_id`. В UI это тот же пункт **«Персональная коллекция …»** / **Your personal collection** — откройте его: дашборды должны быть **на этой странице**, без отдельной вложенной папки. Проверка после деплоя: `.\start.ps1 -Action verify` или логи пода `metabase` (`provision.sh`, `verify-corp-stack.sh`).
 
+### Первичный набор отчётов: только `metabase_dashboards/*.json`
+
+**Источник отчётов** — только JSON в репозитории: один файл = один дашборд, native-вопросы **вложены** в JSON и создаются `setup-dashboards.sh` при провижининге, не через «Сохранить вопрос» в UI. Список: [`metabase_dashboards/README.md`](../metabase_dashboards/README.md).
+
+- **Пустой Metabase:** после `POST /api/setup` (первый админ) и появления схемы витрины в Postgres `metabase/provision.sh` вызывает `setup-dashboards.sh`, который **с нуля** создаёт весь набор. Повторный прогон **идемпотентен** для одноимённых дашбордов/карточек в той же персональной коллекции: скрипт удаляет устаревшие сущности по списку из `*.json` и снова импортирует файлы.
+- **Изменение SQL или состава карт:** правьте JSON в `metabase_dashboards/`, **пересоберите** образ `egisz-corp-metabase` (в каталог копируется весь `metabase_dashboards/`, см. `metabase/Dockerfile`) и **перезапустите** deployment Metabase — `entrypoint` снова выполнит `provision.sh`. Без обновлённого образа под **не** увидит новые JSON.
+- **Только API на localhost, без k8s:** `.\metabase\provision-local.ps1` — собирает образ и запускает `setup-dashboards.sh` с **монтированием** текущего `metabase_dashboards` с диска, так что дашборды в Metabase соответствуют рабочей копии репозитория, даже до коммита в образ.
+
 **Учётная запись администратора Metabase:** `admin@egisz.local` / `egisz`. В Kubernetes значения приходят из Secret `metabase-admin` (`METABASE_ADMIN_EMAIL`, `METABASE_ADMIN_PASSWORD` в `k8s/metabase.yaml`); шаблон — `k8s/metabase-admin-secret.example.yaml`. Локальный `.\start.ps1` при записи секретов использует тот же набор. Для `.\metabase\provision-local.ps1` задайте те же переменные или передайте `-AdminEmail` / `-AdminPassword`.
 
 ### Главная Metabase: «Приветствую …» и «Произошла ошибка»

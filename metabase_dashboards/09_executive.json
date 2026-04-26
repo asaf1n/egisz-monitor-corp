@@ -1,6 +1,6 @@
 {
   "name": "Управленческий дашборд (Corp)",
-  "description": "Ключевые показатели системы (Executive Summary). KPI «Всего обработано» и «% ошибок» — таблицы с разрезом по типу СЭМД, клинике и (для доли ошибок) типу ответа ЕГИСЗ; ниже — графики по тому же периоду (дата обработки в фильтре).",
+  "description": "Ключевые показатели системы (Executive Summary). KPI «Всего обработано» и «% ошибок» — таблицы с разрезом по типу СЭМД, клинике и (для доли ошибок) типу ответа ЕГИСЗ; ниже — графики по тому же периоду (дата обработки в фильтре). Нижний ряд — срез очереди «документы в ожидании» (без ответа, текущий снимок, без фильтра периода).",
   "parameters": [
     {
       "id": "a8f3c2b1-4d5e-6f70-a8b9-c0d1e2f3a4b5",
@@ -135,7 +135,7 @@
     },
     {
       "name": "Документов в ожидании",
-      "description": "Текущая длина очереди (документы без ответа).",
+      "description": "Текущая длина очереди: исходящие документы с localUid, по которым ещё нет строки в fact_egisz_transactions (см. v_rpt_documents_no_response_ui). Разбивки — в трёх графиках под KPI.",
       "table_ref": "v_rpt_documents_no_response_ui",
       "dataset_query": {
         "type": "native",
@@ -155,6 +155,88 @@
       "sizeY": 4,
       "row": 0,
       "col": 18
+    },
+    {
+      "name": "Очередь: срок ожидания",
+      "description": "Сколько документов в очереди по длительности ожидания ответа (от даты «Отправлено»; записи без даты в «прочем»).",
+      "table_ref": "v_rpt_documents_no_response_ui",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT CASE WHEN \"Отправлено\" IS NULL THEN 'дата неизвестна' WHEN EXTRACT(EPOCH FROM (NOW() - \"Отправлено\"))/3600 < 1 THEN 'менее 1 часа' WHEN EXTRACT(EPOCH FROM (NOW() - \"Отправлено\"))/3600 < 12 THEN '1–12 часов' WHEN EXTRACT(EPOCH FROM (NOW() - \"Отправлено\"))/3600 < 24 THEN '12–24 часа' ELSE 'свыше 24 часов' END AS \"Срок ожидания\", COUNT(*)::bigint AS \"Количество\" FROM public.v_rpt_documents_no_response_ui GROUP BY 1 ORDER BY MIN(EXTRACT(EPOCH FROM (NOW() - \"Отправлено\"))) NULLS LAST",
+          "template-tags": {}
+        },
+        "database": 1
+      },
+      "display": "bar",
+      "visualization_settings": {
+        "graph.dimensions": ["Срок ожидания"],
+        "graph.metrics": ["Количество"],
+        "graph.x_axis.axis_enabled": "rotate-45",
+        "column_settings": {
+          "[\"name\",\"Срок ожидания\"]": { "column_title": "Срок ожидания" },
+          "[\"name\",\"Количество\"]": { "column_title": "Количество", "number_separators": ".", "decimals": 0 }
+        }
+      },
+      "sizeX": 8,
+      "sizeY": 6,
+      "row": 11,
+      "col": 0
+    },
+    {
+      "name": "Очередь: по типу СЭМД",
+      "description": "Распределение ожидающих ответа документов по коду и наименованию СЭМД.",
+      "table_ref": "v_rpt_documents_no_response_ui",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(*)::bigint AS \"Количество\" FROM public.v_rpt_documents_no_response_ui GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 25",
+          "template-tags": {}
+        },
+        "database": 1
+      },
+      "display": "bar",
+      "visualization_settings": {
+        "graph.dimensions": ["Наименование СЭМД"],
+        "graph.metrics": ["Количество"],
+        "graph.x_axis.axis_enabled": "rotate-45",
+        "column_settings": {
+          "[\"name\",\"Код СЭМД\"]": { "column_title": "Код СЭМД" },
+          "[\"name\",\"Наименование СЭМД\"]": { "column_title": "Наименование СЭМД" },
+          "[\"name\",\"Количество\"]": { "column_title": "Количество", "number_separators": ".", "decimals": 0 }
+        }
+      },
+      "sizeX": 8,
+      "sizeY": 6,
+      "row": 11,
+      "col": 8
+    },
+    {
+      "name": "Очередь: топ клиник",
+      "description": "Клиники с наибольшим количеством исходящих документов без ответа; JID отличает совпадающие наименования.",
+      "table_ref": "v_rpt_documents_no_response_ui",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT \"JID клиники\", COALESCE(NULLIF(TRIM(\"Наименование клиники\"), ''), '(нет)') AS \"Наименование клиники\", COUNT(*)::bigint AS \"Количество\" FROM public.v_rpt_documents_no_response_ui GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 25",
+          "template-tags": {}
+        },
+        "database": 1
+      },
+      "display": "row",
+      "visualization_settings": {
+        "graph.dimensions": ["Наименование клиники"],
+        "graph.metrics": ["Количество"],
+        "column_settings": {
+          "[\"name\",\"JID клиники\"]": { "column_title": "JID клиники" },
+          "[\"name\",\"Наименование клиники\"]": { "column_title": "Наименование клиники" },
+          "[\"name\",\"Количество\"]": { "column_title": "Количество", "number_separators": ".", "decimals": 0 }
+        }
+      },
+      "sizeX": 8,
+      "sizeY": 6,
+      "row": 11,
+      "col": 16
     },
     {
       "name": "Ошибки по типу (код ЕГИСЗ)",
