@@ -1,7 +1,30 @@
 {
-  "name": "Сервис интеграции",
-  "description": "Статистика по типам СЭМД и клиникам (код, наименование, JID).",
-  "parameters": [],
+  "name": "02 Сервис интеграции",
+  "description": "Анализ структуры потока. Разбивка транзакций по конкретным типам СЭМД и медицинским организациям. Фильтры: период по дате обработки, код СЭМД, JID клиники.",
+  "parameters": [
+    {
+      "id": "a2b3c4d5-e6f7-4890-a123-456789abcdef",
+      "name": "Период (обработано) — глубина, дней",
+      "slug": "srv_period_filter",
+      "type": "number/=",
+      "sectionId": "number",
+      "default": 30
+    },
+    {
+      "id": "b3c4d5e6-f7a8-4901-b234-56789abcdef0",
+      "name": "Код СЭМД",
+      "slug": "srv_semd_filter",
+      "type": "string/=",
+      "sectionId": "string"
+    },
+    {
+      "id": "c4d5e6f7-a8b9-4012-c345-6789abcdef01",
+      "name": "JID клиники",
+      "slug": "srv_clinic_filter",
+      "type": "string/=",
+      "sectionId": "string"
+    }
+  ],
   "cards": [
     {
       "name": "Топ типов СЭМД",
@@ -10,20 +33,57 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 25",
-          "template-tags": {}
+          "query": "SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui CROSS JOIN ( SELECT COALESCE((SELECT MAX(\"Обработано\") FROM public.v_egisz_transactions_enriched_ui), NOW()) AS ref_ts ) vit_ref WHERE \"Обработано\" >= vit_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{srv_period}}::numeric))) [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{srv_semd}}]] [[AND \"JID клиники\"::text = {{srv_clinic}}]] GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 25",
+          "template-tags": {
+            "srv_period": {
+              "id": "f2000001-0001-4001-8001-000000000001",
+              "name": "srv_period",
+              "display-name": "Период (обработано) (глубина, дней)",
+              "type": "number",
+              "required": true,
+              "default": 30
+            },
+            "srv_semd": {
+              "id": "f2000001-0001-4001-8001-000000000010",
+              "name": "srv_semd",
+              "display-name": "Код СЭМД",
+              "type": "text",
+              "widget-type": "string/=",
+              "required": false
+            },
+            "srv_clinic": {
+              "id": "f2000001-0001-4001-8001-000000000011",
+              "name": "srv_clinic",
+              "display-name": "JID клиники",
+              "type": "text",
+              "widget-type": "string/=",
+              "required": false
+            }
+          }
         },
         "database": 1
       },
       "display": "bar",
       "visualization_settings": {
-        "graph.dimensions": ["Наименование СЭМД"],
-        "graph.metrics": ["Количество"],
+        "graph.dimensions": [
+          "Наименование СЭМД"
+        ],
+        "graph.metrics": [
+          "Количество"
+        ],
         "graph.x_axis.axis_enabled": "rotate-45",
         "column_settings": {
-          "[\"name\",\"Код СЭМД\"]": { "column_title": "Код СЭМД" },
-          "[\"name\",\"Наименование СЭМД\"]": { "column_title": "Наименование СЭМД" },
-          "[\"name\",\"Количество\"]": { "column_title": "Количество", "number_separators": ".", "decimals": 0 }
+          "[\"name\",\"Код СЭМД\"]": {
+            "column_title": "Код СЭМД"
+          },
+          "[\"name\",\"Наименование СЭМД\"]": {
+            "column_title": "Наименование СЭМД"
+          },
+          "[\"name\",\"Количество\"]": {
+            "column_title": "Количество",
+            "number_separators": ".",
+            "decimals": 0
+          }
         }
       },
       "sizeX": 12,
@@ -38,19 +98,56 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT \"JID клиники\", \"Наименование клиники\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20",
-          "template-tags": {}
+          "query": "SELECT \"JID клиники\", \"Наименование клиники\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui CROSS JOIN ( SELECT COALESCE((SELECT MAX(\"Обработано\") FROM public.v_egisz_transactions_enriched_ui), NOW()) AS ref_ts ) vit_ref WHERE \"Обработано\" >= vit_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{srv_period}}::numeric))) [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{srv_semd}}]] [[AND \"JID клиники\"::text = {{srv_clinic}}]] GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20",
+          "template-tags": {
+            "srv_period": {
+              "id": "f2000002-0002-4002-8002-000000000001",
+              "name": "srv_period",
+              "display-name": "Период (обработано) (глубина, дней)",
+              "type": "number",
+              "required": true,
+              "default": 30
+            },
+            "srv_semd": {
+              "id": "f2000002-0002-4002-8002-000000000010",
+              "name": "srv_semd",
+              "display-name": "Код СЭМД",
+              "type": "text",
+              "widget-type": "string/=",
+              "required": false
+            },
+            "srv_clinic": {
+              "id": "f2000002-0002-4002-8002-000000000011",
+              "name": "srv_clinic",
+              "display-name": "JID клиники",
+              "type": "text",
+              "widget-type": "string/=",
+              "required": false
+            }
+          }
         },
         "database": 1
       },
       "display": "row",
       "visualization_settings": {
-        "graph.dimensions": ["Наименование клиники"],
-        "graph.metrics": ["Количество"],
+        "graph.dimensions": [
+          "Наименование клиники"
+        ],
+        "graph.metrics": [
+          "Количество"
+        ],
         "column_settings": {
-          "[\"name\",\"JID клиники\"]": { "column_title": "JID клиники" },
-          "[\"name\",\"Наименование клиники\"]": { "column_title": "Наименование клиники" },
-          "[\"name\",\"Количество\"]": { "column_title": "Количество", "number_separators": ".", "decimals": 0 }
+          "[\"name\",\"JID клиники\"]": {
+            "column_title": "JID клиники"
+          },
+          "[\"name\",\"Наименование клиники\"]": {
+            "column_title": "Наименование клиники"
+          },
+          "[\"name\",\"Количество\"]": {
+            "column_title": "Количество",
+            "number_separators": ".",
+            "decimals": 0
+          }
         }
       },
       "sizeX": 12,

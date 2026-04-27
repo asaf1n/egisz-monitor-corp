@@ -139,17 +139,10 @@ fi
 DASHBOARD_ID="$(curl -s "${MB_URL}/api/dashboard" \
   -H "X-Metabase-Session: ${SESSION_TOKEN}" | jq -r '
     (if type == "array" then . elif (.data | type == "array") then .data else [] end)
-    | [
-        .[]
-        | select(
-            .name == "Оперативный мониторинг"
-            or .name == "Сервис интеграции"
-            or .name == "Ошибки и разбор"
-          )
-      ]
-    | sort_by(.id)
-    | last
-    | .id // empty
+    | ([.[] | select(.name == "01 Оперативный мониторинг")] | sort_by(.id) | last | .id)
+      // ([.[] | select(.name == "02 Сервис интеграции")] | sort_by(.id) | last | .id)
+      // ([.[] | select(.name == "03 Ошибки и разбор")] | sort_by(.id) | last | .id)
+      // empty
   ')"
 
 if [ -n "${DASHBOARD_ID}" ]; then

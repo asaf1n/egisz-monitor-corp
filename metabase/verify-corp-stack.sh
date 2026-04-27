@@ -79,8 +79,12 @@ if [ "${EXPECTED}" -gt 0 ] && [ "${ND}" -lt "${EXPECTED}" ]; then
   log "FAIL: dashboards count ${ND} < expected ${EXPECTED} from /app/metabase_dashboards"
   exit 1
 fi
+if [ "${EXPECTED}" -gt 0 ] && [ "${ND}" -gt "${EXPECTED}" ]; then
+  log "FAIL: dashboards count ${ND} > expected ${EXPECTED} (duplicate names or stale collections — run reset-deploy / wipe Metabase root)"
+  exit 1
+fi
 
-log "Metabase OK (${ND} dashboard(s) in personal collection root, expected files=${EXPECTED})"
+log "Metabase OK (${ND} dashboard(s) in personal collection root, expected files=${EXPECTED}; saved questions from dashcards also appear in this list in UI)"
 log "В UI: откройте «Персональная коллекция …» (collection_id=${ROOT_ID}) — дашборды на этой странице."
 
 # Сверка числа карточек на управленческом дашборде с JSON в образе (ловит старый image :latest без пересборки).
@@ -106,6 +110,11 @@ if [ -f "${EXEC_JSON}" ]; then
     exit 1
   fi
   log "Dashboard \"${EXEC_NAME}\" OK (${GOT_CARDS} dashcards)"
+fi
+
+if [ -x /app/smoke-metabase-ui.sh ]; then
+  log "smoke-metabase-ui.sh (10 HTTP checks: filters, auto_apply, card query)"
+  MB_URL="${MB_URL:-http://localhost:3000}" /app/smoke-metabase-ui.sh
 fi
 
 exit 0

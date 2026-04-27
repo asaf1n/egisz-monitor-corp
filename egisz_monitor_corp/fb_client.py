@@ -9,7 +9,7 @@ from egisz_monitor_corp.config_loader import FirebirdConfig
 
 
 def firebird_dsn(cfg: FirebirdConfig) -> str:
-    """Remote DSN: host/port:database (database is path or alias on server)."""
+    """Remote DSN: host/port:database — database is path or alias as on the Firebird server (not a local pod path)."""
     return f"{cfg.host}/{int(cfg.port)}:{cfg.database}"
 
 

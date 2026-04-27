@@ -1,28 +1,79 @@
 {
-  "name": "Ошибки и разбор",
-  "description": "Ошибки парсинга (stg_parse_errors) и последние строки витрины со статусом error (текст из errors_json).",
-  "parameters": [],
+  "name": "03 Ошибки и разбор",
+  "description": "Технический аудит. Вывод реестра ошибок парсинга и регистрации для анализа конкретных причин отказов. Фильтры: период по created_at (staging), период по обработке витрины для error-строк, код ошибки парсинга.",
+  "parameters": [
+    {
+      "id": "f1e2d3c4-b5a6-4789-9012-3456789abcde",
+      "name": "Период (staging, created_at) — глубина, дней",
+      "slug": "stg_period_filter",
+      "type": "number/=",
+      "sectionId": "number",
+      "default": 30
+    },
+    {
+      "id": "a2f3e4d5-c6b7-4890-9123-456789abcdef",
+      "name": "Период (витрина, обработано) — глубина, дней",
+      "slug": "err_vit_period_filter",
+      "type": "number/=",
+      "sectionId": "number",
+      "default": 30
+    },
+    {
+      "id": "b3a4f5e6-d7c8-4901-9234-56789abcdef0",
+      "name": "Код ошибки парсинга",
+      "slug": "err_parse_code_filter",
+      "type": "string/=",
+      "sectionId": "string"
+    }
+  ],
   "cards": [
     {
       "name": "Ошибки парсинга (stg_parse_errors)",
-      "description": "Последние 100 записей staging.",
+      "description": "Последние 100 записей staging в выбранном периоде.",
       "table_ref": "stg_parse_errors",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT id AS \"Номер записи\", error_code AS \"Код ошибки\", LEFT(message, 200) AS \"Сообщение\", created_at AS \"Создано\", relates_to_id AS \"Связанное сообщение\" FROM public.stg_parse_errors ORDER BY id DESC LIMIT 100",
-          "template-tags": {}
+          "query": "SELECT id AS \"Номер записи\", error_code AS \"Код ошибки\", LEFT(message, 200) AS \"Сообщение\", created_at AS \"Создано\", relates_to_id AS \"Связанное сообщение\" FROM public.stg_parse_errors WHERE created_at >= (NOW() - (interval '1 day' * GREATEST(1, ({{stg_period}}::numeric)))) [[AND error_code::text = {{err_parse_code}}]] ORDER BY id DESC LIMIT 100",
+          "template-tags": {
+            "stg_period": {
+              "id": "f3000001-0001-4001-8001-000000000001",
+              "name": "stg_period",
+              "display-name": "Период (staging, created_at) (глубина, дней)",
+              "type": "number",
+              "required": true,
+              "default": 30
+            },
+            "err_parse_code": {
+              "id": "f3000001-0001-4001-8001-000000000010",
+              "name": "err_parse_code",
+              "display-name": "Код ошибки парсинга",
+              "type": "text",
+              "widget-type": "string/=",
+              "required": false
+            }
+          }
         },
         "database": 1
       },
       "display": "table",
       "visualization_settings": {
         "column_settings": {
-          "[\"name\",\"Номер записи\"]": { "column_title": "№ записи" },
-          "[\"name\",\"Связанное сообщение\"]": { "column_title": "Связанное сообщение (relatesToMessage)" },
-          "[\"name\",\"Код ошибки\"]": { "column_title": "Код ошибки" },
-          "[\"name\",\"Сообщение\"]": { "column_title": "Сообщение" },
-          "[\"name\",\"Создано\"]": { "column_title": "Создано" }
+          "[\"name\",\"Номер записи\"]": {
+            "column_title": "№ записи"
+          },
+          "[\"name\",\"Связанное сообщение\"]": {
+            "column_title": "Связанное сообщение (relatesToMessage)"
+          },
+          "[\"name\",\"Код ошибки\"]": {
+            "column_title": "Код ошибки"
+          },
+          "[\"name\",\"Сообщение\"]": {
+            "column_title": "Сообщение"
+          },
+          "[\"name\",\"Создано\"]": {
+            "column_title": "Создано"
+          }
         }
       },
       "sizeX": 24,
@@ -32,33 +83,76 @@
     },
     {
       "name": "Ошибки СЭМД",
-      "description": "Последние error-строки из витрины.",
+      "description": "Последние error-строки из витрины: коды РЭМД, исходные тексты, колонка «Сводка ошибок» с витрины (строка целиком: «·» между item, «—» внутри Schematron).",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT \"localUid СЭМД\", \"JID клиники\", \"Токен gost-хоста\", \"OID организации\", \"Код СЭМД\", \"Наименование СЭМД\", \"Наименование клиники\", \"ИНН клиники\", \"OID клиники\", \"EMDR ID\", \"Дата регистрации\", (SELECT LEFT(string_agg(NULLIF(err->>'message', ''), '; ' ORDER BY ord), 500) FROM jsonb_array_elements(\"Ошибки JSON\") WITH ORDINALITY AS e(err, ord) WHERE NULLIF(err->>'message', '') IS NOT NULL) AS \"Текст ошибки\", \"Обработано\", \"Связанное сообщение\" FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' ORDER BY \"Обработано\" DESC NULLS LAST LIMIT 50",
-          "template-tags": {}
+          "query": "SELECT \"localUid СЭМД\", \"JID клиники\", \"Хост клиники (VPN ГОСТ)\", \"OID организации\", \"Код СЭМД\", \"Наименование СЭМД\", \"Наименование клиники\", \"ИНН клиники\", \"OID клиники\", \"EMDR ID\", \"Дата регистрации\", (SELECT LEFT(string_agg(NULLIF(TRIM(err->>'code'), ''), '; ' ORDER BY ord), 200) FROM jsonb_array_elements(\"Ошибки JSON\") WITH ORDINALITY AS e(err, ord) WHERE NULLIF(TRIM(err->>'code'), '') IS NOT NULL) AS \"Коды РЭМД\", (SELECT LEFT(string_agg(NULLIF(err->>'message', ''), '; ' ORDER BY ord), 500) FROM jsonb_array_elements(\"Ошибки JSON\") WITH ORDINALITY AS e(err, ord) WHERE NULLIF(err->>'message', '') IS NOT NULL) AS \"Текст ошибки\", \"Сводка ошибок\", \"Обработано\", \"Связанное сообщение\" FROM public.v_egisz_transactions_enriched_ui CROSS JOIN ( SELECT COALESCE((SELECT MAX(\"Обработано\") FROM public.v_egisz_transactions_enriched_ui), NOW()) AS ref_ts ) vit_ref WHERE \"Статус\" = 'error' AND \"Обработано\" >= vit_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{err_vit_period}}::numeric))) ORDER BY \"Обработано\" DESC NULLS LAST LIMIT 50",
+          "template-tags": {
+            "err_vit_period": {
+              "id": "f3000002-0002-4002-8002-000000000001",
+              "name": "err_vit_period",
+              "display-name": "Период (витрина, обработано) (глубина, дней)",
+              "type": "number",
+              "required": true,
+              "default": 30
+            }
+          }
         },
         "database": 1
       },
       "display": "table",
       "visualization_settings": {
         "column_settings": {
-          "[\"name\",\"Связанное сообщение\"]": { "column_title": "Связанное сообщение (relatesToMessage)" },
-          "[\"name\",\"localUid СЭМД\"]": { "column_title": "localUid СЭМД" },
-          "[\"name\",\"JID клиники\"]": { "column_title": "JID клиники" },
-          "[\"name\",\"Токен gost-хоста\"]": { "column_title": "Токен gost-хоста" },
-          "[\"name\",\"OID организации\"]": { "column_title": "OID организации" },
-          "[\"name\",\"Код СЭМД\"]": { "column_title": "Код СЭМД" },
-          "[\"name\",\"Наименование СЭМД\"]": { "column_title": "Наименование СЭМД" },
-          "[\"name\",\"Наименование клиники\"]": { "column_title": "Наименование клиники" },
-          "[\"name\",\"ИНН клиники\"]": { "column_title": "ИНН клиники" },
-          "[\"name\",\"OID клиники\"]": { "column_title": "OID клиники" },
-          "[\"name\",\"EMDR ID\"]": { "column_title": "EMDR ID" },
-          "[\"name\",\"Дата регистрации\"]": { "column_title": "Дата регистрации" },
-          "[\"name\",\"Текст ошибки\"]": { "column_title": "Текст ошибки" },
-          "[\"name\",\"Обработано\"]": { "column_title": "Обработано" }
+          "[\"name\",\"Связанное сообщение\"]": {
+            "column_title": "Связанное сообщение (relatesToMessage)"
+          },
+          "[\"name\",\"localUid СЭМД\"]": {
+            "column_title": "localUid СЭМД"
+          },
+          "[\"name\",\"JID клиники\"]": {
+            "column_title": "JID клиники"
+          },
+          "[\"name\",\"Хост клиники (VPN ГОСТ)\"]": {
+            "column_title": "Хост клиники (VPN ГОСТ)"
+          },
+          "[\"name\",\"OID организации\"]": {
+            "column_title": "OID организации"
+          },
+          "[\"name\",\"Код СЭМД\"]": {
+            "column_title": "Код СЭМД"
+          },
+          "[\"name\",\"Наименование СЭМД\"]": {
+            "column_title": "Наименование СЭМД"
+          },
+          "[\"name\",\"Наименование клиники\"]": {
+            "column_title": "Наименование клиники"
+          },
+          "[\"name\",\"ИНН клиники\"]": {
+            "column_title": "ИНН клиники"
+          },
+          "[\"name\",\"OID клиники\"]": {
+            "column_title": "OID клиники"
+          },
+          "[\"name\",\"EMDR ID\"]": {
+            "column_title": "EMDR ID"
+          },
+          "[\"name\",\"Дата регистрации\"]": {
+            "column_title": "Дата регистрации"
+          },
+          "[\"name\",\"Коды РЭМД\"]": {
+            "column_title": "Коды РЭМД"
+          },
+          "[\"name\",\"Текст ошибки\"]": {
+            "column_title": "Текст ошибки"
+          },
+          "[\"name\",\"Сводка ошибок\"]": {
+            "column_title": "Сводка ошибок"
+          },
+          "[\"name\",\"Обработано\"]": {
+            "column_title": "Обработано"
+          }
         }
       },
       "sizeX": 24,

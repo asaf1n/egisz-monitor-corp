@@ -59,6 +59,137 @@ CREATE TABLE IF NOT EXISTS stg_parse_errors (
 
 COMMENT ON TABLE stg_parse_errors IS 'Rows where MSGTEXT could not yield relates_to_id or XML is unusable';
 
+-- Агрегированная «человекочитаемая» сводка по errors_json: одна строка на факт, без перезаписи уже ясных сообщений (ГИП и т.п.).
+-- Разбор нескольких блоков Schematron в одном message: разделитель внутри элемента — " — ".
+
+CREATE OR REPLACE FUNCTION egisz_friendly_schematron_chunk(p_chunk text)
+RETURNS text
+LANGUAGE plpgsql
+IMMUTABLE
+AS $c$
+DECLARE
+  t text;
+  rid text;
+BEGIN
+  t := trim(p_chunk);
+  IF t = '' THEN
+    RETURN NULL;
+  END IF;
+
+  rid := (regexp_match(t, 'У[0-9]+(?:[.-][0-9A-Za-z.]+)*'))[1];
+
+  IF t ~* 'address:Type' AND t ~* 'patientRole' AND t ~* 'addr' THEN
+    RETURN 'Не указан адрес пациента';
+  END IF;
+
+  IF t ~* 'identity:IssueDate' OR (t ~* 'IdentityDoc' AND t ~* 'IssueDate') THEN
+    RETURN 'ДУЛ: не заполнена дата выдачи (атрибут @value или реквизит)';
+  END IF;
+
+  IF t ~* 'IdentityCardType' THEN
+    RETURN 'ДУЛ: проверьте тип документа / реквизиты удостоверения';
+  END IF;
+
+  IF t ~* 'patientRole' AND t ~* 'addr' AND t ~* 'равным' THEN
+    RETURN 'Проверьте адрес пациента (код типа адреса регистрации)';
+  END IF;
+
+  IF rid IS NOT NULL THEN
+    RETURN 'Правило ' || rid || ': ' || left(t, 200) || CASE WHEN length(t) > 200 THEN '…' ELSE '' END;
+  END IF;
+
+  RETURN 'Проверка схемы: ' || left(t, 220) || CASE WHEN length(t) > 220 THEN '…' ELSE '' END;
+END;
+$c$;
+
+CREATE OR REPLACE FUNCTION egisz_friendly_error_item(p_code text, p_message text)
+RETURNS text
+LANGUAGE plpgsql
+IMMUTABLE
+AS $e$
+DECLARE
+  m text;
+  parts text[];
+  chunk text;
+  out_parts text[] := ARRAY[]::text[];
+  deduped text[] := ARRAY[]::text[];
+  p text;
+  n int;
+  i int;
+BEGIN
+  m := trim(COALESCE(p_message, ''));
+  IF m = '' THEN
+    IF nullif(trim(COALESCE(p_code, '')), '') IS NOT NULL THEN
+      RETURN 'Код: ' || p_code;
+    END IF;
+    RETURN NULL;
+  END IF;
+
+  -- Уже сформулировано в терминах бизнес-логики: не трогаем
+  IF m ~* 'не соответствует данным гип' THEN
+    RETURN m;
+  END IF;
+  IF m ~* 'пациент найден по локальному' THEN
+    RETURN m;
+  END IF;
+  -- Не Schematron-каскад: оставляем как есть (в т.ч. cvc-, справочники, короткие ответы)
+  IF m !~* 'schematron' AND m !~* 'схематрона' THEN
+    RETURN m;
+  END IF;
+
+  parts := string_to_array(
+    regexp_replace(
+      m,
+      'Ошибка валидации (schematron|схематрона)\s*:\s*',
+      E'\x1E',
+      'gi'
+    ),
+    E'\x1E'
+  );
+  n := coalesce(array_length(parts, 1), 0);
+  FOR i IN 1..n LOOP
+    chunk := nullif(trim(parts[i]), '');
+    IF chunk IS NULL THEN
+      CONTINUE;
+    END IF;
+    out_parts := array_append(out_parts, egisz_friendly_schematron_chunk(chunk));
+  END LOOP;
+
+  IF coalesce(array_length(out_parts, 1), 0) = 0 THEN
+    RETURN m;
+  END IF;
+
+  FOREACH p IN ARRAY out_parts
+  LOOP
+    IF p IS NULL OR p = '' THEN
+      CONTINUE;
+    END IF;
+    IF p = ANY (deduped) THEN
+      CONTINUE;
+    END IF;
+    deduped := array_append(deduped, p);
+  END LOOP;
+
+  RETURN array_to_string(deduped, ' — ');
+END;
+$e$;
+
+COMMENT ON FUNCTION egisz_friendly_error_item IS 'Одна строка-подсказка по code+message; Schematron с несколькими блоками склеивает " — "; исходный текст, если нет schematron/схематрона.';
+
+CREATE OR REPLACE FUNCTION egisz_friendly_errors_row(p_errors jsonb)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+AS $r$
+  SELECT NULLIF(
+    string_agg(egisz_friendly_error_item(e->>'code', e->>'message'), ' · ' ORDER BY o),
+    ''
+  )
+  FROM jsonb_array_elements(COALESCE(p_errors, '[]'::jsonb)) WITH ORDINALITY AS t(e, o);
+$r$;
+
+COMMENT ON FUNCTION egisz_friendly_errors_row IS 'Сводка по массиву errors_json: элементы разделены " · " (средняя точка).';
+
 -- REPLACE VIEW нельзя использовать для смены имён/набора колонок в базовой витрине (ломаются зависимости и ETL).
 -- Человекочитаемые имена — в отдельных *_ui представлениях и в dim_column_display_labels.
 DROP VIEW IF EXISTS v_rpt_documents_no_response_ui;
@@ -72,12 +203,17 @@ SELECT
     f.local_uid_semd,
     f.jid,
     f.gost_jid_token,
+    CASE
+        WHEN f.gost_jid_token IS NOT NULL AND TRIM(f.gost_jid_token) <> ''
+            THEN 'gost-' || f.gost_jid_token || '.infoclinica.lan'
+    END AS gost_host,
     f.org_oid,
     f.kind_code,
     dt.kind_name AS kind_name,
     f.status,
     f.emdr_id,
     f.errors_json,
+    egisz_friendly_errors_row(f.errors_json) AS errors_friendly,
     f.registration_date,
     f.processed_at,
     DATE(COALESCE(f.registration_date, f.processed_at)) AS chart_day,
@@ -145,13 +281,19 @@ INSERT INTO dim_column_display_labels (source_object, source_column, display_lab
     ('v_egisz_transactions_enriched', 'relates_to_id', 'Связанное сообщение'),
     ('v_egisz_transactions_enriched', 'local_uid_semd', 'localUid СЭМД'),
     ('v_egisz_transactions_enriched', 'jid', 'JID клиники'),
-    ('v_egisz_transactions_enriched', 'gost_jid_token', 'Токен gost-хоста'),
+    ('v_egisz_transactions_enriched', 'gost_jid_token', 'Фрагмент токена gost (LOGTEXT)'),
+    ('v_egisz_transactions_enriched', 'gost_host', 'Хост клиники (VPN ГОСТ)'),
     ('v_egisz_transactions_enriched', 'org_oid', 'OID организации'),
     ('v_egisz_transactions_enriched', 'kind_code', 'Код СЭМД'),
     ('v_egisz_transactions_enriched', 'kind_name', 'Наименование СЭМД'),
     ('v_egisz_transactions_enriched', 'status', 'Статус'),
     ('v_egisz_transactions_enriched', 'emdr_id', 'EMDR ID'),
     ('v_egisz_transactions_enriched', 'errors_json', 'Ошибки JSON'),
+    (
+        'v_egisz_transactions_enriched',
+        'errors_friendly',
+        'Сводка ошибок: одна строка; внутри одного сообщения Schematron блоки — «—», несколько item в JSON — «·»'
+    ),
     ('v_egisz_transactions_enriched', 'registration_date', 'Дата регистрации'),
     ('v_egisz_transactions_enriched', 'processed_at', 'Обработано'),
     ('v_egisz_transactions_enriched', 'chart_day', 'День (тренд)'),
@@ -163,7 +305,7 @@ INSERT INTO dim_column_display_labels (source_object, source_column, display_lab
     ('v_rpt_documents_no_response', 'kind_name', 'Наименование СЭМД'),
     ('v_rpt_documents_no_response', 'jid', 'JID клиники'),
     ('v_rpt_documents_no_response', 'clinic_name', 'Наименование клиники'),
-    ('v_rpt_documents_no_response', 'gost_host', 'Хост клиники (ГОСТ VPN)'),
+    ('v_rpt_documents_no_response', 'gost_host', 'Хост клиники (VPN ГОСТ)'),
     ('v_rpt_documents_no_response', 'sent_at', 'Отправлено')
 ON CONFLICT (source_object, source_column) DO UPDATE SET display_label_ru = EXCLUDED.display_label_ru;
 
@@ -172,13 +314,14 @@ CREATE OR REPLACE VIEW v_egisz_transactions_enriched_ui AS
 SELECT
     local_uid_semd AS "localUid СЭМД",
     jid::text AS "JID клиники",
-    gost_jid_token AS "Токен gost-хоста",
+    gost_host AS "Хост клиники (VPN ГОСТ)",
     org_oid AS "OID организации",
     kind_code AS "Код СЭМД",
     kind_name AS "Наименование СЭМД",
     status AS "Статус",
     emdr_id AS "EMDR ID",
     errors_json AS "Ошибки JSON",
+    errors_friendly AS "Сводка ошибок",
     registration_date AS "Дата регистрации",
     processed_at AS "Обработано",
     chart_day AS "День (тренд)",
@@ -188,7 +331,7 @@ SELECT
     relates_to_id AS "Связанное сообщение"
 FROM v_egisz_transactions_enriched;
 
-COMMENT ON VIEW v_egisz_transactions_enriched_ui IS 'Обёртка над v_egisz_transactions_enriched с подписями колонок для отчётов; см. dim_column_display_labels. JID клиники — TEXT (идентификатор, не суммируется в Metabase). Колонка «Связанное сообщение» (relates_to_id) — последняя для удобства витрин и Metabase.';
+COMMENT ON VIEW v_egisz_transactions_enriched_ui IS 'Обёртка над v_egisz_transactions_enriched с подписями колонок для отчётов; см. dim_column_display_labels. JID клиники — TEXT (идентификатор, не суммируется в Metabase). «Сводка ошибок» — errors_friendly: агрегация подсказок по errors_json, исходные «Ошибки JSON» не меняются. Колонка «Связанное сообщение» (relates_to_id) — последняя для удобства витрин и Metabase.';
 
 CREATE OR REPLACE VIEW v_rpt_documents_no_response_ui AS
 SELECT
@@ -197,7 +340,7 @@ SELECT
     kind_name AS "Наименование СЭМД",
     jid::text AS "JID клиники",
     clinic_name AS "Наименование клиники",
-    gost_host AS "Хост клиники (ГОСТ VPN)",
+    gost_host AS "Хост клиники (VPN ГОСТ)",
     sent_at AS "Отправлено"
 FROM v_rpt_documents_no_response;
 

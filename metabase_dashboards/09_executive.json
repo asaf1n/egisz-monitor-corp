@@ -1,16 +1,62 @@
 {
-  "name": "Управленческий дашборд",
-  "description": "KPI: объёмы обработки, доля ошибок, длина очереди; таблицы и графики по тому же периоду (фильтр даты обработки). Срез очереди ожидающих — текущий снимок, без периода.",
+  "name": "09 Управленческий дашборд",
+  "description": "Общее количество обработанных за период, % ошибок и очередь без ответа. Окно по «Обработано» и по «Отправлено» для очереди считается от последних дат во витрине (не от часов сервера). KPI «за последний календарный день в данных» — по дню MAX(Обработано). Глобальный фильтр N дней связан со всеми карточками, включая блок очереди.",
   "parameters": [
     {
       "id": "a8f3c2b1-4d5e-6f70-a8b9-c0d1e2f3a4b5",
-      "name": "Период (дата обработки)",
+      "name": "Глубина периода, дней (витрина + очередь по «Отправлено»)",
       "slug": "period_filter",
-      "type": "date/all-options",
-      "sectionId": "date"
+      "type": "number/=",
+      "sectionId": "number",
+      "default": 30
     }
   ],
   "cards": [
+    {
+      "name": "KPI по снимку",
+      "description": "Строка: объём за последний календарный день, который есть в «Обработано»; доля error; счётчик очереди с учётом глобальной глубины периода (по дате «Отправлено», от последней отправки в снимке).",
+      "table_ref": "v_egisz_transactions_enriched_ui",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "WITH last_day AS ( SELECT date_trunc('day', COALESCE((SELECT MAX(\"Обработано\") FROM public.v_egisz_transactions_enriched_ui), NOW())) AS d ), pend_ref AS ( SELECT COALESCE((SELECT MAX(\"Отправлено\") FROM public.v_rpt_documents_no_response_ui), NOW()) AS ref_ts ) SELECT (SELECT COUNT(*)::bigint FROM public.v_egisz_transactions_enriched_ui t CROSS JOIN last_day WHERE t.\"Обработано\" >= last_day.d AND t.\"Обработано\" < last_day.d + INTERVAL '1 day') AS \"Обработано за последний день в данных\", (SELECT ROUND(100.0 * SUM(CASE WHEN t2.\"Статус\" = 'error' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) FROM public.v_egisz_transactions_enriched_ui t2 CROSS JOIN last_day WHERE t2.\"Обработано\" >= last_day.d AND t2.\"Обработано\" < last_day.d + INTERVAL '1 day') AS \"% ошибок за этот день\", (SELECT COUNT(*)::bigint FROM public.v_rpt_documents_no_response_ui p CROSS JOIN pend_ref WHERE p.\"Отправлено\" >= pend_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{period}}::numeric)))) AS \"Документов в очереди\"",
+          "template-tags": {
+            "period": {
+              "id": "b1c2d3e4-f5a6-7890-bcde-f12345678900",
+              "name": "period",
+              "display-name": "Глубина, дней",
+              "type": "number",
+              "required": true,
+              "default": 30
+            }
+          }
+        },
+        "database": 1
+      },
+      "display": "table",
+      "visualization_settings": {
+        "column_settings": {
+          "[\"name\",\"Обработано за последний день в данных\"]": {
+            "column_title": "Обработано (последний день в БД)",
+            "number_separators": ".",
+            "decimals": 0
+          },
+          "[\"name\",\"% ошибок за этот день\"]": {
+            "column_title": "% ошибок за этот день",
+            "decimals": 2
+          },
+          "[\"name\",\"Документов в очереди\"]": {
+            "column_title": "Очередь в окне фильтра",
+            "number_separators": ".",
+            "decimals": 0
+          }
+        }
+      },
+      "sizeX": 24,
+      "sizeY": 3,
+      "row": 0,
+      "col": 0
+    },
     {
       "name": "Всего обработано за период",
       "description": "Объём транзакций за период (фильтр по дате обработки в витрине) с разрезом по коду/наименованию СЭМД и клинике (JID + наименование). Сводное число — сумма столбца «Количество».",
@@ -18,38 +64,42 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", \"JID клиники\", COALESCE(NULLIF(TRIM(\"Наименование клиники\"), ''), '(нет)') AS \"Наименование клиники\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE {{period}} GROUP BY 1, 2, 3, 4 ORDER BY 5 DESC NULLS LAST LIMIT 200",
+          "query": "WITH vit_ref AS ( SELECT COALESCE((SELECT MAX(\"Обработано\") FROM public.v_egisz_transactions_enriched_ui), NOW()) AS ref_ts ) SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Тип СЭМД\", \"JID клиники\", COALESCE(NULLIF(TRIM(\"Наименование клиники\"), ''), '(нет)') AS \"Наименование клиники\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui CROSS JOIN vit_ref WHERE \"Обработано\" >= vit_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{period}}::numeric))) GROUP BY 1, 2, 3 ORDER BY 4 DESC NULLS LAST LIMIT 200",
           "template-tags": {
             "period": {
               "id": "b1c2d3e4-f5a6-7890-bcde-f12345678901",
               "name": "period",
-              "display-name": "Период (дата обработки)",
-              "type": "dimension",
-              "widget-type": "date/all-options"
+              "display-name": "Глубина, дней",
+              "type": "number",
+              "required": true,
+              "default": 30
             }
           }
         },
         "database": 1
       },
-      "metabase-field-filters": {
-        "period": {
-          "table_ref": "v_egisz_transactions_enriched_ui",
-          "field_name": "Обработано"
-        }
-      },
       "display": "table",
       "visualization_settings": {
         "column_settings": {
-          "[\"name\",\"Код СЭМД\"]": { "column_title": "Код СЭМД" },
-          "[\"name\",\"Наименование СЭМД\"]": { "column_title": "Наименование СЭМД" },
-          "[\"name\",\"JID клиники\"]": { "column_title": "JID клиники" },
-          "[\"name\",\"Наименование клиники\"]": { "column_title": "Наименование клиники" },
-          "[\"name\",\"Количество\"]": { "column_title": "Количество", "number_separators": ".", "decimals": 0 }
+          "[\"name\",\"Тип СЭМД\"]": {
+            "column_title": "Тип СЭМД (код)"
+          },
+          "[\"name\",\"JID клиники\"]": {
+            "column_title": "JID клиники"
+          },
+          "[\"name\",\"Наименование клиники\"]": {
+            "column_title": "Наименование клиники"
+          },
+          "[\"name\",\"Количество\"]": {
+            "column_title": "Количество",
+            "number_separators": ".",
+            "decimals": 0
+          }
         }
       },
       "sizeX": 6,
       "sizeY": 4,
-      "row": 0,
+      "row": 3,
       "col": 0
     },
     {
@@ -59,78 +109,90 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE {{period}} AND \"Статус\" = 'success'",
+          "query": "WITH vit_ref AS ( SELECT COALESCE((SELECT MAX(\"Обработано\") FROM public.v_egisz_transactions_enriched_ui), NOW()) AS ref_ts ) SELECT COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui CROSS JOIN vit_ref WHERE \"Обработано\" >= vit_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{period}}::numeric))) AND \"Статус\" = 'success'",
           "template-tags": {
             "period": {
               "id": "b1c2d3e4-f5a6-7890-bcde-f12345678902",
               "name": "period",
-              "display-name": "Период (дата обработки)",
-              "type": "dimension",
-              "widget-type": "date/all-options"
+              "display-name": "Глубина, дней",
+              "type": "number",
+              "required": true,
+              "default": 30
             }
           }
         },
         "database": 1
-      },
-      "metabase-field-filters": {
-        "period": {
-          "table_ref": "v_egisz_transactions_enriched_ui",
-          "field_name": "Обработано"
-        }
       },
       "display": "scalar",
       "visualization_settings": {
         "column_settings": {
-          "[\"name\",\"Количество\"]": { "column_title": "Количество", "number_separators": ".", "decimals": 0 }
+          "[\"name\",\"Количество\"]": {
+            "column_title": "Количество",
+            "number_separators": ".",
+            "decimals": 0
+          }
         }
       },
       "sizeX": 6,
       "sizeY": 4,
-      "row": 0,
+      "row": 3,
       "col": 6
     },
     {
       "name": "% Ошибок за период",
-      "description": "Доля ошибок и объёмы в разрезе типа СЭМД, клиники и классификации ответа ЕГИСЗ (код ошибки или начало текста, как на карточке «Ошибки по типу»). Фильтр периода — по дате обработки в витрине. Для строки «(успешно)» / «(неизвестно)» столбец «Ошибок» обычно 0; сортировка выводит проблемные срезы наверх.",
+      "description": "Доля ошибок и объёмы в разрезе типа СЭМД, клиники и смысловой сводки первой ошибки в JSON (egisz_friendly_error_item, как на «Ошибки по типу»). Фильтр периода — по дате обработки в витрине. Для «(успешно)» / «(неизвестно)» столбец «Ошибок» обычно 0; сортировка выводит проблемные срезы наверх.",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH filtered AS ( SELECT * FROM public.v_egisz_transactions_enriched_ui WHERE {{period}} ), with_err AS ( SELECT f.*, CASE WHEN f.\"Статус\" = 'success' THEN '(успешно)' WHEN f.\"Статус\" = 'unknown' THEN '(неизвестно)' WHEN f.\"Статус\" = 'error' THEN COALESCE( ( SELECT CASE WHEN NULLIF(TRIM(err->>'code'), '') IS NOT NULL THEN TRIM(err->>'code') ELSE LEFT(COALESCE(NULLIF(TRIM(err->>'message'), ''), '(нет текста)'), 120) END FROM jsonb_array_elements(COALESCE(f.\"Ошибки JSON\", '[]'::jsonb)) AS e(err) WHERE NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL LIMIT 1 ), '(ошибка без деталей)' ) ELSE '(' || COALESCE(f.\"Статус\", '?') || ')' END AS err_kind FROM filtered f ) SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", \"JID клиники\", COALESCE(NULLIF(TRIM(\"Наименование клиники\"), ''), '(нет)') AS \"Наименование клиники\", err_kind AS \"Тип ошибки\", COUNT(*)::bigint AS \"Транзакций\", SUM(CASE WHEN \"Статус\" = 'error' THEN 1 ELSE 0 END)::bigint AS \"Ошибок\", ROUND(100.0 * SUM(CASE WHEN \"Статус\" = 'error' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS \"Процент ошибок\" FROM with_err GROUP BY 1, 2, 3, 4, 5 ORDER BY \"Ошибок\" DESC, \"Транзакций\" DESC LIMIT 500",
+          "query": "WITH vit_ref AS ( SELECT COALESCE((SELECT MAX(\"Обработано\") FROM public.v_egisz_transactions_enriched_ui), NOW()) AS ref_ts ), filtered AS ( SELECT v.* FROM public.v_egisz_transactions_enriched_ui v CROSS JOIN vit_ref WHERE v.\"Обработано\" >= vit_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{period}}::numeric))) ), with_err AS ( SELECT f.*, CASE WHEN f.\"Статус\" = 'success' THEN '(успешно)' WHEN f.\"Статус\" = 'unknown' THEN '(неизвестно)' WHEN f.\"Статус\" = 'error' THEN COALESCE( ( SELECT LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 120) FROM jsonb_array_elements(COALESCE(f.\"Ошибки JSON\", '[]'::jsonb)) AS e(err) WHERE NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL LIMIT 1 ), '(ошибка без деталей)' ) ELSE '(' || COALESCE(f.\"Статус\", '?') || ')' END AS err_kind FROM filtered f ) SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Тип СЭМД\", \"JID клиники\", COALESCE(NULLIF(TRIM(\"Наименование клиники\"), ''), '(нет)') AS \"Наименование клиники\", err_kind AS \"Тип ошибки\", COUNT(*)::bigint AS \"Транзакций\", SUM(CASE WHEN \"Статус\" = 'error' THEN 1 ELSE 0 END)::bigint AS \"Ошибок\", ROUND(100.0 * SUM(CASE WHEN \"Статус\" = 'error' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS \"Процент ошибок\" FROM with_err GROUP BY 1, 2, 3, 4 ORDER BY \"Ошибок\" DESC, \"Транзакций\" DESC LIMIT 500",
           "template-tags": {
             "period": {
               "id": "b1c2d3e4-f5a6-7890-bcde-f12345678903",
               "name": "period",
-              "display-name": "Период (дата обработки)",
-              "type": "dimension",
-              "widget-type": "date/all-options"
+              "display-name": "Глубина, дней",
+              "type": "number",
+              "required": true,
+              "default": 30
             }
           }
         },
         "database": 1
       },
-      "metabase-field-filters": {
-        "period": {
-          "table_ref": "v_egisz_transactions_enriched_ui",
-          "field_name": "Обработано"
-        }
-      },
       "display": "table",
       "visualization_settings": {
         "column_settings": {
-          "[\"name\",\"Код СЭМД\"]": { "column_title": "Код СЭМД" },
-          "[\"name\",\"Наименование СЭМД\"]": { "column_title": "Наименование СЭМД" },
-          "[\"name\",\"JID клиники\"]": { "column_title": "JID клиники" },
-          "[\"name\",\"Наименование клиники\"]": { "column_title": "Наименование клиники" },
-          "[\"name\",\"Тип ошибки\"]": { "column_title": "Тип ошибки" },
-          "[\"name\",\"Транзакций\"]": { "column_title": "Транзакций", "number_separators": ".", "decimals": 0 },
-          "[\"name\",\"Ошибок\"]": { "column_title": "Ошибок", "number_separators": ".", "decimals": 0 },
-          "[\"name\",\"Процент ошибок\"]": { "column_title": "% ошибок в срезе", "decimals": 2 }
+          "[\"name\",\"Тип СЭМД\"]": {
+            "column_title": "Тип СЭМД (код)"
+          },
+          "[\"name\",\"JID клиники\"]": {
+            "column_title": "JID клиники"
+          },
+          "[\"name\",\"Наименование клиники\"]": {
+            "column_title": "Наименование клиники"
+          },
+          "[\"name\",\"Тип ошибки\"]": {
+            "column_title": "Тип ошибки"
+          },
+          "[\"name\",\"Транзакций\"]": {
+            "column_title": "Транзакций",
+            "number_separators": ".",
+            "decimals": 0
+          },
+          "[\"name\",\"Ошибок\"]": {
+            "column_title": "Ошибок",
+            "number_separators": ".",
+            "decimals": 0
+          },
+          "[\"name\",\"Процент ошибок\"]": {
+            "column_title": "% ошибок в срезе",
+            "decimals": 2
+          }
         }
       },
       "sizeX": 6,
       "sizeY": 4,
-      "row": 0,
+      "row": 3,
       "col": 12
     },
     {
@@ -140,20 +202,33 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT COUNT(*)::bigint AS \"Количество\" FROM public.v_rpt_documents_no_response_ui",
-          "template-tags": {}
+          "query": "WITH pend_ref AS ( SELECT COALESCE((SELECT MAX(\"Отправлено\") FROM public.v_rpt_documents_no_response_ui), NOW()) AS ref_ts ) SELECT COUNT(*)::bigint AS \"Количество\" FROM public.v_rpt_documents_no_response_ui p CROSS JOIN pend_ref WHERE p.\"Отправлено\" >= pend_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{period}}::numeric)))",
+          "template-tags": {
+            "period": {
+              "id": "b1c2d3e4-f5a6-7890-bcde-f12345678907",
+              "name": "period",
+              "display-name": "Глубина, дней",
+              "type": "number",
+              "required": true,
+              "default": 30
+            }
+          }
         },
         "database": 1
       },
       "display": "scalar",
       "visualization_settings": {
         "column_settings": {
-          "[\"name\",\"Количество\"]": { "column_title": "Количество", "number_separators": ".", "decimals": 0 }
+          "[\"name\",\"Количество\"]": {
+            "column_title": "Количество",
+            "number_separators": ".",
+            "decimals": 0
+          }
         }
       },
       "sizeX": 6,
       "sizeY": 4,
-      "row": 0,
+      "row": 3,
       "col": 18
     },
     {
@@ -163,52 +238,88 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT CASE WHEN \"Отправлено\" IS NULL THEN 'дата неизвестна' WHEN EXTRACT(EPOCH FROM (NOW() - \"Отправлено\"))/3600 < 1 THEN 'менее 1 часа' WHEN EXTRACT(EPOCH FROM (NOW() - \"Отправлено\"))/3600 < 12 THEN '1–12 часов' WHEN EXTRACT(EPOCH FROM (NOW() - \"Отправлено\"))/3600 < 24 THEN '12–24 часа' ELSE 'свыше 24 часов' END AS \"Срок ожидания\", COUNT(*)::bigint AS \"Количество\" FROM public.v_rpt_documents_no_response_ui GROUP BY 1 ORDER BY MIN(EXTRACT(EPOCH FROM (NOW() - \"Отправлено\"))) NULLS LAST",
-          "template-tags": {}
+          "query": "WITH pend_ref AS ( SELECT COALESCE((SELECT MAX(\"Отправлено\") FROM public.v_rpt_documents_no_response_ui), NOW()) AS ref_ts ) SELECT CASE WHEN p.\"Отправлено\" IS NULL THEN 'дата неизвестна' WHEN EXTRACT(EPOCH FROM (pend_ref.ref_ts - p.\"Отправлено\"))/3600 < 1 THEN 'менее 1 часа' WHEN EXTRACT(EPOCH FROM (pend_ref.ref_ts - p.\"Отправлено\"))/3600 < 12 THEN '1–12 часов' WHEN EXTRACT(EPOCH FROM (pend_ref.ref_ts - p.\"Отправлено\"))/3600 < 24 THEN '12–24 часа' ELSE 'свыше 24 часов' END AS \"Срок ожидания\", COUNT(*)::bigint AS \"Количество\" FROM public.v_rpt_documents_no_response_ui p CROSS JOIN pend_ref WHERE p.\"Отправлено\" >= pend_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{period}}::numeric))) GROUP BY 1 ORDER BY MIN(EXTRACT(EPOCH FROM (pend_ref.ref_ts - p.\"Отправлено\"))) NULLS LAST",
+          "template-tags": {
+            "period": {
+              "id": "b1c2d3e4-f5a6-7890-bcde-f12345678908",
+              "name": "period",
+              "display-name": "Глубина, дней",
+              "type": "number",
+              "required": true,
+              "default": 30
+            }
+          }
         },
         "database": 1
       },
       "display": "bar",
       "visualization_settings": {
-        "graph.dimensions": ["Срок ожидания"],
-        "graph.metrics": ["Количество"],
+        "graph.dimensions": [
+          "Срок ожидания"
+        ],
+        "graph.metrics": [
+          "Количество"
+        ],
         "graph.x_axis.axis_enabled": "rotate-45",
         "column_settings": {
-          "[\"name\",\"Срок ожидания\"]": { "column_title": "Срок ожидания" },
-          "[\"name\",\"Количество\"]": { "column_title": "Количество", "number_separators": ".", "decimals": 0 }
+          "[\"name\",\"Срок ожидания\"]": {
+            "column_title": "Срок ожидания"
+          },
+          "[\"name\",\"Количество\"]": {
+            "column_title": "Количество",
+            "number_separators": ".",
+            "decimals": 0
+          }
         }
       },
       "sizeX": 8,
       "sizeY": 6,
-      "row": 11,
+      "row": 14,
       "col": 0
     },
     {
       "name": "Очередь: по типу СЭМД",
-      "description": "Распределение ожидающих ответа документов по коду и наименованию СЭМД.",
+      "description": "Распределение ожидающих ответа по типу СЭМД (код); подписи короче, график — по горизонтали.",
       "table_ref": "v_rpt_documents_no_response_ui",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(*)::bigint AS \"Количество\" FROM public.v_rpt_documents_no_response_ui GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 25",
-          "template-tags": {}
+          "query": "WITH pend_ref AS ( SELECT COALESCE((SELECT MAX(\"Отправлено\") FROM public.v_rpt_documents_no_response_ui), NOW()) AS ref_ts ) SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Тип СЭМД\", COUNT(*)::bigint AS \"Количество\" FROM public.v_rpt_documents_no_response_ui p CROSS JOIN pend_ref WHERE p.\"Отправлено\" >= pend_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{period}}::numeric))) GROUP BY 1 ORDER BY 2 DESC LIMIT 25",
+          "template-tags": {
+            "period": {
+              "id": "b1c2d3e4-f5a6-7890-bcde-f12345678909",
+              "name": "period",
+              "display-name": "Глубина, дней",
+              "type": "number",
+              "required": true,
+              "default": 30
+            }
+          }
         },
         "database": 1
       },
-      "display": "bar",
+      "display": "row",
       "visualization_settings": {
-        "graph.dimensions": ["Наименование СЭМД"],
-        "graph.metrics": ["Количество"],
-        "graph.x_axis.axis_enabled": "rotate-45",
+        "graph.dimensions": [
+          "Тип СЭМД"
+        ],
+        "graph.metrics": [
+          "Количество"
+        ],
         "column_settings": {
-          "[\"name\",\"Код СЭМД\"]": { "column_title": "Код СЭМД" },
-          "[\"name\",\"Наименование СЭМД\"]": { "column_title": "Наименование СЭМД" },
-          "[\"name\",\"Количество\"]": { "column_title": "Количество", "number_separators": ".", "decimals": 0 }
+          "[\"name\",\"Тип СЭМД\"]": {
+            "column_title": "Тип СЭМД (код)"
+          },
+          "[\"name\",\"Количество\"]": {
+            "column_title": "Количество",
+            "number_separators": ".",
+            "decimals": 0
+          }
         }
       },
       "sizeX": 8,
       "sizeY": 6,
-      "row": 11,
+      "row": 14,
       "col": 8
     },
     {
@@ -218,106 +329,132 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT \"JID клиники\", COALESCE(NULLIF(TRIM(\"Наименование клиники\"), ''), '(нет)') AS \"Наименование клиники\", COUNT(*)::bigint AS \"Количество\" FROM public.v_rpt_documents_no_response_ui GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 25",
-          "template-tags": {}
+          "query": "WITH pend_ref AS ( SELECT COALESCE((SELECT MAX(\"Отправлено\") FROM public.v_rpt_documents_no_response_ui), NOW()) AS ref_ts ) SELECT (LEFT(COALESCE(NULLIF(TRIM(\"Наименование клиники\"), ''), ''), 28) || ' | JID ' || \"JID клиники\"::text) AS \"Клиника\", COUNT(*)::bigint AS \"Количество\" FROM public.v_rpt_documents_no_response_ui p CROSS JOIN pend_ref WHERE p.\"Отправлено\" >= pend_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{period}}::numeric))) GROUP BY 1 ORDER BY 2 DESC LIMIT 25",
+          "template-tags": {
+            "period": {
+              "id": "b1c2d3e4-f5a6-7890-bcde-f1234567890a",
+              "name": "period",
+              "display-name": "Глубина, дней",
+              "type": "number",
+              "required": true,
+              "default": 30
+            }
+          }
         },
         "database": 1
       },
       "display": "row",
       "visualization_settings": {
-        "graph.dimensions": ["Наименование клиники"],
-        "graph.metrics": ["Количество"],
+        "graph.dimensions": [
+          "Клиника"
+        ],
+        "graph.metrics": [
+          "Количество"
+        ],
         "column_settings": {
-          "[\"name\",\"JID клиники\"]": { "column_title": "JID клиники" },
-          "[\"name\",\"Наименование клиники\"]": { "column_title": "Наименование клиники" },
-          "[\"name\",\"Количество\"]": { "column_title": "Количество", "number_separators": ".", "decimals": 0 }
+          "[\"name\",\"Клиника\"]": {
+            "column_title": "Клиника (коротко)"
+          },
+          "[\"name\",\"Количество\"]": {
+            "column_title": "Количество",
+            "number_separators": ".",
+            "decimals": 0
+          }
         }
       },
       "sizeX": 8,
       "sizeY": 6,
-      "row": 11,
+      "row": 14,
       "col": 16
     },
     {
       "name": "Ошибки по типу (код ЕГИСЗ)",
-      "description": "Распределение ошибочных транзакций по коду из ответа ЕГИСЗ (ns2:code в JSON); если кода нет — по началу текста сообщения. Тот же период (дата обработки), что у KPI выше.",
+      "description": "Распределение по смысловой сводке (public.egisz_friendly_error_item: совпадает с логикой колонки «Сводка ошибок» в витрине; для Schematron — краткие подсказки, для ГИП — исходный текст). Тот же период (дата обработки), что у KPI выше.",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT (\n  CASE\n    WHEN NULLIF(TRIM(err->>'code'), '') IS NOT NULL THEN TRIM(err->>'code')\n    ELSE LEFT(COALESCE(NULLIF(TRIM(err->>'message'), ''), '(нет текста)'), 120)\n  END\n) AS \"Тип ошибки\",\nCOUNT(*)::bigint AS \"Количество\"\nFROM public.v_egisz_transactions_enriched_ui,\njsonb_array_elements(\"Ошибки JSON\") AS e(err)\nWHERE {{period}} AND \"Статус\" = 'error'\n  AND (NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL)\nGROUP BY 1\nORDER BY 2 DESC\nLIMIT 20",
+          "query": "WITH vit_ref AS ( SELECT COALESCE((SELECT MAX(\"Обработано\") FROM public.v_egisz_transactions_enriched_ui), NOW()) AS ref_ts )\nSELECT LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 72) AS \"Тип ошибки\",\nCOUNT(*)::bigint AS \"Количество\"\nFROM public.v_egisz_transactions_enriched_ui env CROSS JOIN vit_ref,\njsonb_array_elements(env.\"Ошибки JSON\") AS e(err)\nWHERE env.\"Обработано\" >= vit_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{period}}::numeric))) AND env.\"Статус\" = 'error'\n  AND (NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL)\nGROUP BY 1\nORDER BY 2 DESC\nLIMIT 20",
           "template-tags": {
             "period": {
               "id": "b1c2d3e4-f5a6-7890-bcde-f12345678904",
               "name": "period",
-              "display-name": "Период (дата обработки)",
-              "type": "dimension",
-              "widget-type": "date/all-options"
+              "display-name": "Глубина, дней",
+              "type": "number",
+              "required": true,
+              "default": 30
             }
           }
         },
         "database": 1
       },
-      "metabase-field-filters": {
-        "period": {
-          "table_ref": "v_egisz_transactions_enriched_ui",
-          "field_name": "Обработано"
-        }
-      },
       "display": "row",
       "visualization_settings": {
-        "graph.dimensions": ["Тип ошибки"],
-        "graph.metrics": ["Количество"],
+        "graph.dimensions": [
+          "Тип ошибки"
+        ],
+        "graph.metrics": [
+          "Количество"
+        ],
         "column_settings": {
-          "[\"name\",\"Тип ошибки\"]": { "column_title": "Тип ошибки" },
-          "[\"name\",\"Количество\"]": { "column_title": "Количество", "number_separators": ".", "decimals": 0 }
+          "[\"name\",\"Тип ошибки\"]": {
+            "column_title": "Тип ошибки"
+          },
+          "[\"name\",\"Количество\"]": {
+            "column_title": "Количество",
+            "number_separators": ".",
+            "decimals": 0
+          }
         }
       },
       "sizeX": 8,
       "sizeY": 7,
-      "row": 4,
+      "row": 7,
       "col": 0
     },
     {
       "name": "Ошибки по типу СЭМД",
-      "description": "Число ошибочных транзакций за период по коду и наименованию СЭМД.",
+      "description": "Ошибки за глубину периода, разрез по типу СЭМД (код), без длинного наименования.",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE {{period}} AND \"Статус\" = 'error' GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 25",
+          "query": "WITH vit_ref AS ( SELECT COALESCE((SELECT MAX(\"Обработано\") FROM public.v_egisz_transactions_enriched_ui), NOW()) AS ref_ts ) SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Тип СЭМД\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui CROSS JOIN vit_ref WHERE \"Обработано\" >= vit_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{period}}::numeric))) AND \"Статус\" = 'error' GROUP BY 1 ORDER BY 2 DESC LIMIT 25",
           "template-tags": {
             "period": {
               "id": "b1c2d3e4-f5a6-7890-bcde-f12345678905",
               "name": "period",
-              "display-name": "Период (дата обработки)",
-              "type": "dimension",
-              "widget-type": "date/all-options"
+              "display-name": "Глубина, дней",
+              "type": "number",
+              "required": true,
+              "default": 30
             }
           }
         },
         "database": 1
       },
-      "metabase-field-filters": {
-        "period": {
-          "table_ref": "v_egisz_transactions_enriched_ui",
-          "field_name": "Обработано"
-        }
-      },
-      "display": "bar",
+      "display": "row",
       "visualization_settings": {
-        "graph.dimensions": ["Наименование СЭМД"],
-        "graph.metrics": ["Количество"],
-        "graph.x_axis.axis_enabled": "rotate-45",
+        "graph.dimensions": [
+          "Тип СЭМД"
+        ],
+        "graph.metrics": [
+          "Количество"
+        ],
         "column_settings": {
-          "[\"name\",\"Код СЭМД\"]": { "column_title": "Код СЭМД" },
-          "[\"name\",\"Наименование СЭМД\"]": { "column_title": "Наименование СЭМД" },
-          "[\"name\",\"Количество\"]": { "column_title": "Количество", "number_separators": ".", "decimals": 0 }
+          "[\"name\",\"Тип СЭМД\"]": {
+            "column_title": "Тип СЭМД (код)"
+          },
+          "[\"name\",\"Количество\"]": {
+            "column_title": "Количество",
+            "number_separators": ".",
+            "decimals": 0
+          }
         }
       },
       "sizeX": 8,
       "sizeY": 7,
-      "row": 4,
+      "row": 7,
       "col": 8
     },
     {
@@ -327,38 +464,42 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT \"JID клиники\", \"Наименование клиники\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE {{period}} AND \"Статус\" = 'error' GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 25",
+          "query": "WITH vit_ref AS ( SELECT COALESCE((SELECT MAX(\"Обработано\") FROM public.v_egisz_transactions_enriched_ui), NOW()) AS ref_ts ) SELECT (LEFT(COALESCE(NULLIF(TRIM(\"Наименование клиники\"), ''), ''), 28) || ' | JID ' || \"JID клиники\"::text) AS \"Клиника\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui CROSS JOIN vit_ref WHERE \"Обработано\" >= vit_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{period}}::numeric))) AND \"Статус\" = 'error' GROUP BY 1 ORDER BY 2 DESC LIMIT 25",
           "template-tags": {
             "period": {
               "id": "b1c2d3e4-f5a6-7890-bcde-f12345678906",
               "name": "period",
-              "display-name": "Период (дата обработки)",
-              "type": "dimension",
-              "widget-type": "date/all-options"
+              "display-name": "Глубина, дней",
+              "type": "number",
+              "required": true,
+              "default": 30
             }
           }
         },
         "database": 1
       },
-      "metabase-field-filters": {
-        "period": {
-          "table_ref": "v_egisz_transactions_enriched_ui",
-          "field_name": "Обработано"
-        }
-      },
       "display": "row",
       "visualization_settings": {
-        "graph.dimensions": ["Наименование клиники"],
-        "graph.metrics": ["Количество"],
+        "graph.dimensions": [
+          "Клиника"
+        ],
+        "graph.metrics": [
+          "Количество"
+        ],
         "column_settings": {
-          "[\"name\",\"JID клиники\"]": { "column_title": "JID клиники" },
-          "[\"name\",\"Наименование клиники\"]": { "column_title": "Наименование клиники" },
-          "[\"name\",\"Количество\"]": { "column_title": "Количество", "number_separators": ".", "decimals": 0 }
+          "[\"name\",\"Клиника\"]": {
+            "column_title": "Клиника (коротко)"
+          },
+          "[\"name\",\"Количество\"]": {
+            "column_title": "Количество",
+            "number_separators": ".",
+            "decimals": 0
+          }
         }
       },
       "sizeX": 8,
       "sizeY": 7,
-      "row": 4,
+      "row": 7,
       "col": 16
     }
   ]

@@ -1,38 +1,61 @@
 {
-  "name": "Тренды и динамика",
-  "description": "Объёмы обмена и доля успешных регистраций по времени (дата с ответа ЕГИСЗ или дата обработки).",
+  "name": "05 Тренды и динамика",
+  "description": "Анализ нагрузки. Ось дат и 72-часовой срез привязаны к последним датам в витрине, а не к часам сервера, чтобы снимок оставался читаемым при остановке ETL.",
   "parameters": [
     {
       "id": "e7f8a9b0-c1d2-4e3f-a5b6-c7d8e9f0a1b2",
-      "name": "Период (ось даты графика)",
+      "name": "Период (ось даты графика) — глубина, дней",
       "slug": "trend_period_filter",
-      "type": "date/all-options",
-      "sectionId": "date"
+      "type": "number/=",
+      "sectionId": "number",
+      "default": 30
     }
   ],
   "cards": [
     {
       "name": "Транзакции по дням и статусам",
-      "description": "Количество сообщений по календарным дням: дата из ответа ЕГИСЗ (Дата регистрации / registrationDate), при отсутствии — дата загрузки в витрину (Обработано). Не использовать только «Обработано» для трендов — при пакетной загрузке ETL все точки съезжают в один день.",
+      "description": "Количество сообщений по календарным дням: дата из ответа ЕГИСЗ (Дата регистрации / registrationDate), при отсутствии — дата загрузки в витрину (Обработано). Тот же фильтр периода, что у «Динамика по типам СЭМД» (ось «День (тренд)»).",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT DATE(COALESCE(\"Дата регистрации\", \"Обработано\")) AS \"Дата\", \"Статус\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui GROUP BY 1, 2 ORDER BY 1 ASC",
-          "template-tags": {}
+          "query": "SELECT DATE(COALESCE(\"Дата регистрации\", \"Обработано\")) AS \"Дата\", \"Статус\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE \"День (тренд)\"::date >= ( (SELECT COALESCE(MAX(\"День (тренд)\")::date, CURRENT_DATE) FROM public.v_egisz_transactions_enriched_ui) - (({{trend_period}}::integer) - 1) ) GROUP BY 1, 2 ORDER BY 1 ASC",
+          "template-tags": {
+            "trend_period": {
+              "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+              "name": "trend_period",
+              "display-name": "Период (ось даты графика) (глубина, дней)",
+              "type": "number",
+              "required": true,
+              "default": 30
+            }
+          }
         },
         "database": 1
       },
       "display": "bar",
       "visualization_settings": {
-        "graph.dimensions": ["Дата", "Статус"],
-        "graph.metrics": ["Количество"],
+        "graph.dimensions": [
+          "Дата",
+          "Статус"
+        ],
+        "graph.metrics": [
+          "Количество"
+        ],
         "stackable.stack_type": "stacked",
         "graph.x_axis.axis_enabled": "rotate-45",
         "column_settings": {
-          "[\"name\",\"Дата\"]": { "column_title": "Дата" },
-          "[\"name\",\"Статус\"]": { "column_title": "Статус" },
-          "[\"name\",\"Количество\"]": { "column_title": "Количество", "number_separators": ".", "decimals": 0 }
+          "[\"name\",\"Дата\"]": {
+            "column_title": "Дата"
+          },
+          "[\"name\",\"Статус\"]": {
+            "column_title": "Статус"
+          },
+          "[\"name\",\"Количество\"]": {
+            "column_title": "Количество",
+            "number_separators": ".",
+            "decimals": 0
+          }
         }
       },
       "sizeX": 12,
@@ -47,39 +70,135 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT \"День (тренд)\" AS \"Дата\", CASE WHEN NULLIF(TRIM(\"Код СЭМД\"), '') IS NULL THEN initcap(COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)')) ELSE NULLIF(TRIM(\"Код СЭМД\"), '') || '. ' || initcap(COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)')) END AS \"Наименование СЭМД\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE {{trend_period}} GROUP BY 1, 2 ORDER BY 1 ASC",
+          "query": "SELECT \"День (тренд)\" AS \"Дата\", CASE WHEN NULLIF(TRIM(\"Код СЭМД\"), '') IS NULL THEN initcap(COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)')) ELSE NULLIF(TRIM(\"Код СЭМД\"), '') || '. ' || initcap(COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)')) END AS \"Наименование СЭМД\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE \"День (тренд)\"::date >= ( (SELECT COALESCE(MAX(\"День (тренд)\")::date, CURRENT_DATE) FROM public.v_egisz_transactions_enriched_ui) - (({{trend_period}}::integer) - 1) ) GROUP BY 1, 2 ORDER BY 1 ASC",
           "template-tags": {
             "trend_period": {
               "id": "f8a9b0c1-d2e3-4f5a-b6c7-d8e9f0a1b2c3",
               "name": "trend_period",
-              "display-name": "Период (ось даты графика)",
-              "type": "dimension",
-              "widget-type": "date/all-options"
+              "display-name": "Период (ось даты графика) (глубина, дней)",
+              "type": "number",
+              "required": true,
+              "default": 30
             }
           }
         },
         "database": 1
       },
-      "metabase-field-filters": {
-        "trend_period": {
-          "table_ref": "v_egisz_transactions_enriched_ui",
-          "field_name": "День (тренд)"
-        }
-      },
       "display": "line",
       "visualization_settings": {
-        "graph.dimensions": ["Дата", "Наименование СЭМД"],
-        "graph.metrics": ["Количество"],
+        "graph.dimensions": [
+          "Дата",
+          "Наименование СЭМД"
+        ],
+        "graph.metrics": [
+          "Количество"
+        ],
         "column_settings": {
-          "[\"name\",\"Дата\"]": { "column_title": "Дата" },
-          "[\"name\",\"Наименование СЭМД\"]": { "column_title": "Наименование СЭМД" },
-          "[\"name\",\"Количество\"]": { "column_title": "Количество" }
+          "[\"name\",\"Дата\"]": {
+            "column_title": "Дата"
+          },
+          "[\"name\",\"Наименование СЭМД\"]": {
+            "column_title": "Наименование СЭМД"
+          },
+          "[\"name\",\"Количество\"]": {
+            "column_title": "Количество"
+          }
         }
       },
       "sizeX": 12,
       "sizeY": 8,
       "row": 0,
       "col": 12
+    },
+    {
+      "name": "Доля ошибок по дням",
+      "description": "По календарным дням (колонка «День (тренд)»): число обработанных, число error и процент ошибок. Дополняет stacked-график по статусам.",
+      "table_ref": "v_egisz_transactions_enriched_ui",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT \"День (тренд)\" AS \"Дата\", COUNT(*)::bigint AS \"Всего\", SUM(CASE WHEN \"Статус\" = 'error' THEN 1 ELSE 0 END)::bigint AS \"Ошибок\", ROUND(100.0 * SUM(CASE WHEN \"Статус\" = 'error' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS \"% ошибок\" FROM public.v_egisz_transactions_enriched_ui WHERE \"День (тренд)\"::date >= ( (SELECT COALESCE(MAX(\"День (тренд)\")::date, CURRENT_DATE) FROM public.v_egisz_transactions_enriched_ui) - (({{trend_period}}::integer) - 1) ) GROUP BY 1 ORDER BY 1 ASC",
+          "template-tags": {
+            "trend_period": {
+              "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+              "name": "trend_period",
+              "display-name": "Период (ось даты графика) (глубина, дней)",
+              "type": "number",
+              "required": true,
+              "default": 30
+            }
+          }
+        },
+        "database": 1
+      },
+      "display": "line",
+      "visualization_settings": {
+        "graph.dimensions": [
+          "Дата"
+        ],
+        "graph.metrics": [
+          "% ошибок"
+        ],
+        "column_settings": {
+          "[\"name\",\"Дата\"]": {
+            "column_title": "Дата"
+          },
+          "[\"name\",\"Всего\"]": {
+            "column_title": "Всего",
+            "number_separators": ".",
+            "decimals": 0
+          },
+          "[\"name\",\"Ошибок\"]": {
+            "column_title": "Ошибок",
+            "number_separators": ".",
+            "decimals": 0
+          },
+          "[\"name\",\"% ошибок\"]": {
+            "column_title": "% ошибок",
+            "decimals": 2
+          }
+        }
+      },
+      "sizeX": 24,
+      "sizeY": 6,
+      "row": 8,
+      "col": 0
+    },
+    {
+      "name": "Объём по часам (72 ч)",
+      "description": "Нагрузка по моменту попадания в витрину («Обработано»), последние 72 часа; часовая детализация без общего фильтра дашборда.",
+      "table_ref": "v_egisz_transactions_enriched_ui",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "WITH vit_ref AS ( SELECT COALESCE((SELECT MAX(\"Обработано\") FROM public.v_egisz_transactions_enriched_ui), NOW()) AS ref_ts ) SELECT date_trunc('hour', \"Обработано\") AS \"Час\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui CROSS JOIN vit_ref WHERE \"Обработано\" >= vit_ref.ref_ts - INTERVAL '72 hours' GROUP BY 1 ORDER BY 1 ASC",
+          "template-tags": {}
+        },
+        "database": 1
+      },
+      "display": "line",
+      "visualization_settings": {
+        "graph.dimensions": [
+          "Час"
+        ],
+        "graph.metrics": [
+          "Количество"
+        ],
+        "column_settings": {
+          "[\"name\",\"Час\"]": {
+            "column_title": "Час"
+          },
+          "[\"name\",\"Количество\"]": {
+            "column_title": "Количество",
+            "number_separators": ".",
+            "decimals": 0
+          }
+        }
+      },
+      "sizeX": 24,
+      "sizeY": 6,
+      "row": 14,
+      "col": 0
     }
   ]
 }

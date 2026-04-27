@@ -8,8 +8,8 @@ firebird:
   charset: WIN1251
   page_size: 4096
 postgres:
-  host: localhost
-  port: 5433
+  host: postgres.egisz-corp.svc.cluster.local
+  port: 5432
   database: egisz_reports
   user: egisz
   password: egisz

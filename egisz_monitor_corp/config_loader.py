@@ -130,6 +130,15 @@ def load_corp_config(path: Path | None = None) -> CorpAppConfig:
             f"to config/egisz_corp.yaml or set EGISZ_CORP_CONFIG."
         )
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    return parse_corp_config_dict(raw)
+
+
+def parse_corp_config_dict(
+    raw: dict[str, Any],
+    *,
+    use_yaml_postgres_only: bool = False,
+) -> CorpAppConfig:
+    """Build config from a YAML root mapping (used by load_corp_config and Config UI form preview/tests)."""
     if not isinstance(raw, dict):
         raise ValueError("Config root must be a mapping")
 
@@ -139,6 +148,21 @@ def load_corp_config(path: Path | None = None) -> CorpAppConfig:
     mb = raw.get("metabase") or {}
     if not isinstance(fb, dict) or not isinstance(pg, dict) or not isinstance(etl, dict):
         raise ValueError("firebird, postgres, and etl must be mappings")
+
+    if use_yaml_postgres_only:
+        pg_host = _str(pg.get("host"))
+        pg_port = _int(pg.get("port"))
+        pg_db = _str(pg.get("database"))
+        pg_user = _str(pg.get("user"))
+        pg_password = _str(pg.get("password"))
+        pg_schema = _str(pg.get("schema"), "public")
+    else:
+        pg_host = _env_nonempty("EGISZ_CORP_POSTGRES_HOST") or _str(pg.get("host"))
+        pg_port = _int(_env_nonempty("EGISZ_CORP_POSTGRES_PORT") or pg.get("port"))
+        pg_db = _env_nonempty("EGISZ_CORP_POSTGRES_DB") or _str(pg.get("database"))
+        pg_user = _env_nonempty("EGISZ_CORP_POSTGRES_USER") or _str(pg.get("user"))
+        pg_password = _env_nonempty("EGISZ_CORP_POSTGRES_PASSWORD") or _str(pg.get("password"))
+        pg_schema = _env_nonempty("EGISZ_CORP_POSTGRES_SCHEMA") or _str(pg.get("schema"), "public")
 
     return CorpAppConfig(
         firebird=FirebirdConfig(
@@ -151,12 +175,12 @@ def load_corp_config(path: Path | None = None) -> CorpAppConfig:
             page_size=_int(fb.get("page_size"), 4096),
         ),
         postgres=PostgresConfig(
-            host=_env_nonempty("EGISZ_CORP_POSTGRES_HOST") or _str(pg.get("host")),
-            port=_int(_env_nonempty("EGISZ_CORP_POSTGRES_PORT") or pg.get("port")),
-            database=_env_nonempty("EGISZ_CORP_POSTGRES_DB") or _str(pg.get("database")),
-            user=_env_nonempty("EGISZ_CORP_POSTGRES_USER") or _str(pg.get("user")),
-            password=_env_nonempty("EGISZ_CORP_POSTGRES_PASSWORD") or _str(pg.get("password")),
-            schema=_env_nonempty("EGISZ_CORP_POSTGRES_SCHEMA") or _str(pg.get("schema"), "public"),
+            host=pg_host,
+            port=pg_port,
+            database=pg_db,
+            user=pg_user,
+            password=pg_password,
+            schema=pg_schema,
         ),
         etl=EtlConfig(
             batch_size=_int(etl.get("batch_size"), 500),

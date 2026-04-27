@@ -396,7 +396,8 @@ create_dashboard() {
       description: $description,
       collection_id: ($collectionId | tonumber),
       cacheables: [],
-      parameters: ($parameters | fromjson)
+      parameters: ($parameters | fromjson),
+      auto_apply_filters: true
     }')"
 
   dashboard_id="$(api_request POST "/api/dashboard" "${dashboard_payload}" | jq -r '.id')"
@@ -404,6 +405,11 @@ create_dashboard() {
     echo "Failed to create dashboard ${name}" >&2
     exit 1
   fi
+
+  # Id параметров фильтра после POST могут отличаться от полей в JSON — привязки к карточкам строим по ответу GET.
+  local dash_saved resolved_parameters_json
+  dash_saved="$(api_request GET "/api/dashboard/${dashboard_id}")"
+  resolved_parameters_json="$(echo "${dash_saved}" | jq -c '.parameters // []')"
 
   # Metabase v0.47+ attaches dashboard cards via PUT /api/dashboard/:id/cards.
   local cards="[]"
@@ -420,11 +426,11 @@ create_dashboard() {
       local col="$(echo "$parsed_json" | jq -r ".cards[$i].col // 0")"
       
       local mappings
-      mappings="$(echo "$parsed_json" | jq -c --argjson cardIndex "$i" '
+      mappings="$(echo "$parsed_json" | jq -c --argjson cardIndex "$i" --argjson dashParams "${resolved_parameters_json}" '
         (.cards[$cardIndex].dataset_query.native["template-tags"] // {}) as $cardTemplateTags
         | ($cardTemplateTags | keys) as $cardTags
         | [
-            (.parameters // [])[] as $param
+            $dashParams[] as $param
             | (
                 if ($param.slug | endswith("_filter")) then
                   ($param.slug | sub("_filter$"; ""))
@@ -475,6 +481,14 @@ create_dashboard() {
     local cards_payload
     cards_payload="$(jq -n --arg cards "${cards}" '{cards: ($cards | fromjson)}')"
     api_request PUT "/api/dashboard/${dashboard_id}/cards" "${cards_payload}" >/dev/null
+
+    # Полное тело как после GET (уже с parameter_mappings), с auto_apply_filters — обходит сброс при PUT …/cards в MB 0.48+.
+    local dash_after fix_payload
+    dash_after="$(api_request GET "/api/dashboard/${dashboard_id}")"
+    fix_payload="$(echo "${dash_after}" | jq '.auto_apply_filters = true')"
+    if ! api_request PUT "/api/dashboard/${dashboard_id}" "${fix_payload}" >/dev/null; then
+      log_info "WARN: PUT /api/dashboard/${dashboard_id} after dashcards failed (filters may need Apply in UI)"
+    fi
   fi
 
   printf '%s' "${dashboard_id}"
@@ -520,6 +534,12 @@ wipe_corp_root_collection() {
   for _pass in 1 2 3; do
     items="$(api_request GET "/api/collection/${coll}/items")"
     list="$(echo "${items}" | mb_normalize_list)"
+    # Вложенные коллекции (старые папки EGISZ и т.п.): иначе остаются «осиротевшие» карточки и дубликаты в UI.
+    while IFS= read -r subcoll; do
+      [ -z "${subcoll}" ] && continue
+      log_info "Removing nested collection id=${subcoll} (full tree)"
+      delete_collection_tree "${subcoll}"
+    done < <(echo "${list}" | jq -r '.[] | select(.model == "collection") | .id')
     while IFS= read -r id; do
       [ -z "${id}" ] && continue
       log_info "Removing prior dashboard id=${id}"

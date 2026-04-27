@@ -58,8 +58,9 @@ spec:
       containers:
         - name: metabase
           # Сборка: docker build -f metabase/Dockerfile -t egisz-corp-metabase:latest . && docker tag egisz-corp-metabase:latest egisz-corp-metabase:local
-          # В манифесте не :latest (кэш ноды тянул устаревший digest). :local — всегда после `start.ps1 -Action build`. imagePullPolicy: Never — не тянуть с Docker Hub; Never ломал теги set image fix-* на node.
-          image: egisz-corp-metabase:local
+          # IfNotPresent: Docker Desktop подставляет образ из локального Docker Engine (см. docs.docker.com/desktop/kubernetes).
+          # Тег :k8s-v4 (не :local): bump при изменении Dockerfile/скриптов — иначе kubelet Docker Desktop держит старый digest для имени тега.
+          image: egisz-corp-metabase:k8s-v4
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000
@@ -111,6 +112,26 @@ spec:
               value: "EGISZ Monitor Corp"
             - name: MB_SITE_URL
               value: "http://127.0.0.1:3000"
+            # Application DB в Postgres (БД metabase). Иначе Metabase держит состояние во внутреннем хранилище
+            # контейнера — rollout/redeploy не гарантируют повторный провижинг из образа. deploy/reset-deploy делают DROP/CREATE БД metabase; точечно: .\start.ps1 -Action reset-metabase.
+            - name: MB_DB_TYPE
+              value: "postgres"
+            - name: MB_DB_HOST
+              value: "postgres.egisz-corp.svc.cluster.local"
+            - name: MB_DB_PORT
+              value: "5432"
+            - name: MB_DB_DBNAME
+              value: "metabase"
+            - name: MB_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_USER
+            - name: MB_DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_PASSWORD
           volumeMounts:
             - name: shared
               mountPath: /shared

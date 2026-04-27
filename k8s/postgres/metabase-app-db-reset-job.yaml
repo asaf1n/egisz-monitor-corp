@@ -1,0 +1,35 @@
+# Полный сброс application DB Metabase (DROP + CREATE). Витрина egisz_reports не трогается.
+# Перед применением остановите deployment/metabase (replicas=0), иначе DROP может не сработать.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: egisz-metabase-app-db-reset
+  namespace: egisz-corp
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: reset-metabase-db
+          image: postgres:16-bookworm
+          envFrom:
+            - secretRef:
+                name: postgres-credentials
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              export PGPASSWORD="${POSTGRES_PASSWORD}"
+              HOST="postgres"
+              until pg_isready -h "$HOST" -U "$POSTGRES_USER" -d postgres; do
+                echo "waiting for postgres..."
+                sleep 2
+              done
+              psql -h "$HOST" -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 \
+                -c "DROP DATABASE IF EXISTS metabase WITH (FORCE);"
+              psql -h "$HOST" -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 \
+                -c "CREATE DATABASE metabase;"
+              echo "metabase application database reset complete"

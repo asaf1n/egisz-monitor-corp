@@ -6,6 +6,7 @@
 firebird:
   host: "host.docker.internal"
   port: 3050
+  # Имя/алиас БД на хосте (см. Firebird aliases.conf). Часто proxy_egisz; дефис/подчёркивание должны совпадать с сервером.
   database: "proxy_egisz"
   user: "SYSDBA"
   password: "masterkey"

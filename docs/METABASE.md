@@ -46,7 +46,8 @@
 | Объект | Назначение |
 |--------|------------|
 | `v_egisz_transactions_enriched` | Техническая витрина (snake_case): факты + СЭМД + клиника; **не переименовывать колонки здесь** — от этого зависят другие представления и ETL. |
-| `v_egisz_transactions_enriched_ui` | То же содержимое, колонки с **русскими подписями** для Metabase (имена как в `dim_column_display_labels`). |
+| `v_egisz_transactions_enriched_ui` | То же содержимое, колонки с **русскими подписями** для Metabase (имена как в `dim_column_display_labels`). В т.ч. **«Сводка ошибок»** — плоская строка по `errors_json` (функция `egisz_friendly_errors_row`), без замены сырого JSON; **«Ошибки JSON»** — как в ответе РЭМД. |
+| `public.egisz_friendly_error_item`, `public.egisz_friendly_errors_row` | SQL-функции в витрине: подсказка по одному элементу `code`/`message` и агрегат по всему массиву (используются в нативных вопросах и в колонке **«Сводка ошибок»**). |
 | `v_rpt_documents_no_response` | Очередь «документы без ответа» (технические имена колонок). |
 | `v_rpt_documents_no_response_ui` | То же для отчётов с русскими именами колонок. |
 | `dim_column_display_labels` | Справочник сопоставления `source_object` + `source_column` → `display_label_ru` (синхронизирован с колонками `*_ui`). |
@@ -57,6 +58,16 @@
 | `etl_state` | Контроль курсора `last_log_id` (не используйте как бизнес-время) |
 
 Карточки в `metabase_dashboards/` по умолчанию читают **`v_egisz_transactions_enriched_ui`** и **`v_rpt_documents_no_response_ui`**, чтобы заголовки таблиц и осей совпадали с подписями без ручного дублирования в каждом запросе.
+
+## Сбор данных в витрину и использование Metabase
+
+Порядок, в котором появляются **факты** и обновляются **дашборды** (колонка **«Сводка ошибок»** и карточки, вызывающие `egisz_friendly_*`, требуют актуального `001_schema.sql` в Postgres).
+
+1. **Схема витрины в PostgreSQL** — `egisz_reports` должна содержать таблицы/представления и функции (`apply-schema` из пакета, k8s Job `egisz-reports-schema-init`, либо `.\start.ps1` при `deploy` / ручной `psql -f sql/001_schema.sql`). Без шага (1) запросы с **«Сводка ошибок»** или `egisz_friendly_error_item` вернут ошибку.
+2. **ETL (загрузка фактов)** — смещение по `EXCHANGELOG.LOGID` в `etl_state`, выборка из Firebird, UPSERT в `fact_egisz_transactions`. Запуск: **Config UI** `egisz-corp sync`, расписание Airflow (`k8s/airflow/`), либо автоматически в составе `deploy` (см. `start.ps1` / `k8s/README.md`). Каждая успешная синхронизация **догружает** новые callback-и; прошлые строки в витрине **«Сводка ошибок»** пересчитывается при чтении (логика в SQL), менять ETL ради неё не нужно.
+3. **Metabase** смотрит на ту же БД `egisz_reports` и только **читает** витрину. После смены JSON-дашбордов или `Dockerfile` Metabase: **`docker build -f metabase/Dockerfile`**, бамп тега **`egisz-corp-metabase:k8s-v4`** (см. `k8s/metabase.yaml`), `kubectl rollout restart deployment/metabase` или `.\start.ps1 -Action apply` (подхватит образ, провижининг при старте). Локальный kind: после `build` — `kind load` образов, как в `start.ps1`. При **только** обновлении **витрины** без смены образа Metabase достаточно повторного **apply-schema** и/или ETL; пересобирать образ Metabase **не** обязательно.
+
+**Разделители в «Сводка ошибок»:** между элементами массива `errors_json` в одной транзакции — **·** (средняя точка); внутри многочастевого Schematron в одном `message` — **—** (короткое тире в SQL). Понятные бизнес-сообщения ГИП (`не соответствует данным ГИП` и т.д.) **не** перезаписываются.
 
 ## Пример вопроса (SQL)
 

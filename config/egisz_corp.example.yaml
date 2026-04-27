@@ -16,10 +16,11 @@ firebird:
   charset: "WIN1251"
   page_size: 4096
 
-# Параметры ниже совпадают с docker-compose.yml + .env.example (порт 5433 на хосте).
+# В Kubernetes витрина — сервис postgres в namespace egisz-corp (из пода conf-ui).
+# С хоста Windows: kubectl -n egisz-corp port-forward svc/postgres 5432:5432 и host localhost / порт 5432.
 postgres:
-  host: "localhost"
-  port: 5433
+  host: "postgres.egisz-corp.svc.cluster.local"
+  port: 5432
   database: "egisz_reports"
   user: "egisz"
   password: "egisz"

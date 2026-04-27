@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any, Mapping
 
-from flask import Flask, render_template_string, request, url_for
+from flask import Flask, jsonify, render_template_string, request
 
 from egisz_monitor_corp.config_loader import (
     default_config_path,
     load_corp_config,
     logical_config_path,
+    parse_corp_config_dict,
     save_corp_config,
 )
 from egisz_monitor_corp.fb_client import fetch_all
@@ -64,13 +66,11 @@ PAGE = """
         </p>
       </div>
 
-      {% if message %}
-      <div class="mb-6 rounded-md p-4 {{ 'bg-emerald-900/30 border border-emerald-800 text-emerald-400' if ok else 'bg-rose-900/30 border border-rose-800 text-rose-400' }}">
-        {{ message }}
+      <div id="cfgMessageWrap" class="mb-6 hidden rounded-md p-4 border" role="status">
+        <div id="cfgMessageText" class="whitespace-pre-wrap"></div>
       </div>
-      {% endif %}
 
-      <form id="configForm" method="post" action="{{ url_for('save') }}" class="space-y-4">
+      <form id="configForm" class="space-y-4" action="#" onsubmit="return false;">
 
         <div class="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:gap-x-6 lg:gap-y-0 lg:items-stretch">
         <!-- Firebird Section -->
@@ -94,6 +94,7 @@ PAGE = """
             <label class="block min-w-0">
               <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">database (alias/path)</span>
               <input name="fb_database" value="{{ fb.database }}" required class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              <p class="mt-1 text-[10px] text-[#6B7280] leading-snug">Точно как на сервере Firebird: имя из <code class="text-[#9CA3AF]">aliases.conf</code> или полный путь к .fdb. Если в логе <code class="text-[#9CA3AF]">CreateFile … «имя»</code> — сервер не нашёл алиас/файл (часто путают <code class="text-[#9CA3AF]">proxy_egisz</code> и <code class="text-[#9CA3AF]">proxy-egisz</code>).</p>
             </label>
             <label class="block w-full sm:w-[10.5rem] sm:max-w-[10.5rem] sm:justify-self-start">
               <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">user</span>
@@ -153,13 +154,13 @@ PAGE = """
         </div>
 
         <div class="pt-3 flex flex-wrap gap-2 border-t border-[#1B2940]">
-          <button type="submit" class="inline-flex min-h-[2.875rem] min-w-[140px] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3.5 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white">
+          <button type="button" id="btnSaveYaml" class="inline-flex min-h-[2.875rem] min-w-[140px] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3.5 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white">
             Сохранить в YAML
           </button>
-          <button type="submit" formmethod="post" formaction="{{ url_for('test_fb') }}" class="inline-flex min-h-[2.875rem] min-w-[140px] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3.5 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white">
+          <button type="button" id="btnTestFb" class="inline-flex min-h-[2.875rem] min-w-[140px] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3.5 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white">
             Проверить Firebird
           </button>
-          <button type="submit" formmethod="post" formaction="{{ url_for('test_pg') }}" class="inline-flex min-h-[2.875rem] min-w-[140px] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3.5 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white">
+          <button type="button" id="btnTestPg" class="inline-flex min-h-[2.875rem] min-w-[140px] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3.5 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white">
             Проверить PostgreSQL
           </button>
         </div>
@@ -387,6 +388,61 @@ PAGE = """
       el.textContent = parts.filter(Boolean).join(String.fromCharCode(10));
     } catch (e) { el.textContent = 'Ошибка опроса: ' + e; }
   }
+  function showCfgMessage(ok, text) {
+    const wrap = document.getElementById('cfgMessageWrap');
+    const body = document.getElementById('cfgMessageText');
+    wrap.classList.remove(
+      'hidden',
+      'bg-emerald-900/30', 'border-emerald-800', 'text-emerald-400',
+      'bg-rose-900/30', 'border-rose-800', 'text-rose-400'
+    );
+    if (ok) {
+      wrap.classList.add('bg-emerald-900/30', 'border', 'border-emerald-800', 'text-emerald-400');
+    } else {
+      wrap.classList.add('bg-rose-900/30', 'border', 'border-rose-800', 'text-rose-400');
+    }
+    body.textContent = text || '';
+  }
+  async function postConfigForm(url) {
+    const fd = new FormData(document.getElementById('configForm'));
+    const r = await fetch(url, {
+      method: 'POST',
+      body: fd,
+      headers: { Accept: 'application/json' },
+      credentials: 'same-origin',
+    });
+    const raw = await r.text();
+    let j;
+    try {
+      j = JSON.parse(raw);
+    } catch (e) {
+      showCfgMessage(false, 'Ответ сервера не JSON (код ' + r.status + '). ' + raw.slice(0, 400));
+      return;
+    }
+    showCfgMessage(!!j.ok, j.message || (j.ok ? 'OK' : 'Ошибка'));
+  }
+  document.getElementById('btnSaveYaml').onclick = async function () {
+    if (!confirm('Сохранить текущую конфигурацию из полей формы в YAML на сервере?')) return;
+    try {
+      await postConfigForm('/save');
+    } catch (e) {
+      showCfgMessage(false, String(e));
+    }
+  };
+  document.getElementById('btnTestFb').onclick = async function () {
+    try {
+      await postConfigForm('/test-fb');
+    } catch (e) {
+      showCfgMessage(false, String(e));
+    }
+  };
+  document.getElementById('btnTestPg').onclick = async function () {
+    try {
+      await postConfigForm('/test-pg');
+    } catch (e) {
+      showCfgMessage(false, String(e));
+    }
+  };
   document.getElementById('btnSync').onclick = async function() {
     const el = document.getElementById('syncStatus');
     el.textContent = 'Запрос...';
@@ -407,6 +463,48 @@ PAGE = """
 </body>
 </html>
 """
+
+
+def _merged_yaml_dict_from_form(p: Path, form: Mapping[str, Any]) -> dict[str, Any]:
+    """Merge POSTed form fields into the YAML root dict on disk (passwords unchanged if left blank)."""
+    import yaml
+
+    old: dict[str, Any] = {}
+    if p.is_file():
+        loaded = yaml.safe_load(p.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            old = loaded
+    old.setdefault("firebird", {})
+    old.setdefault("postgres", {})
+    old.setdefault("etl", {})
+    old.setdefault("metabase", old.get("metabase") or {})
+
+    fb_updates: dict[str, object] = {
+        "host": str(form.get("fb_host", "") or "").strip(),
+        "port": int(form.get("fb_port") or 3050),
+        "database": str(form.get("fb_database", "") or "").strip(),
+        "user": str(form.get("fb_user", "") or "").strip(),
+        "charset": str(form.get("fb_charset", "WIN1251") or "").strip() or "WIN1251",
+    }
+    if form.get("fb_password"):
+        fb_updates["password"] = str(form.get("fb_password", "") or "")
+    old["firebird"].update(fb_updates)
+
+    pg_updates: dict[str, object] = {
+        "host": str(form.get("pg_host", "") or "").strip(),
+        "port": int(form.get("pg_port") or 5432),
+        "database": str(form.get("pg_database", "") or "").strip(),
+        "user": str(form.get("pg_user", "") or "").strip(),
+        "schema": str(form.get("pg_schema", "public") or "").strip() or "public",
+    }
+    if form.get("pg_password"):
+        pg_updates["password"] = str(form.get("pg_password", "") or "")
+    old["postgres"].update(pg_updates)
+
+    old["etl"]["batch_size"] = int(form.get("etl_batch") or 500)
+    old["etl"]["sync_window_days"] = int(form.get("etl_sync_days") or 30)
+    old["etl"]["full_scan"] = bool(form.get("etl_full_scan"))
+    return old
 
 
 def create_app() -> Flask:
@@ -438,101 +536,66 @@ def create_app() -> Flask:
             fb=cfg.firebird,
             pg=cfg.postgres,
             etl=cfg.etl,
-            message=None,
-            ok=True,
         )
 
     @app.post("/save")
     def save():  # type: ignore[no-untyped-def]
         p = config_path()
-        old = {}
-        if p.is_file():
-            import yaml
-
-            old = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-        if not isinstance(old, dict):
-            old = {}
-        old.setdefault("firebird", {})
-        old.setdefault("postgres", {})
-        old.setdefault("etl", {})
-        old.setdefault("metabase", old.get("metabase") or {})
-
-        old["firebird"].update(
-            {
-                "host": request.form.get("fb_host", "").strip(),
-                "port": int(request.form.get("fb_port") or 3050),
-                "database": request.form.get("fb_database", "").strip(),
-                "user": request.form.get("fb_user", "").strip(),
-                "password": request.form.get("fb_password", ""),
-                "charset": request.form.get("fb_charset", "WIN1251").strip() or "WIN1251",
-            }
-        )
-        old["postgres"].update(
-            {
-                "host": request.form.get("pg_host", "").strip(),
-                "port": int(request.form.get("pg_port") or 5432),
-                "database": request.form.get("pg_database", "").strip(),
-                "user": request.form.get("pg_user", "").strip(),
-                "password": request.form.get("pg_password", ""),
-                "schema": request.form.get("pg_schema", "public").strip() or "public",
-            }
-        )
-        old["etl"]["batch_size"] = int(request.form.get("etl_batch") or 500)
-        old["etl"]["sync_window_days"] = int(request.form.get("etl_sync_days") or 30)
-        old["etl"]["full_scan"] = bool(request.form.get("etl_full_scan"))
-
-        save_corp_config(old, p)
+        if not p.is_file():
+            return jsonify(
+                {
+                    "ok": False,
+                    "message": f"Нет файла конфигурации ({logical_config_path()}).",
+                }
+            )
+        try:
+            merged = _merged_yaml_dict_from_form(p, request.form)
+        except (ValueError, TypeError) as e:
+            return jsonify({"ok": False, "message": f"Проверьте поля формы (числа, обязательные значения): {e}"})
+        try:
+            save_corp_config(merged, p)
+        except OSError as e:
+            return jsonify(
+                {
+                    "ok": False,
+                    "message": (
+                        "Не удалось записать файл конфигурации (нет прав или том только для чтения). "
+                        f"Детали: {e}"
+                    ),
+                }
+            )
         os.environ["EGISZ_CORP_CONFIG"] = str(logical_config_path())
-        cfg = load_corp_config(p)
-        return render_template_string(
-            PAGE,
-            path=str(logical_config_path()),
-            fb=cfg.firebird,
-            pg=cfg.postgres,
-            etl=cfg.etl,
-            message="Сохранено.",
-            ok=True,
-        )
+        try:
+            parse_corp_config_dict(merged)
+        except Exception as e:
+            return jsonify({"ok": False, "message": f"Файл записан, но конфиг не читается: {e}"})
+        return jsonify({"ok": True, "message": "Сохранено."})
 
     @app.post("/test-fb")
     def test_fb():  # type: ignore[no-untyped-def]
         p = config_path()
-        msg, ok = "Firebird: OK", True
+        if not p.is_file():
+            return jsonify({"ok": False, "message": "Нет файла конфигурации на сервере."})
         try:
-            cfg = load_corp_config(p)
+            merged = _merged_yaml_dict_from_form(p, request.form)
+            cfg = parse_corp_config_dict(merged, use_yaml_postgres_only=True)
             fetch_all(cfg.firebird, "SELECT 1 AS OK FROM RDB$DATABASE")
         except Exception as e:  # pragma: no cover
-            msg, ok = f"Firebird: {e}", False
-        cfg = load_corp_config(p)
-        return render_template_string(
-            PAGE,
-            path=str(logical_config_path()),
-            fb=cfg.firebird,
-            pg=cfg.postgres,
-            etl=cfg.etl,
-            message=msg,
-            ok=ok,
-        )
+            return jsonify({"ok": False, "message": f"Firebird: {e}"})
+        return jsonify({"ok": True, "message": "Firebird: OK"})
 
     @app.post("/test-pg")
     def test_pg():  # type: ignore[no-untyped-def]
         p = config_path()
-        msg, ok = "PostgreSQL: OK", True
+        if not p.is_file():
+            return jsonify({"ok": False, "message": "Нет файла конфигурации на сервере."})
         try:
-            cfg = load_corp_config(p)
+            merged = _merged_yaml_dict_from_form(p, request.form)
+            cfg = parse_corp_config_dict(merged, use_yaml_postgres_only=True)
             test_pg_connection(cfg.postgres)
         except Exception as e:  # pragma: no cover
-            msg, ok = f"PostgreSQL: {e}", False
-        cfg = load_corp_config(p)
-        return render_template_string(
-            PAGE,
-            path=str(logical_config_path()),
-            fb=cfg.firebird,
-            pg=cfg.postgres,
-            etl=cfg.etl,
-            message=msg,
-            ok=ok,
-        )
+            return jsonify({"ok": False, "message": f"PostgreSQL: {e}"})
+        return jsonify({"ok": True, "message": "PostgreSQL: OK"})
 
     from egisz_monitor_corp.sync_routes import register_sync_routes
 

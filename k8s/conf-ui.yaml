@@ -1,5 +1,6 @@
 # Config UI (Flask): редактирование YAML конфигурации EGISZ Corp.
 # NodePort — доступ с хоста Windows без kubectl port-forward (Docker Desktop / kind).
+# Рабочая копия YAML в emptyDir (запись из UI); при новом поде init снова копирует из Secret. Другие Job’ы читают Secret — обновляйте его при необходимости (deploy / kubectl apply).
 apiVersion: v1
 kind: Service
 metadata:
@@ -30,6 +31,17 @@ spec:
       labels:
         app.kubernetes.io/name: conf-ui
     spec:
+      # Секрет K8s только для чтения: без копии в emptyDir Flask не может записать YAML (POST /save → 500).
+      initContainers:
+        - name: seed-config
+          image: busybox:1.36
+          command: ["sh", "-c", "set -e; cp /seed/egisz_corp.yaml /work/egisz_corp.yaml"]
+          volumeMounts:
+            - name: cfg-secret
+              mountPath: /seed
+              readOnly: true
+            - name: cfg-work
+              mountPath: /work
       containers:
         - name: conf-ui
           # Тег corp-web пересобирается из latest в start.ps1 (Invoke-DockerBuild), чтобы Docker Desktop K8s подхватывал новый digest.
@@ -55,9 +67,8 @@ spec:
             - name: FLASK_RUN_PORT
               value: "8080"
           volumeMounts:
-            - name: cfg
+            - name: cfg-work
               mountPath: /app/config
-              readOnly: true
           readinessProbe:
             httpGet:
               path: /
@@ -65,6 +76,8 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 10
       volumes:
-        - name: cfg
+        - name: cfg-secret
           secret:
             secretName: egisz-corp-conf-ui-config
+        - name: cfg-work
+          emptyDir: {}
