@@ -1,14 +1,14 @@
 {
   "name": "08 Агрегация ожидающих",
   "description": "Мониторинг очереди. Окно по «Отправлено» от последней даты в витрине очереди (не от часов сервера). Детализация — таблица с идентификатором, типом СЭМД и клиникой.",
+  "width": "full",
   "parameters": [
     {
       "id": "a8b9c0d1-e2f3-4456-a789-bcdef0123456",
-      "name": "Период (отправлено) — глубина, дней",
-      "slug": "pend_period_filter",
-      "type": "number/=",
-      "sectionId": "number",
-      "default": 30
+      "name": "По дате «Отправлено» (очередь)",
+      "slug": "dwh_date_filter",
+      "type": "date/all-options",
+      "sectionId": "date"
     }
   ],
   "cards": [
@@ -16,18 +16,18 @@
       "name": "Топ клиник с зависшими документами",
       "description": "Клиники с наибольшим количеством документов без ответа, с JID для различения одинаковых наименований.",
       "table_ref": "v_rpt_documents_no_response_ui",
+      "metabase-field-filters": { "dwh_date": { "table_ref": "v_rpt_documents_no_response_ui", "field_name": "Отправлено" } },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH pend_ref AS ( SELECT COALESCE((SELECT MAX(\"Отправлено\") FROM public.v_rpt_documents_no_response_ui), NOW()) AS ref_ts ) SELECT \"JID клиники\", \"Наименование клиники\", COUNT(*)::bigint AS \"Количество\" FROM public.v_rpt_documents_no_response_ui p CROSS JOIN pend_ref WHERE p.\"Отправлено\" >= pend_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{pend_period}}::numeric))) GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20",
+          "query": "WITH pend_ref AS ( SELECT COALESCE((SELECT MAX(\"Отправлено\") FROM public.v_rpt_documents_no_response_ui), NOW()) AS ref_ts ) SELECT \"JID клиники\", \"Наименование клиники\", COUNT(*)::bigint AS \"Количество\" FROM public.v_rpt_documents_no_response_ui p CROSS JOIN pend_ref WHERE 1=1 [[AND {{dwh_date}}]] GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20",
           "template-tags": {
-            "pend_period": {
+            "dwh_date": {
               "id": "f8000001-0001-4001-8001-000000000001",
-              "name": "pend_period",
-              "display-name": "Период (отправлено) (глубина, дней)",
-              "type": "number",
-              "required": true,
-              "default": 30
+              "name": "dwh_date",
+              "display-name": "По дате «Отправлено»",
+              "type": "dimension",
+              "widget-type": "date/all-options"
             }
           }
         },
@@ -64,24 +64,24 @@
       "name": "Возраст зависших документов",
       "description": "Распределение по времени ожидания; «сейчас» для расчёта — момент последней «Отправлено» в снимке.",
       "table_ref": "v_rpt_documents_no_response_ui",
+      "metabase-field-filters": { "dwh_date": { "table_ref": "v_rpt_documents_no_response_ui", "field_name": "Отправлено" } },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH pend_ref AS ( SELECT COALESCE((SELECT MAX(\"Отправлено\") FROM public.v_rpt_documents_no_response_ui), NOW()) AS ref_ts ) SELECT CASE WHEN p.\"Отправлено\" IS NULL THEN 'дата неизвестна' WHEN EXTRACT(EPOCH FROM (pend_ref.ref_ts - p.\"Отправлено\"))/3600 < 1 THEN 'менее 1 часа' WHEN EXTRACT(EPOCH FROM (pend_ref.ref_ts - p.\"Отправлено\"))/3600 < 12 THEN '1–12 часов' WHEN EXTRACT(EPOCH FROM (pend_ref.ref_ts - p.\"Отправлено\"))/3600 < 24 THEN '12–24 часа' ELSE 'свыше 24 часов' END AS \"Время ожидания\", COUNT(*)::bigint AS \"Количество\" FROM public.v_rpt_documents_no_response_ui p CROSS JOIN pend_ref WHERE p.\"Отправлено\" IS NOT NULL AND p.\"Отправлено\" >= pend_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{pend_period}}::numeric))) GROUP BY 1 ORDER BY MIN(EXTRACT(EPOCH FROM (pend_ref.ref_ts - p.\"Отправлено\")))",
+          "query": "WITH pend_ref AS ( SELECT COALESCE((SELECT MAX(\"Отправлено\") FROM public.v_rpt_documents_no_response_ui), NOW()) AS ref_ts ) SELECT CASE WHEN p.\"Отправлено\" IS NULL THEN 'дата неизвестна' WHEN EXTRACT(EPOCH FROM (pend_ref.ref_ts - p.\"Отправлено\"))/3600 < 1 THEN 'менее 1 часа' WHEN EXTRACT(EPOCH FROM (pend_ref.ref_ts - p.\"Отправлено\"))/3600 < 12 THEN '1–12 часов' WHEN EXTRACT(EPOCH FROM (pend_ref.ref_ts - p.\"Отправлено\"))/3600 < 24 THEN '12–24 часа' ELSE 'свыше 24 часов' END AS \"Время ожидания\", COUNT(*)::bigint AS \"Количество\" FROM public.v_rpt_documents_no_response_ui p CROSS JOIN pend_ref WHERE 1=1 [[AND {{dwh_date}}]] AND p.\"Отправлено\" IS NOT NULL GROUP BY 1 ORDER BY MIN(EXTRACT(EPOCH FROM (pend_ref.ref_ts - p.\"Отправлено\")))",
           "template-tags": {
-            "pend_period": {
+            "dwh_date": {
               "id": "f8000002-0002-4002-8002-000000000001",
-              "name": "pend_period",
-              "display-name": "Период (отправлено) (глубина, дней)",
-              "type": "number",
-              "required": true,
-              "default": 30
+              "name": "dwh_date",
+              "display-name": "По дате «Отправлено»",
+              "type": "dimension",
+              "widget-type": "date/all-options"
             }
           }
         },
         "database": 1
       },
-      "display": "bar",
+      "display": "row",
       "visualization_settings": {
         "graph.dimensions": [
           "Время ожидания"
@@ -89,7 +89,7 @@
         "graph.metrics": [
           "Количество"
         ],
-        "graph.x_axis.axis_enabled": "rotate-45",
+        "graph.show_values": true,
         "column_settings": {
           "[\"name\",\"Время ожидания\"]": {
             "column_title": "Время ожидания"
@@ -110,24 +110,24 @@
       "name": "Зависшие документы по типам СЭМД",
       "description": "Распределение документов без ответа по коду и наименованию СЭМД.",
       "table_ref": "v_rpt_documents_no_response_ui",
+      "metabase-field-filters": { "dwh_date": { "table_ref": "v_rpt_documents_no_response_ui", "field_name": "Отправлено" } },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH pend_ref AS ( SELECT COALESCE((SELECT MAX(\"Отправлено\") FROM public.v_rpt_documents_no_response_ui), NOW()) AS ref_ts ) SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(*)::bigint AS \"Количество\" FROM public.v_rpt_documents_no_response_ui p CROSS JOIN pend_ref WHERE p.\"Отправлено\" >= pend_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{pend_period}}::numeric))) GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 25",
+          "query": "WITH pend_ref AS ( SELECT COALESCE((SELECT MAX(\"Отправлено\") FROM public.v_rpt_documents_no_response_ui), NOW()) AS ref_ts ) SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(*)::bigint AS \"Количество\" FROM public.v_rpt_documents_no_response_ui p CROSS JOIN pend_ref WHERE 1=1 [[AND {{dwh_date}}]] GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 25",
           "template-tags": {
-            "pend_period": {
+            "dwh_date": {
               "id": "f8000003-0003-4003-8003-000000000001",
-              "name": "pend_period",
-              "display-name": "Период (отправлено) (глубина, дней)",
-              "type": "number",
-              "required": true,
-              "default": 30
+              "name": "dwh_date",
+              "display-name": "По дате «Отправлено»",
+              "type": "dimension",
+              "widget-type": "date/all-options"
             }
           }
         },
         "database": 1
       },
-      "display": "bar",
+      "display": "row",
       "visualization_settings": {
         "graph.dimensions": [
           "Наименование СЭМД"
@@ -135,7 +135,7 @@
         "graph.metrics": [
           "Количество"
         ],
-        "graph.x_axis.axis_enabled": "rotate-45",
+        "graph.show_values": true,
         "column_settings": {
           "[\"name\",\"Код СЭМД\"]": {
             "column_title": "Код СЭМД"
@@ -159,18 +159,18 @@
       "name": "Зависшие — детализация",
       "description": "До 500 строк: ИД документа (localUid), код и наименование СЭМД, клиника (JID и наименование), дата отправки и корзина возраста относительно снимка очереди.",
       "table_ref": "v_rpt_documents_no_response_ui",
+      "metabase-field-filters": { "dwh_date": { "table_ref": "v_rpt_documents_no_response_ui", "field_name": "Отправлено" } },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH pend_ref AS ( SELECT COALESCE((SELECT MAX(\"Отправлено\") FROM public.v_rpt_documents_no_response_ui), NOW()) AS ref_ts ) SELECT \"localUid СЭМД\" AS \"ИД документа\", COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", \"JID клиники\" AS \"JID клиники\", COALESCE(NULLIF(TRIM(\"Наименование клиники\"), ''), '(нет)') AS \"Клиника\", \"Отправлено\", CASE WHEN p.\"Отправлено\" IS NULL THEN 'дата неизвестна' WHEN EXTRACT(EPOCH FROM (pend_ref.ref_ts - p.\"Отправлено\"))/3600 < 1 THEN 'менее 1 часа' WHEN EXTRACT(EPOCH FROM (pend_ref.ref_ts - p.\"Отправлено\"))/3600 < 12 THEN '1–12 часов' WHEN EXTRACT(EPOCH FROM (pend_ref.ref_ts - p.\"Отправлено\"))/3600 < 24 THEN '12–24 часа' ELSE 'свыше 24 часов' END AS \"Время ожидания\" FROM public.v_rpt_documents_no_response_ui p CROSS JOIN pend_ref WHERE p.\"Отправлено\" >= pend_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{pend_period}}::numeric))) ORDER BY p.\"Отправлено\" ASC NULLS LAST LIMIT 500",
+          "query": "WITH pend_ref AS ( SELECT COALESCE((SELECT MAX(\"Отправлено\") FROM public.v_rpt_documents_no_response_ui), NOW()) AS ref_ts ) SELECT \"localUid СЭМД\" AS \"ИД документа\", COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", \"JID клиники\" AS \"JID клиники\", COALESCE(NULLIF(TRIM(\"Наименование клиники\"), ''), '(нет)') AS \"Клиника\", \"Отправлено\", CASE WHEN p.\"Отправлено\" IS NULL THEN 'дата неизвестна' WHEN EXTRACT(EPOCH FROM (pend_ref.ref_ts - p.\"Отправлено\"))/3600 < 1 THEN 'менее 1 часа' WHEN EXTRACT(EPOCH FROM (pend_ref.ref_ts - p.\"Отправлено\"))/3600 < 12 THEN '1–12 часов' WHEN EXTRACT(EPOCH FROM (pend_ref.ref_ts - p.\"Отправлено\"))/3600 < 24 THEN '12–24 часа' ELSE 'свыше 24 часов' END AS \"Время ожидания\" FROM public.v_rpt_documents_no_response_ui p CROSS JOIN pend_ref WHERE 1=1 [[AND {{dwh_date}}]] ORDER BY p.\"Отправлено\" ASC NULLS LAST LIMIT 500",
           "template-tags": {
-            "pend_period": {
+            "dwh_date": {
               "id": "f8000004-0004-4004-8004-000000000001",
-              "name": "pend_period",
-              "display-name": "Период (отправлено) (глубина, дней)",
-              "type": "number",
-              "required": true,
-              "default": 30
+              "name": "dwh_date",
+              "display-name": "По дате «Отправлено»",
+              "type": "dimension",
+              "widget-type": "date/all-options"
             }
           }
         },

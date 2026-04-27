@@ -120,8 +120,8 @@ function Invoke-DockerBuild {
     Write-Host "[Docker] Building egisz-corp-metabase..." -ForegroundColor Yellow
     docker build @nc -f metabase/Dockerfile -t egisz-corp-metabase:latest $Root
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    # :k8s-v4 + :local = тот же digest, что :latest. В k8s/metabase.yaml образ — :k8s-v4 (bump v5, v6… при смене скриптов/дашбордов), иначе kubelet Docker Desktop держит старый digest для имени тега.
-    docker tag egisz-corp-metabase:latest egisz-corp-metabase:k8s-v4
+    # :k8s-v8 + :local = тот же digest, что :latest. В k8s/metabase.yaml образ — :k8s-v8 (bump v9… при смене скриптов/дашбордов), иначе kubelet Docker Desktop держит старый digest для имени тега.
+    docker tag egisz-corp-metabase:latest egisz-corp-metabase:k8s-v8
     if ($LASTEXITCODE -ne 0) { exit 1 }
     docker tag egisz-corp-metabase:latest egisz-corp-metabase:local
     if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -184,7 +184,7 @@ function Invoke-KindLoadImagesIfNeeded {
     if ($LASTEXITCODE -ne 0) { exit 1 }
     kind load docker-image egisz-corp-metabase:latest --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    kind load docker-image egisz-corp-metabase:k8s-v4 --name $name
+    kind load docker-image egisz-corp-metabase:k8s-v8 --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }
     kind load docker-image egisz-corp-metabase:local --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -344,7 +344,7 @@ CREATE DATABASE metabase OWNER
         if ($LASTEXITCODE -ne 0) {
             Write-Host "WARN: rollout status timed out; check: kubectl -n $ns get pods -l app.kubernetes.io/name=metabase" -ForegroundColor Yellow
         }
-        Write-Host 'Done. Metabase UI: http://127.0.0.1:3000/ - dashboards 01-09 in Personal collection after provision (1-5 min).' -ForegroundColor Green
+        Write-Host 'Done. Metabase UI: http://127.0.0.1:3000/ - dashboards 01-10 in Personal collection after provision (1-5 min).' -ForegroundColor Green
         Write-Host "Logs: kubectl -n $ns logs deploy/metabase --tail=80" -ForegroundColor Gray
     }
 }
@@ -868,7 +868,7 @@ function Show-DeployInfo {
     Show-K8sNetworkLegend
     Write-Host "Credentials (local dev):" -ForegroundColor Cyan
     Write-Host "  Postgres: db=egisz_reports user=egisz pass=egisz (in cluster: postgres:5432)" -ForegroundColor White
-    Write-Host '  Metabase: admin@egisz.local / egisz — дашборды 01–09 в корне Personal collection (deploy уже сбрасывает БД metabase; точечно: reset-metabase)' -ForegroundColor White
+    Write-Host '  Metabase: admin@egisz.local / egisz — дашборды 01–10 в корне Personal collection (deploy уже сбрасывает БД metabase; точечно: reset-metabase)' -ForegroundColor White
     Write-Host "  Firebird: host.docker.internal:3050 in k8s\local\egisz_corp.yaml (rebuild conf-ui image for libfbclient)" -ForegroundColor White
     Write-Host "  Standard ports: deploy/apply already forwarded 8080/3000 unless you used -SkipPortForwardAfterDeploy; or run: .\start.ps1 -Action web" -ForegroundColor White
     Write-Host ""

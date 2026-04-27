@@ -1,14 +1,14 @@
 {
   "name": "04 Документы без ответа",
-  "description": "Поиск «зависших» транзакций. Анализ документов, по которым не поступил подтверждающий callback от ЕГИСЗ. Фильтр по дате отправки.",
+  "description": "Поиск «зависших» транзакций. [Field filter](https://www.metabase.com/docs/v0.60/questions/native-editor/field-filters) по **«Отправлено»** (дата/диапазон).",
+  "width": "full",
   "parameters": [
     {
-      "id": "d4c3b2a1-0f9e-4789-8012-3456789abcde",
-      "name": "Период (отправлено) — глубина, дней",
-      "slug": "sent_period_filter",
-      "type": "number/=",
-      "sectionId": "number",
-      "default": 30
+      "id": "d4e5f6a7-b8c9-0d1e-2f3a-4b5c6d7e8f0a1",
+      "name": "Период по дате отправки",
+      "slug": "dwh_date_filter",
+      "type": "date/all-options",
+      "sectionId": "date"
     }
   ],
   "cards": [
@@ -16,18 +16,23 @@
       "name": "Документы без ответа",
       "description": "Строки v_rpt_documents_no_response_ui (подписи из dim_column_display_labels).",
       "table_ref": "v_rpt_documents_no_response_ui",
+      "metabase-field-filters": {
+        "dwh_date": {
+          "table_ref": "v_rpt_documents_no_response_ui",
+          "field_name": "Отправлено"
+        }
+      },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH pend_ref AS ( SELECT COALESCE((SELECT MAX(\"Отправлено\") FROM public.v_rpt_documents_no_response_ui), NOW()) AS ref_ts ) SELECT v.* FROM public.v_rpt_documents_no_response_ui v CROSS JOIN pend_ref WHERE v.\"Отправлено\" >= pend_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{sent_period}}::numeric))) ORDER BY v.\"Отправлено\" DESC NULLS LAST LIMIT 100",
+          "query": "SELECT v.* FROM public.v_rpt_documents_no_response_ui v WHERE 1=1 [[AND {{dwh_date}}]] ORDER BY v.\"Отправлено\" DESC NULLS LAST LIMIT 100",
           "template-tags": {
-            "sent_period": {
+            "dwh_date": {
               "id": "f4000001-0001-4001-8001-000000000001",
-              "name": "sent_period",
-              "display-name": "Период (отправлено) (глубина, дней)",
-              "type": "number",
-              "required": true,
-              "default": 30
+              "name": "dwh_date",
+              "display-name": "По дате «Отправлено»",
+              "type": "dimension",
+              "widget-type": "date/all-options"
             }
           }
         },

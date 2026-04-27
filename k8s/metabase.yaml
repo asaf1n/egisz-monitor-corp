@@ -59,8 +59,8 @@ spec:
         - name: metabase
           # Сборка: docker build -f metabase/Dockerfile -t egisz-corp-metabase:latest . && docker tag egisz-corp-metabase:latest egisz-corp-metabase:local
           # IfNotPresent: Docker Desktop подставляет образ из локального Docker Engine (см. docs.docker.com/desktop/kubernetes).
-          # Тег :k8s-v4 (не :local): bump при изменении Dockerfile/скриптов — иначе kubelet Docker Desktop держит старый digest для имени тега.
-          image: egisz-corp-metabase:k8s-v4
+          # Тег :k8s-v8 (не :local): bump при изменении Dockerfile/скриптов/дашбордов — иначе kubelet Docker Desktop держит старый digest для имени тега.
+          image: egisz-corp-metabase:k8s-v8
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000

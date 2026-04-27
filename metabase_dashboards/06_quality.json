@@ -1,14 +1,14 @@
 {
   "name": "06 Качество данных",
-  "description": "Контроль полноты. Проверка корректности маппинга справочников и заполнения обязательных атрибутов СЭМД. Фильтр по дате обработки витрины.",
+  "description": "Контроль полноты. Проверка корректности маппинга справочников и заполнения обязательных атрибутов СЭМД. **Field filter** `dwh_date` по **«Обработано»** (v0.60+).",
+  "width": "full",
   "parameters": [
     {
       "id": "e5f6a7b8-c9d0-4123-ef45-6789abcdef01",
-      "name": "Период (обработано) — глубина, дней",
-      "slug": "q_period_filter",
-      "type": "number/=",
-      "sectionId": "number",
-      "default": 30
+      "name": "Период по дате обработки (витрина)",
+      "slug": "dwh_date_filter",
+      "type": "date/all-options",
+      "sectionId": "date"
     }
   ],
   "cards": [
@@ -16,18 +16,20 @@
       "name": "Успешность по клиникам",
       "description": "Процент успешных отправок по клиникам с JID для различения одинаковых наименований.",
       "table_ref": "v_egisz_transactions_enriched_ui",
+      "metabase-field-filters": {
+        "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" }
+      },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT \"JID клиники\", \"Наименование клиники\", COUNT(*)::bigint AS \"Всего отправлено\", SUM(CASE WHEN \"Статус\"='success' THEN 1 ELSE 0 END)::bigint AS \"Успешно\", SUM(CASE WHEN \"Статус\"='error' THEN 1 ELSE 0 END)::bigint AS \"Ошибок\", ROUND(SUM(CASE WHEN \"Статус\"='success' THEN 1 ELSE 0 END)*100.0 / NULLIF(COUNT(*), 0), 2) AS \"Процент успешных\" FROM public.v_egisz_transactions_enriched_ui CROSS JOIN ( SELECT COALESCE((SELECT MAX(\"Обработано\") FROM public.v_egisz_transactions_enriched_ui), NOW()) AS ref_ts ) vit_ref WHERE \"Обработано\" >= vit_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{q_period}}::numeric))) GROUP BY 1, 2 ORDER BY 6 ASC, 3 DESC LIMIT 50",
+          "query": "SELECT \"JID клиники\", \"Наименование клиники\", COUNT(*)::bigint AS \"Всего отправлено\", SUM(CASE WHEN \"Статус\"='success' THEN 1 ELSE 0 END)::bigint AS \"Успешно\", SUM(CASE WHEN \"Статус\"='error' THEN 1 ELSE 0 END)::bigint AS \"Ошибок\", ROUND(SUM(CASE WHEN \"Статус\"='success' THEN 1 ELSE 0 END)*100.0 / NULLIF(COUNT(*), 0), 2) AS \"Процент успешных\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] GROUP BY 1, 2 ORDER BY 6 ASC, 3 DESC LIMIT 50",
           "template-tags": {
-            "q_period": {
+            "dwh_date": {
               "id": "f6000001-0001-4001-8001-000000000001",
-              "name": "q_period",
-              "display-name": "Период (обработано) (глубина, дней)",
-              "type": "number",
-              "required": true,
-              "default": 30
+              "name": "dwh_date",
+              "display-name": "По дате «Обработано»",
+              "type": "dimension",
+              "widget-type": "date/all-options"
             }
           }
         },
@@ -71,18 +73,20 @@
       "name": "Успешность по типам СЭМД",
       "description": "Процент успешных отправок по типам документов.",
       "table_ref": "v_egisz_transactions_enriched_ui",
+      "metabase-field-filters": {
+        "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" }
+      },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(*)::bigint AS \"Всего отправлено\", SUM(CASE WHEN \"Статус\"='success' THEN 1 ELSE 0 END)::bigint AS \"Успешно\", SUM(CASE WHEN \"Статус\"='error' THEN 1 ELSE 0 END)::bigint AS \"Ошибок\", ROUND(SUM(CASE WHEN \"Статус\"='success' THEN 1 ELSE 0 END)*100.0 / NULLIF(COUNT(*), 0), 2) AS \"Процент успешных\" FROM public.v_egisz_transactions_enriched_ui CROSS JOIN ( SELECT COALESCE((SELECT MAX(\"Обработано\") FROM public.v_egisz_transactions_enriched_ui), NOW()) AS ref_ts ) vit_ref WHERE \"Обработано\" >= vit_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{q_period}}::numeric))) GROUP BY 1, 2 ORDER BY 6 ASC, 3 DESC LIMIT 50",
+          "query": "SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(*)::bigint AS \"Всего отправлено\", SUM(CASE WHEN \"Статус\"='success' THEN 1 ELSE 0 END)::bigint AS \"Успешно\", SUM(CASE WHEN \"Статус\"='error' THEN 1 ELSE 0 END)::bigint AS \"Ошибок\", ROUND(SUM(CASE WHEN \"Статус\"='success' THEN 1 ELSE 0 END)*100.0 / NULLIF(COUNT(*), 0), 2) AS \"Процент успешных\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] GROUP BY 1, 2 ORDER BY 6 ASC, 3 DESC LIMIT 50",
           "template-tags": {
-            "q_period": {
+            "dwh_date": {
               "id": "f6000002-0002-4002-8002-000000000001",
-              "name": "q_period",
-              "display-name": "Период (обработано) (глубина, дней)",
-              "type": "number",
-              "required": true,
-              "default": 30
+              "name": "dwh_date",
+              "display-name": "По дате «Обработано»",
+              "type": "dimension",
+              "widget-type": "date/all-options"
             }
           }
         },
@@ -126,18 +130,20 @@
       "name": "JID / OID: целостность",
       "description": "Счётчики строк без JID и с расхождением OID в факте (OID организации) и в справочнике (OID клиники), оба заданы.",
       "table_ref": "v_egisz_transactions_enriched_ui",
+      "metabase-field-filters": {
+        "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" }
+      },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH vit_ref AS ( SELECT COALESCE((SELECT MAX(\"Обработано\") FROM public.v_egisz_transactions_enriched_ui), NOW()) AS ref_ts ) SELECT (SELECT COUNT(*)::bigint FROM public.v_egisz_transactions_enriched_ui CROSS JOIN vit_ref WHERE NULLIF(BTRIM(\"JID клиники\"::text), '') IS NULL AND \"Обработано\" >= vit_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{q_period}}::numeric)))) AS \"Транз. без JID\", (SELECT COUNT(*)::bigint FROM public.v_egisz_transactions_enriched_ui CROSS JOIN vit_ref WHERE NULLIF(BTRIM(\"OID организации\"::text), '') IS NOT NULL AND NULLIF(BTRIM(\"OID клиники\"::text), '') IS NOT NULL AND BTRIM(COALESCE(\"OID организации\"::text, '')) <> BTRIM(COALESCE(\"OID клиники\"::text, '')) AND \"Обработано\" >= vit_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{q_period}}::numeric)))) AS \"Несовпадение OID факта и клиники\"",
+          "query": "SELECT (SELECT COUNT(*)::bigint FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] AND NULLIF(BTRIM(\"JID клиники\"::text), '') IS NULL) AS \"Транз. без JID\", (SELECT COUNT(*)::bigint FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] AND NULLIF(BTRIM(\"OID организации\"::text), '') IS NOT NULL AND NULLIF(BTRIM(\"OID клиники\"::text), '') IS NOT NULL AND BTRIM(COALESCE(\"OID организации\"::text, '')) <> BTRIM(COALESCE(\"OID клиники\"::text, ''))) AS \"Несовпадение OID факта и клиники\"",
           "template-tags": {
-            "q_period": {
+            "dwh_date": {
               "id": "f6000003-0003-4003-8003-000000000001",
-              "name": "q_period",
-              "display-name": "Период (обработано) (глубина, дней)",
-              "type": "number",
-              "required": true,
-              "default": 30
+              "name": "dwh_date",
+              "display-name": "По дате «Обработано»",
+              "type": "dimension",
+              "widget-type": "date/all-options"
             }
           }
         },
@@ -167,18 +173,20 @@
       "name": "Полнота полей витрины",
       "description": "Сводные счётчики по fact/UI: пустой localUid, пустой код СЭМД, успешные ответы без даты регистрации. При появлении в DWH явных правил обязательных атрибутов СЭМД их можно добавить отдельными карточками.",
       "table_ref": "v_egisz_transactions_enriched_ui",
+      "metabase-field-filters": {
+        "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" }
+      },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT COUNT(*) FILTER (WHERE NULLIF(BTRIM(\"localUid СЭМД\"::text), '') IS NULL)::bigint AS \"Без localUid\", COUNT(*) FILTER (WHERE NULLIF(BTRIM(\"Код СЭМД\"::text), '') IS NULL)::bigint AS \"Без кода СЭМД\", COUNT(*) FILTER (WHERE \"Статус\" = 'success' AND \"Дата регистрации\" IS NULL)::bigint AS \"Успех без даты регистрации\" FROM public.v_egisz_transactions_enriched_ui CROSS JOIN ( SELECT COALESCE((SELECT MAX(\"Обработано\") FROM public.v_egisz_transactions_enriched_ui), NOW()) AS ref_ts ) vit_ref WHERE \"Обработано\" >= vit_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{q_period}}::numeric)))",
+          "query": "SELECT COUNT(*) FILTER (WHERE NULLIF(BTRIM(\"localUid СЭМД\"::text), '') IS NULL)::bigint AS \"Без localUid\", COUNT(*) FILTER (WHERE NULLIF(BTRIM(\"Код СЭМД\"::text), '') IS NULL)::bigint AS \"Без кода СЭМД\", COUNT(*) FILTER (WHERE \"Статус\" = 'success' AND \"Дата регистрации\" IS NULL)::bigint AS \"Успех без даты регистрации\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]]",
           "template-tags": {
-            "q_period": {
+            "dwh_date": {
               "id": "f6000004-0004-4004-8004-000000000001",
-              "name": "q_period",
-              "display-name": "Период (обработано) (глубина, дней)",
-              "type": "number",
-              "required": true,
-              "default": 30
+              "name": "dwh_date",
+              "display-name": "По дате «Обработано»",
+              "type": "dimension",
+              "widget-type": "date/all-options"
             }
           }
         },

@@ -1,33 +1,33 @@
 {
   "name": "05 Тренды и динамика",
-  "description": "Анализ нагрузки. Ось дат и 72-часовой срез привязаны к последним датам в витрине, а не к часам сервера, чтобы снимок оставался читаемым при остановке ETL.",
+  "description": "Анализ нагрузки. «Тренд»-карточки: [field filter](https://www.metabase.com/docs/v0.60/questions/native-editor/field-filters) по **«День (тренд)»** (календарный критерий в витрине). «Объём по часам» — без глобального date filter (72 ч от max «Обработано»).",
+  "width": "full",
   "parameters": [
     {
-      "id": "e7f8a9b0-c1d2-4e3f-a5b6-c7d8e9f0a1b2",
-      "name": "Период (ось даты графика) — глубина, дней",
-      "slug": "trend_period_filter",
-      "type": "number/=",
-      "sectionId": "number",
-      "default": 30
+      "id": "d4e5f6a7-b8c9-0d1e-2f3a-4b5c6d7e8f0a1",
+      "name": "По оси дня (колонка «День (тренд)»)",
+      "slug": "dwh_date_filter",
+      "type": "date/all-options",
+      "sectionId": "date"
     }
   ],
   "cards": [
     {
       "name": "Транзакции по дням и статусам",
+      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "День (тренд)" } },
       "description": "Количество сообщений по календарным дням: дата из ответа ЕГИСЗ (Дата регистрации / registrationDate), при отсутствии — дата загрузки в витрину (Обработано). Тот же фильтр периода, что у «Динамика по типам СЭМД» (ось «День (тренд)»).",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT DATE(COALESCE(\"Дата регистрации\", \"Обработано\")) AS \"Дата\", \"Статус\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE \"День (тренд)\"::date >= ( (SELECT COALESCE(MAX(\"День (тренд)\")::date, CURRENT_DATE) FROM public.v_egisz_transactions_enriched_ui) - (({{trend_period}}::integer) - 1) ) GROUP BY 1, 2 ORDER BY 1 ASC",
+          "query": "SELECT DATE(COALESCE(\"Дата регистрации\", \"Обработано\")) AS \"Дата\", \"Статус\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] GROUP BY 1, 2 ORDER BY 1 ASC",
           "template-tags": {
-            "trend_period": {
+            "dwh_date": {
               "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-              "name": "trend_period",
-              "display-name": "Период (ось даты графика) (глубина, дней)",
-              "type": "number",
-              "required": true,
-              "default": 30
+              "name": "dwh_date",
+              "display-name": "По дате «День (тренд)»",
+              "type": "dimension",
+              "widget-type": "date/all-options"
             }
           }
         },
@@ -44,6 +44,7 @@
         ],
         "stackable.stack_type": "stacked",
         "graph.x_axis.axis_enabled": "rotate-45",
+        "graph.show_values": true,
         "column_settings": {
           "[\"name\",\"Дата\"]": {
             "column_title": "Дата"
@@ -65,20 +66,20 @@
     },
     {
       "name": "Динамика по типам СЭМД",
+      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "День (тренд)" } },
       "description": "Тренд по календарным дням: дата из ответа ЕГИСЗ (Дата регистрации), иначе дата попадания в витрину (Обработано). Отражает динамику ответов/регистрации, а не момент срабатывания ETL. Фильтр периода привязан к той же логике (колонка «День (тренд)» в витрине). В легенде: код и наименование СЭМД, например «227. Протокол Консультации».",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT \"День (тренд)\" AS \"Дата\", CASE WHEN NULLIF(TRIM(\"Код СЭМД\"), '') IS NULL THEN initcap(COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)')) ELSE NULLIF(TRIM(\"Код СЭМД\"), '') || '. ' || initcap(COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)')) END AS \"Наименование СЭМД\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE \"День (тренд)\"::date >= ( (SELECT COALESCE(MAX(\"День (тренд)\")::date, CURRENT_DATE) FROM public.v_egisz_transactions_enriched_ui) - (({{trend_period}}::integer) - 1) ) GROUP BY 1, 2 ORDER BY 1 ASC",
+          "query": "SELECT \"День (тренд)\" AS \"Дата\", CASE WHEN NULLIF(TRIM(\"Код СЭМД\"), '') IS NULL THEN initcap(COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)')) ELSE NULLIF(TRIM(\"Код СЭМД\"), '') || '. ' || initcap(COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)')) END AS \"Наименование СЭМД\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] GROUP BY 1, 2 ORDER BY 1 ASC",
           "template-tags": {
-            "trend_period": {
+            "dwh_date": {
               "id": "f8a9b0c1-d2e3-4f5a-b6c7-d8e9f0a1b2c3",
-              "name": "trend_period",
-              "display-name": "Период (ось даты графика) (глубина, дней)",
-              "type": "number",
-              "required": true,
-              "default": 30
+              "name": "dwh_date",
+              "display-name": "По дате «День (тренд)»",
+              "type": "dimension",
+              "widget-type": "date/all-options"
             }
           }
         },
@@ -112,20 +113,20 @@
     },
     {
       "name": "Доля ошибок по дням",
+      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "День (тренд)" } },
       "description": "По календарным дням (колонка «День (тренд)»): число обработанных, число error и процент ошибок. Дополняет stacked-график по статусам.",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT \"День (тренд)\" AS \"Дата\", COUNT(*)::bigint AS \"Всего\", SUM(CASE WHEN \"Статус\" = 'error' THEN 1 ELSE 0 END)::bigint AS \"Ошибок\", ROUND(100.0 * SUM(CASE WHEN \"Статус\" = 'error' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS \"% ошибок\" FROM public.v_egisz_transactions_enriched_ui WHERE \"День (тренд)\"::date >= ( (SELECT COALESCE(MAX(\"День (тренд)\")::date, CURRENT_DATE) FROM public.v_egisz_transactions_enriched_ui) - (({{trend_period}}::integer) - 1) ) GROUP BY 1 ORDER BY 1 ASC",
+          "query": "SELECT \"День (тренд)\" AS \"Дата\", COUNT(*)::bigint AS \"Всего\", SUM(CASE WHEN \"Статус\" = 'error' THEN 1 ELSE 0 END)::bigint AS \"Ошибок\", ROUND(100.0 * SUM(CASE WHEN \"Статус\" = 'error' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS \"% ошибок\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ORDER BY 1 ASC",
           "template-tags": {
-            "trend_period": {
+            "dwh_date": {
               "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
-              "name": "trend_period",
-              "display-name": "Период (ось даты графика) (глубина, дней)",
-              "type": "number",
-              "required": true,
-              "default": 30
+              "name": "dwh_date",
+              "display-name": "По дате «День (тренд)»",
+              "type": "dimension",
+              "widget-type": "date/all-options"
             }
           }
         },

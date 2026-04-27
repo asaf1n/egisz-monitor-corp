@@ -58,6 +58,8 @@ MAPS="$(echo "${DC09}" | jq '[.[] | select(.card != null or .card_id != null) | 
 step 6 "GET /api/dashboard/:id — Оперативный (filters wired)"
 DOP="$(curl -sS "${MB_URL}/api/dashboard/${OP_ID}" "${HDR[@]}")"
 echo "${DOP}" | jq -e '.auto_apply_filters == true' >/dev/null || die "01: auto_apply_filters is not true"
+echo "${DOP}" | jq -e '(.parameters // []) | map(.slug) | index("top_semd_filter") != null and index("top_clinic_filter") != null' >/dev/null \
+  || die "01: expected dashboard parameter slugs top_semd_filter and top_clinic_filter (URL/bookmarks)"
 DC01="$(echo "${DOP}" | jq '.dashcards // .ordered_cards // []')"
 MAPS2="$(echo "${DC01}" | jq '[.[] | select(.card != null or .card_id != null) | (.parameter_mappings // []) | length] | add // 0')"
 [[ "${MAPS2}" -gt 0 ]] || die "01: no parameter_mappings on dashcards"

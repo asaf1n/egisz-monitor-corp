@@ -1,14 +1,14 @@
 {
   "name": "07 Глубокий анализ ошибок",
   "description": "Классификация инцидентов. Топы и срезы по смысловой «Сводке ошибки» (public.egisz_friendly_error_item; совпадает с колонкой «Сводка ошибок» в витрине по строке). Исходный message в JSON не перезаписывается. Фильтр по дате обработки.",
+  "width": "full",
   "parameters": [
     {
       "id": "f7a8b9c0-d1e2-4345-f678-9abcdef01234",
-      "name": "Период (обработано) — глубина, дней",
-      "slug": "deep_period_filter",
-      "type": "number/=",
-      "sectionId": "number",
-      "default": 30
+      "name": "Период по дате обработки (витрина)",
+      "slug": "dwh_date_filter",
+      "type": "date/all-options",
+      "sectionId": "date"
     }
   ],
   "cards": [
@@ -16,18 +16,18 @@
       "name": "Топ причин отказов ЕГИСЗ",
       "description": "Самые частые смысловые сводки по каждому элементу errors_json (функция egisz_friendly_error_item; разделители внутри одного сообщения — длинное тире, как в витрине).",
       "table_ref": "v_egisz_transactions_enriched_ui",
+      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 200) AS \"Сводка ошибки\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui env CROSS JOIN ( SELECT COALESCE((SELECT MAX(\"Обработано\") FROM public.v_egisz_transactions_enriched_ui), NOW()) AS ref_ts ) vit_ref, jsonb_array_elements(env.\"Ошибки JSON\") AS e(err) WHERE env.\"Статус\" = 'error' AND (NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL) AND env.\"Обработано\" >= vit_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{deep_period}}::numeric))) GROUP BY 1 ORDER BY 2 DESC LIMIT 20",
+          "query": "SELECT LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 200) AS \"Сводка ошибки\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui env, jsonb_array_elements(env.\"Ошибки JSON\") AS e(err) WHERE env.\"Статус\" = 'error' AND (NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL) AND 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ORDER BY 2 DESC LIMIT 20",
           "template-tags": {
-            "deep_period": {
+            "dwh_date": {
               "id": "f7000001-0001-4001-8001-000000000001",
-              "name": "deep_period",
-              "display-name": "Период (обработано) (глубина, дней)",
-              "type": "number",
-              "required": true,
-              "default": 30
+              "name": "dwh_date",
+              "display-name": "По дате «Обработано»",
+              "type": "dimension",
+              "widget-type": "date/all-options"
             }
           }
         },
@@ -41,6 +41,7 @@
         "graph.metrics": [
           "Количество"
         ],
+        "graph.show_values": true,
         "column_settings": {
           "[\"name\",\"Сводка ошибки\"]": {
             "column_title": "Сводка ошибки"
@@ -61,18 +62,18 @@
       "name": "Ошибки по клиникам",
       "description": "Частые смысловые сводки в разрезе клиник и типов СЭМД (egisz_friendly_error_item по элементу JSON).",
       "table_ref": "v_egisz_transactions_enriched_ui",
+      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT \"JID клиники\", \"Наименование клиники\", COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 120) AS \"Сводка ошибки\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui env CROSS JOIN ( SELECT COALESCE((SELECT MAX(\"Обработано\") FROM public.v_egisz_transactions_enriched_ui), NOW()) AS ref_ts ) vit_ref, jsonb_array_elements(env.\"Ошибки JSON\") AS e(err) WHERE env.\"Статус\" = 'error' AND (NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL) AND env.\"Обработано\" >= vit_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{deep_period}}::numeric))) GROUP BY 1, 2, 3, 4, 5 ORDER BY 6 DESC LIMIT 50",
+          "query": "SELECT \"JID клиники\", \"Наименование клиники\", COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 120) AS \"Сводка ошибки\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui env, jsonb_array_elements(env.\"Ошибки JSON\") AS e(err) WHERE env.\"Статус\" = 'error' AND (NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL) AND 1=1 [[AND {{dwh_date}}]] GROUP BY 1, 2, 3, 4, 5 ORDER BY 6 DESC LIMIT 50",
           "template-tags": {
-            "deep_period": {
+            "dwh_date": {
               "id": "f7000002-0002-4002-8002-000000000001",
-              "name": "deep_period",
-              "display-name": "Период (обработано) (глубина, дней)",
-              "type": "number",
-              "required": true,
-              "default": 30
+              "name": "dwh_date",
+              "display-name": "По дате «Обработано»",
+              "type": "dimension",
+              "widget-type": "date/all-options"
             }
           }
         },

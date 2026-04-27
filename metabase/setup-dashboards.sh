@@ -295,7 +295,7 @@ create_card() {
           $meta.tables[]?
           | select(.name == $tr or ((.schema // "public") + "." + .name) == $tr)
           | .fields[]?
-          | select(.name == $fn)
+          | select(.name == $fn or .display_name == $fn)
           | .id
         ] | first;
       (.dataset_query.native["template-tags"] // {}) as $tags
@@ -384,6 +384,7 @@ create_dashboard() {
   local name="$(echo "$parsed_json" | jq -r '.name')"
   local description="$(echo "$parsed_json" | jq -r '.description')"
   local parameters_json="$(echo "$parsed_json" | jq -c '.parameters // []')"
+  local dash_width="$(echo "$parsed_json" | jq -r '.width // "full"')"
 
   local dashboard_payload dashboard_id
   dashboard_payload="$(jq -n \
@@ -391,10 +392,12 @@ create_dashboard() {
     --arg description "${description}" \
     --arg collectionId "${collection_id}" \
     --arg parameters "${parameters_json}" \
+    --arg width "${dash_width}" \
     '{
       name: $name,
       description: $description,
       collection_id: ($collectionId | tonumber),
+      width: $width,
       cacheables: [],
       parameters: ($parameters | fromjson),
       auto_apply_filters: true
@@ -485,7 +488,7 @@ create_dashboard() {
     # Полное тело как после GET (уже с parameter_mappings), с auto_apply_filters — обходит сброс при PUT …/cards в MB 0.48+.
     local dash_after fix_payload
     dash_after="$(api_request GET "/api/dashboard/${dashboard_id}")"
-    fix_payload="$(echo "${dash_after}" | jq '.auto_apply_filters = true')"
+    fix_payload="$(echo "${dash_after}" | jq --arg w "${dash_width}" '.auto_apply_filters = true | .width = $w')"
     if ! api_request PUT "/api/dashboard/${dashboard_id}" "${fix_payload}" >/dev/null; then
       log_info "WARN: PUT /api/dashboard/${dashboard_id} after dashcards failed (filters may need Apply in UI)"
     fi
@@ -512,6 +515,30 @@ delete_legacy_corp_cards
 
 authenticate
 APP_DB_ID="$(ensure_app_database)"
+
+# Metabase 0.60+ sync может отставать: без полей витрины create_card (field filters) падает с «metabase-field-filters: field not found».
+log_info "Waiting for DWH view field metadata (field filters on «Обработано»)…"
+for _i in $(seq 1 90); do
+  APP_DB_METADATA_JSON="" # сбрасываем кэш get_database_metadata; иначе застреваем на первом (неполном) снимке
+  _nf="$(get_database_metadata | jq '
+    [ .tables[]? | select(.name == "v_egisz_transactions_enriched_ui")
+        | .fields[]?
+        | select(
+            .name == "processed_at" or .name == "Обработано" or .display_name == "Обработано"
+          ) ]
+    | length
+  ')"
+  if [ "${_nf:-0}" -ge 1 ] 2>/dev/null; then
+    log_info "DWH view fields in metadata (count=${_nf}) — OK"
+    break
+  fi
+  if [ "$_i" -eq 90 ]; then
+    echo "[dashboards] ERROR: v_egisz_transactions_enriched_ui (Обработано) not in metadata after 180s — field filters will fail" >&2
+    exit 1
+  fi
+  sleep 2
+done
+APP_DB_METADATA_JSON=""
 
 # Дашборды в корне личной коллекции (тот же URL, что «Персональная коллекция …»), иначе вложенная папка не видна на главном экране коллекции.
 PERSONAL_ID="$(api_request GET "/api/user/current" | jq -r '.personal_collection_id // empty')"

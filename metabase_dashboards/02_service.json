@@ -1,14 +1,14 @@
 {
   "name": "02 Сервис интеграции",
-  "description": "Анализ структуры потока. Разбивка транзакций по конкретным типам СЭМД и медицинским организациям. Фильтры: период по дате обработки, код СЭМД, JID клиники.",
+  "description": "Анализ структуры потока. Период — [field filter](https://www.metabase.com/docs/v0.60/questions/native-editor/field-filters) по **«Обработано»**; плюс код СЭМД, JID.",
+  "width": "full",
   "parameters": [
     {
-      "id": "a2b3c4d5-e6f7-4890-a123-456789abcdef",
-      "name": "Период (обработано) — глубина, дней",
-      "slug": "srv_period_filter",
-      "type": "number/=",
-      "sectionId": "number",
-      "default": 30
+      "id": "d4e5f6a7-b8c9-0d1e-2f3a-4b5c6d7e8f0a1",
+      "name": "Период по дате обработки (витрина)",
+      "slug": "dwh_date_filter",
+      "type": "date/all-options",
+      "sectionId": "date"
     },
     {
       "id": "b3c4d5e6-f7a8-4901-b234-56789abcdef0",
@@ -30,18 +30,23 @@
       "name": "Топ типов СЭМД",
       "description": "Количество записей по коду и наименованию СЭМД.",
       "table_ref": "v_egisz_transactions_enriched_ui",
+      "metabase-field-filters": {
+        "dwh_date": {
+          "table_ref": "v_egisz_transactions_enriched_ui",
+          "field_name": "Обработано"
+        }
+      },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui CROSS JOIN ( SELECT COALESCE((SELECT MAX(\"Обработано\") FROM public.v_egisz_transactions_enriched_ui), NOW()) AS ref_ts ) vit_ref WHERE \"Обработано\" >= vit_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{srv_period}}::numeric))) [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{srv_semd}}]] [[AND \"JID клиники\"::text = {{srv_clinic}}]] GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 25",
+          "query": "SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{srv_semd}}]] [[AND \"JID клиники\"::text = {{srv_clinic}}]] GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 25",
           "template-tags": {
-            "srv_period": {
+            "dwh_date": {
               "id": "f2000001-0001-4001-8001-000000000001",
-              "name": "srv_period",
-              "display-name": "Период (обработано) (глубина, дней)",
-              "type": "number",
-              "required": true,
-              "default": 30
+              "name": "dwh_date",
+              "display-name": "По дате «Обработано»",
+              "type": "dimension",
+              "widget-type": "date/all-options"
             },
             "srv_semd": {
               "id": "f2000001-0001-4001-8001-000000000010",
@@ -63,7 +68,7 @@
         },
         "database": 1
       },
-      "display": "bar",
+      "display": "row",
       "visualization_settings": {
         "graph.dimensions": [
           "Наименование СЭМД"
@@ -71,7 +76,7 @@
         "graph.metrics": [
           "Количество"
         ],
-        "graph.x_axis.axis_enabled": "rotate-45",
+        "graph.show_values": true,
         "column_settings": {
           "[\"name\",\"Код СЭМД\"]": {
             "column_title": "Код СЭМД"
@@ -95,18 +100,23 @@
       "name": "По клиникам",
       "description": "Топ клиник по числу записей с JID для различения одинаковых наименований.",
       "table_ref": "v_egisz_transactions_enriched_ui",
+      "metabase-field-filters": {
+        "dwh_date": {
+          "table_ref": "v_egisz_transactions_enriched_ui",
+          "field_name": "Обработано"
+        }
+      },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT \"JID клиники\", \"Наименование клиники\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui CROSS JOIN ( SELECT COALESCE((SELECT MAX(\"Обработано\") FROM public.v_egisz_transactions_enriched_ui), NOW()) AS ref_ts ) vit_ref WHERE \"Обработано\" >= vit_ref.ref_ts - (interval '1 day' * GREATEST(1, ({{srv_period}}::numeric))) [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{srv_semd}}]] [[AND \"JID клиники\"::text = {{srv_clinic}}]] GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20",
+          "query": "SELECT \"JID клиники\", \"Наименование клиники\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{srv_semd}}]] [[AND \"JID клиники\"::text = {{srv_clinic}}]] GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20",
           "template-tags": {
-            "srv_period": {
+            "dwh_date": {
               "id": "f2000002-0002-4002-8002-000000000001",
-              "name": "srv_period",
-              "display-name": "Период (обработано) (глубина, дней)",
-              "type": "number",
-              "required": true,
-              "default": 30
+              "name": "dwh_date",
+              "display-name": "По дате «Обработано»",
+              "type": "dimension",
+              "widget-type": "date/all-options"
             },
             "srv_semd": {
               "id": "f2000002-0002-4002-8002-000000000010",

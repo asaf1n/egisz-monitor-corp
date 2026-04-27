@@ -83,7 +83,7 @@
 
 1. **Схема витрины в PostgreSQL** — `egisz_reports` должна содержать таблицы/представления и функции (`apply-schema` из пакета, k8s Job `egisz-reports-schema-init`, либо `.\start.ps1` при `deploy` / ручной `psql -f sql/001_schema.sql`). Без шага (1) запросы с **«Сводка ошибок»** или `egisz_friendly_error_item` вернут ошибку.
 2. **ETL (загрузка фактов)** — см. подраздел **«Синхронизация Firebird → PostgreSQL»** выше: после появления схемы каждый успешный прогон **догружает** новые callback-и по курсору **`LOGID`**; колонка **«Сводка ошибок»** в UI витрины пересчитывается при **чтении** (SQL), менять ETL ради неё не нужно.
-3. **Metabase** смотрит на ту же БД `egisz_reports` и только **читает** витрину. После смены JSON-дашбордов или `Dockerfile` Metabase: **`docker build -f metabase/Dockerfile`**, бамп тега **`egisz-corp-metabase:k8s-v4`** (см. `k8s/metabase.yaml`), `kubectl rollout restart deployment/metabase` или `.\start.ps1 -Action apply` (подхватит образ, провижининг при старте). Локальный kind: после `build` — `kind load` образов, как в `start.ps1`. При **только** обновлении **витрины** без смены образа Metabase достаточно повторного **apply-schema** и/или ETL; пересобирать образ Metabase **не** обязательно.
+3. **Metabase** смотрит на ту же БД `egisz_reports` и только **читает** витрину. После смены JSON-дашбордов или `Dockerfile` Metabase: **`docker build -f metabase/Dockerfile`**, бамп тега **`egisz-corp-metabase:k8s-v8`** (см. `k8s/metabase.yaml`), `kubectl rollout restart deployment/metabase` или `.\start.ps1 -Action apply` (подхватит образ, провижининг при старте). Локальный kind: после `build` — `kind load` образов, как в `start.ps1`. При **только** обновлении **витрины** без смены образа Metabase достаточно повторного **apply-schema** и/или ETL; пересобирать образ Metabase **не** обязательно.
 
 **Разделители в «Сводка ошибок»:** между элементами массива `errors_json` в одной транзакции — **·** (средняя точка); внутри многочастевого Schematron в одном `message` — **—** (короткое тире в SQL). Понятные бизнес-сообщения ГИП (`не соответствует данным ГИП` и т.д.) **не** перезаписываются.
 
@@ -95,6 +95,21 @@ FROM v_egisz_transactions_enriched_ui
 WHERE "Обработано" > NOW() - INTERVAL '7 days'
 GROUP BY 1;
 ```
+
+## Metabase 0.60+ и фильтры дат на дашборде
+
+Во native-вопросах важно не путать **базовую (basic) date-переменную** и **field filter** (тип `dimension`):
+[SQL parameters: Field filters](https://www.metabase.com/docs/v0.60/questions/native-editor/field-filters) / [variables](https://www.metabase.com/docs/v0.60/questions/native-editor/sql-parameters.html) — *«If you add a basic Date variable… it’s only possible to use the dashboard filter option Single Date. So if you’re trying to use one of the other Time options on the dashboard, you’ll need to change the variable to a field filter and map it to a date field.»*
+
+В провижининге из `metabase_dashboards/*.json`:
+
+- в SQL: `WHERE 1=1 [[AND {{dwh_date}}]]` (у одного и того же **имени** тега `dwh_date` на разных карточках может быть разный физический столбец, см. ниже);
+- в `template-tags` для `dwh_date` указаны `type: "dimension"` и `widget-type: "date/all-options"`;
+- на **карточке** рядом с `dataset_query` — объект **`metabase-field-filters`**: скрипт `metabase/setup-dashboards.sh` подставит `dimension: ["field", <field_id>, null]` в API Metabase, сопоставив `table_ref` + `field_name` с полями после `sync` БД. Имя поля можно взять из `dim_column_display_labels` (русские подписи в `*_ui`) или, при необходимости, совпадение с **display name** (в `setup-dashboards.sh` — fallback по `display_name` в метаданных).
+
+**Один** параметр дашборда (slug `dwh_date_filter`) визуально один виджет; внутри вопросов `dwh_date` может быть сопоставлен, например, с «**Обработано**» (витрина) или с «**Отправлено**» (очередь) — важно, что **каждое** сохранённое применяет к своему `field` диапазон, заданный пользователем. До замены **«N дней от MAX(даты) в витрине»** окно задаётся **календарём/относительным диапазоном** (последние 7/30 суток и т.д.) в UI Metabase.
+
+**Требуется** после `POST /api/database/:id/sync_schema` в скрипте, чтобы `resolve_field_id` нашёл `field_name`. Если сопоставление не сработает, в логе provижнинга будет: `metabase-field-filters: field not found`.
 
 ## Деплой и обновление карточек (GitHub Actions / CI)
 

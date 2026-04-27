@@ -316,7 +316,7 @@ SELECT
     jid::text AS "JID клиники",
     gost_host AS "Хост клиники (VPN ГОСТ)",
     org_oid AS "OID организации",
-    kind_code AS "Код СЭМД",
+    kind_code::text AS "Код СЭМД",
     kind_name AS "Наименование СЭМД",
     status AS "Статус",
     emdr_id AS "EMDR ID",
@@ -331,12 +331,12 @@ SELECT
     relates_to_id AS "Связанное сообщение"
 FROM v_egisz_transactions_enriched;
 
-COMMENT ON VIEW v_egisz_transactions_enriched_ui IS 'Обёртка над v_egisz_transactions_enriched с подписями колонок для отчётов; см. dim_column_display_labels. JID клиники — TEXT (идентификатор, не суммируется в Metabase). «Сводка ошибок» — errors_friendly: агрегация подсказок по errors_json, исходные «Ошибки JSON» не меняются. Колонка «Связанное сообщение» (relates_to_id) — последняя для удобства витрин и Metabase.';
+COMMENT ON VIEW v_egisz_transactions_enriched_ui IS 'Обёртка над v_egisz_transactions_enriched с подписями колонок для отчётов; см. dim_column_display_labels. JID клиники и Код СЭМД — TEXT (идентификаторы, не суммируются в Metabase). «Сводка ошибок» — errors_friendly: агрегация подсказок по errors_json, исходные «Ошибки JSON» не меняются. Колонка «Связанное сообщение» (relates_to_id) — последняя для удобства витрин и Metabase.';
 
 CREATE OR REPLACE VIEW v_rpt_documents_no_response_ui AS
 SELECT
     local_uid_semd AS "localUid СЭМД",
-    kind_code AS "Код СЭМД",
+    kind_code::text AS "Код СЭМД",
     kind_name AS "Наименование СЭМД",
     jid::text AS "JID клиники",
     clinic_name AS "Наименование клиники",
@@ -344,4 +344,4 @@ SELECT
     sent_at AS "Отправлено"
 FROM v_rpt_documents_no_response;
 
-COMMENT ON VIEW v_rpt_documents_no_response_ui IS 'Обёртка над v_rpt_documents_no_response с подписями колонок для отчётов; см. dim_column_display_labels. JID клиники — TEXT (идентификатор, не суммируется в Metabase).';
+COMMENT ON VIEW v_rpt_documents_no_response_ui IS 'Обёртка над v_rpt_documents_no_response с подписями колонок для отчётов; см. dim_column_display_labels. JID клиники и Код СЭМД — TEXT (идентификаторы, не суммируются в Metabase).';
