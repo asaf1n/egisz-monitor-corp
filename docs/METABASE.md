@@ -41,7 +41,7 @@
 
 ## Объекты для дашбордов
 
-После `egisz-corp apply-schema` и успешного `egisz-corp sync`:
+После `egisz-corp apply-schema` и успешного прогона ETL (CLI **`egisz-corp sync`** или кнопка синхронизации в **Config UI** — см. ниже):
 
 | Объект | Назначение |
 |--------|------------|
@@ -61,10 +61,28 @@
 
 ## Сбор данных в витрину и использование Metabase
 
+### Синхронизация Firebird → PostgreSQL
+
+Факты в витрину попадают через **`run_sync`** (`egisz_monitor_corp.etl`): только **SELECT** из Firebird (**firebird-driver**, на воркере нужен **fbclient** / **`FB_CLIENT_LIBRARY`**) и запись в PostgreSQL (**psycopg2**).
+
+- **Курсор:** в таблице **`etl_state`** хранится **`last_log_id`** по имени пайплайна из YAML (по умолчанию `firebird_exchangelog`). Инкремент идёт по **`LOGID`** в **`EXCHANGELOG`**, не по `MODIFYDATE`. Режим **`full_scan: true`** сбрасывает курсор и перечитывает журнал в рамках окна **`sync_window_days`** (типовое ограничение по **`LOGDATE`** — `DATEADD` во Firebird, см. `sql_util.default_exchangelog_select`).
+- **Порядок в одном прогоне:** два запроса обогащения (**`EGISZ_LICENSES`** + **`JPERSONS`**, только строки с **`JID IS NOT NULL`**); **COUNT** строк журнала после курсора для прогресса (ошибка COUNT не останавливает ETL); постраничная выборка **`EXCHANGELOG`** (`SELECT FIRST` + `ORDER BY e.LOGID`, `sql_util.paginated_exchangelog_sql`); парсинг **`MSGTEXT`** / **`LOGTEXT`**; ошибки без пригодного XML / без **`relatesToMessage`** — в **`stg_parse_errors`**; **UPSERT** фактов и измерений; обновление **`last_log_id`**; отдельная выборка для **`stg_egisz_outbound_documents`** (очередь «без ответа»).
+
+**Как запустить тот же ETL:**
+
+| Способ | Примечание |
+|--------|------------|
+| **`egisz-corp sync`** | CLI из установленного пакета; путь к YAML — **`EGISZ_CORP_CONFIG`** или **`--config`**. |
+| **Config UI** (кнопка синхронизации) | Тот же **`run_sync`**, что и в CLI, выполняется **в процессе Flask** (`sync_routes`, single-flight: повторный старт, пока идёт синк, отклоняется). Это **не** вызов бинарника `egisz-corp` из пода. |
+| **Apache Airflow** | DAG **`egisz_corp_firebird_to_postgres`** (`airflow/dags/egisz_corp_etl_dag.py`): задача **`test_connections`**, затем **`corp_sync`**; путь к конфигу — переменные **`egisz_corp_project_root`** / **`egisz_corp_config_path`** (см. раздел «Переменные Airflow» ниже). |
+| **`start.ps1`** | При **`deploy`** / **`apply`** поднимается стек и схема витрины, но **полный прогон ETL не вшит** в скрипт по умолчанию; после деплоя данные загружают из **Config UI**, **`kubectl … exec deploy/conf-ui -- egisz-corp sync`** (см. вывод `start.ps1` после деплоя) или **Airflow**. |
+
+Подробнее по стеку и шагам см. **`README.md`** (разделы «Стек технологий», «Синхронизация», «Выборка данных»).
+
 Порядок, в котором появляются **факты** и обновляются **дашборды** (колонка **«Сводка ошибок»** и карточки, вызывающие `egisz_friendly_*`, требуют актуального `001_schema.sql` в Postgres).
 
 1. **Схема витрины в PostgreSQL** — `egisz_reports` должна содержать таблицы/представления и функции (`apply-schema` из пакета, k8s Job `egisz-reports-schema-init`, либо `.\start.ps1` при `deploy` / ручной `psql -f sql/001_schema.sql`). Без шага (1) запросы с **«Сводка ошибок»** или `egisz_friendly_error_item` вернут ошибку.
-2. **ETL (загрузка фактов)** — смещение по `EXCHANGELOG.LOGID` в `etl_state`, выборка из Firebird, UPSERT в `fact_egisz_transactions`. Запуск: **Config UI** `egisz-corp sync`, расписание Airflow (`k8s/airflow/`), либо автоматически в составе `deploy` (см. `start.ps1` / `k8s/README.md`). Каждая успешная синхронизация **догружает** новые callback-и; прошлые строки в витрине **«Сводка ошибок»** пересчитывается при чтении (логика в SQL), менять ETL ради неё не нужно.
+2. **ETL (загрузка фактов)** — см. подраздел **«Синхронизация Firebird → PostgreSQL»** выше: после появления схемы каждый успешный прогон **догружает** новые callback-и по курсору **`LOGID`**; колонка **«Сводка ошибок»** в UI витрины пересчитывается при **чтении** (SQL), менять ETL ради неё не нужно.
 3. **Metabase** смотрит на ту же БД `egisz_reports` и только **читает** витрину. После смены JSON-дашбордов или `Dockerfile` Metabase: **`docker build -f metabase/Dockerfile`**, бамп тега **`egisz-corp-metabase:k8s-v4`** (см. `k8s/metabase.yaml`), `kubectl rollout restart deployment/metabase` или `.\start.ps1 -Action apply` (подхватит образ, провижининг при старте). Локальный kind: после `build` — `kind load` образов, как в `start.ps1`. При **только** обновлении **витрины** без смены образа Metabase достаточно повторного **apply-schema** и/или ETL; пересобирать образ Metabase **не** обязательно.
 
 **Разделители в «Сводка ошибок»:** между элементами массива `errors_json` в одной транзакции — **·** (средняя точка); внутри многочастевого Schematron в одном `message` — **—** (короткое тире в SQL). Понятные бизнес-сообщения ГИП (`не соответствует данным ГИП` и т.д.) **не** перезаписываются.
