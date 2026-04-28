@@ -114,8 +114,8 @@ class NormalizedRecord:
 
 class EgiszMonitorParser:
     """
-    SOAP-focused parser: XML from MSGTEXT; gost- host from LOGTEXT then EGISZ_MESSAGES.REPLYTO.
-    Clinic JID: LOGTEXT URL, строка EGISZ_LICENSES (JID), или OID→EGISZ_LICENSES.MO_UID→JID; реквизиты МО из JPERSONS.
+    SOAP-focused parser: XML from MSGTEXT; gost- host from MSGTEXT then LOGTEXT then EGISZ_MESSAGES.REPLYTO.
+    Clinic JID: gost- из текста сообщения (MSGTEXT), затем LOGTEXT/REPLYTO, строка EGISZ_LICENSES (JID), или OID→EGISZ_LICENSES.MO_UID→JID; реквизиты МО из JPERSONS.
     """
 
     def __init__(self, log_excerpt_max: int = 4000) -> None:
@@ -125,9 +125,10 @@ class EgiszMonitorParser:
         self,
         log_text: str | None,
         reply_to: str | None = None,
+        msg_text: str | None = None,
     ) -> dict[str, Any]:
         """
-        Extract clinic token from gost-<jid>.infoclinica.lan in LOGTEXT, then in REPLYTO.
+        Extract clinic token from gost-<jid>.infoclinica.lan in MSGTEXT, then LOGTEXT, then REPLYTO.
 
         DOCUMENTID / localUid are not used here; they feed local_uid_semd only after SOAP localUid is read (see build_record).
         """
@@ -144,7 +145,7 @@ class EgiszMonitorParser:
             jid: int | None = int(best) if best.isdigit() else None
             return best, jid
 
-        for blob in (log_text, reply_to):
+        for blob in (msg_text, log_text, reply_to):
             token, jid = _first_gost(blob)
             if token is not None:
                 return {"jid": jid, "gost_jid_token": token}
@@ -270,7 +271,7 @@ class EgiszMonitorParser:
         jid_by_mo_uid_from_egisz_licenses: Mapping[str, int] | None = None,
     ) -> tuple[int | None, str | None]:
         """
-        Resolve internal JID: URL → EGISZ_LICENSES.JID из строки выборки → OID→EGISZ_LICENSES.MO_UID→JID.
+        Resolve internal JID: gost- из текста (MSGTEXT/LOGTEXT/REPLYTO) → EGISZ_LICENSES.JID из строки выборки → OID→EGISZ_LICENSES.MO_UID→JID.
         """
         if jid_from_url is not None and jid_from_url > 0:
             return jid_from_url, None
@@ -301,7 +302,7 @@ class EgiszMonitorParser:
         on_staging_error: Callable[[StagingParseError], None] | None = None,
     ) -> NormalizedRecord | None:
         """
-        SOAP только из MSGTEXT; хост gost- из LOGTEXT затем REPLYTO.
+        SOAP только из MSGTEXT; хост gost- из MSGTEXT затем LOGTEXT затем REPLYTO.
         KIND из XML (MSGTEXT) либо из колонки EGISZ_LICENSES.KIND строки журнала. UPSERT key: relates_to_id.
         local_uid_semd: тег localUid в SOAP либо EGISZ_MESSAGES.DOCUMENTID.
         """
@@ -310,7 +311,7 @@ class EgiszMonitorParser:
         )
         excerpt = combined[: self.log_excerpt_max] if combined else ""
 
-        host_part = self.extract_jid(log_text, reply_to=reply_to)
+        host_part = self.extract_jid(log_text, reply_to=reply_to, msg_text=msg_text)
         jid_url = host_part["jid"]
         gost_token = host_part["gost_jid_token"]
 

@@ -45,7 +45,7 @@
 * Идентификатор документа в витрине **`local_uid_semd`**: сначала **`<localUid>`** из того же XML, иначе подставляется **`EGISZ_MESSAGES.DOCUMENTID`** из джойна к журналу.
 
 **Определение ЮЛ / `JID` клиники (порядок в `resolve_clinic`):**
-1. **По URL / REPLYTO:** токен **`gost-<jid>.infoclinica.lan`** ищется регулярным выражением в **`EXCHANGELOG.LOGTEXT`**, затем в **`EGISZ_MESSAGES.REPLYTO`**.
+1. **По URL / REPLYTO:** токен **`gost-<jid>.infoclinica.lan`** ищется регулярным выражением в **`EXCHANGELOG.MSGTEXT`** (разбор текста сообщения), затем в **`EXCHANGELOG.LOGTEXT`**, затем в **`EGISZ_MESSAGES.REPLYTO`**.
 2. **По строке лицензии в выборке:** **`JID`** из подзапроса **`EGISZ_LICENSES`** (сопоставление **`REPLYTO`** с **`MO_DOMEN`** уже в SQL журнала).
 3. **По OID:** текст тега **`<organization>`** в XML (или **`MO_UID`** из той же строки лицензии) сопоставляется с картой **`MO_UID` → `JID`** из предзагруженного **`EGISZ_LICENSES`**.
 4. **Наименование и реквизиты** из **`JPERSONS`** подставляются в измерения по уже разрешённому **`JID`**.
@@ -56,7 +56,7 @@
 | :--- | :--- | :--- |
 | **`relates_to_id`** | `<relatesToMessage>` (MSGTEXT) | **Ключ связи.** Технический ID, связывающий асинхронный ответ ЕГИЗС с исходным запросом МИС. |
 | **`local_uid_semd`** | `<localUid>` (MSGTEXT) / `DOCUMENTID` | Идентификатор документа. Значение из XML-ответа приоритетнее данных из таблицы `EGISZ_MESSAGES`. |
-| **`jid`** | `gost-` в LOGTEXT / REPLYTO; `JID` и `MO_UID` из строки `EGISZ_LICENSES` (SQL по `REPLYTO`↔`MO_DOMEN`) | **ID клиники.** Порядок разрешения: URL-токен → `JID` из лицензии строки журнала → `MO_UID`/`<organization>` → `JID` по предзагруженной карте. |
+| **`jid`** | `gost-` в MSGTEXT / LOGTEXT / REPLYTO; `JID` и `MO_UID` из строки `EGISZ_LICENSES` (SQL по `REPLYTO`↔`MO_DOMEN`) | **ID клиники.** Порядок разрешения: URL-токен из текста сообщения и транспортных полей (MSGTEXT → LOGTEXT → REPLYTO) → `JID` из лицензии строки журнала → `MO_UID`/`<organization>` → `JID` по предзагруженной карте. |
 | **`status`** | `<status>` (MSGTEXT) | Результат обработки: `success` (успех), `error` (ошибка) или `unknown`. |
 | **`errors_json`** | `<errors>` (MSGTEXT) | Массив кодов и текстов ошибок РЭМД для технического анализа причин отказа в регистрации. В представлении `*_ui` колонка **«Сводка ошибок»** — SQL-агрегат по этому массиву; в факте хранится исходный JSON. |
 
