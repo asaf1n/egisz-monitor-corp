@@ -4,7 +4,7 @@ Schema (PROXY_EGISZ): EXCHANGELOG (LOGTEXT = URL/хост клиники, MSGTEX
 EGISZ_MESSAGES (DOCUMENTID, REPLYTO), EGISZ_LICENSES (MO_UID, MO_DOMEN, JID, KIND),
 JPERSONS (JNAME, JINN VARCHAR(12), FIR_OID VARCHAR(255) — как MO UID для <organization>).
 KIND exists only in EGISZ_LICENSES — not on EGISZ_MESSAGES. Строка EGISZ_LICENSES: REPLYTO matches MO_DOMEN.
-localUid в SOAP ↔ DOCUMENTID; клиника: gost- в LOGTEXT, иначе REPLYTO → MO_DOMEN → JID → JPERSONS.
+localUid в SOAP ↔ DOCUMENTID; клиника: gost- сначала в MSGTEXT (разбор текста сообщения), затем LOGTEXT, иначе REPLYTO → MO_DOMEN → JID → JPERSONS.
 """
 
 from __future__ import annotations
@@ -92,7 +92,7 @@ WHERE jp.JID IS NOT NULL
 
 
 def outbound_documents_staging_select(sync_window_days: int) -> str:
-    """EGISZ_MESSAGES с DOCUMENTID за окно: тип/клиника через REPLYTO→EGISZ_LICENSES как в EXCHANGELOG."""
+    """EGISZ_MESSAGES с DOCUMENTID за окно: KIND/JID через REPLYTO→EGISZ_LICENSES (как fallback после gost- в MSGTEXT в журнале EXCHANGELOG)."""
     return f"""
 SELECT
     TRIM(m.DOCUMENTID) AS DOCUMENTID,

@@ -59,6 +59,16 @@ def test_extract_jid_falls_back_to_reply_to_when_log_has_no_gost() -> None:
     assert r["gost_jid_token"] == "99"
 
 
+def test_extract_jid_prefers_msg_text_over_log_and_reply_to() -> None:
+    p = EgiszMonitorParser()
+    log = "http://gost-1.infoclinica.lan/"
+    reply = "http://gost-2.infoclinica.lan/"
+    msg = "echo http://gost-88.infoclinica.lan/ in payload"
+    r = p.extract_jid(log, reply_to=reply, msg_text=msg)
+    assert r["jid"] == 88
+    assert r["gost_jid_token"] == "88"
+
+
 def test_build_record_uses_reply_to_for_jid_when_logtext_plain() -> None:
     p = EgiszMonitorParser()
     xml = _soap("MSG-RT", "success", kind="<ns2:kind>62</ns2:kind>")
@@ -98,6 +108,20 @@ def test_build_record_prefers_msgtext_for_soap_logtext_host_only() -> None:
     assert rec.relates_to_id == "MSG-HOST"
     assert rec.jid == 12
     assert rec.local_uid_semd == "DOC-99"
+
+
+def test_build_record_prefers_gost_in_msgtext_over_logtext() -> None:
+    """If both SOAP and LOGTEXT contain gost-, token from MSGTEXT wins."""
+    p = EgiszMonitorParser()
+    xml = _soap("MSG-GOST", "success", kind="<ns2:kind>62</ns2:kind>")
+    extra = "http://gost-77.infoclinica.lan/mentioned-in-body"
+    msg = f"{extra}\n{xml}"
+    log = "http://gost-12.infoclinica.lan/callback"
+    rec = p.build_record(log, msg_text=msg, reply_to="http://gost-5.infoclinica.lan/", kind_from_egisz_licenses="62")
+    assert rec is not None
+    assert rec.relates_to_id == "MSG-GOST"
+    assert rec.jid == 77
+    assert rec.gost_jid_token == "77"
 
 
 def test_local_uid_from_xml_overrides_document_id() -> None:
