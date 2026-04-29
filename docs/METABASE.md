@@ -77,7 +77,7 @@
 | **Apache Airflow** | DAG **`egisz_corp_firebird_to_postgres`** (`airflow/dags/egisz_corp_etl_dag.py`): задача **`test_connections`**, затем **`corp_sync`**; путь к конфигу — переменные **`egisz_corp_project_root`** / **`egisz_corp_config_path`** (см. раздел «Переменные Airflow» ниже). |
 | **`start.ps1`** | При **`deploy`** / **`apply`** поднимается стек и схема витрины, но **полный прогон ETL не вшит** в скрипт по умолчанию; после деплоя данные загружают из **Config UI**, **`kubectl … exec deploy/conf-ui -- egisz-corp sync`** (см. вывод `start.ps1` после деплоя) или **Airflow**. |
 
-Подробнее по стеку и шагам см. **`README.md`** (разделы «Стек технологий», «Синхронизация», «Выборка данных»).
+Подробнее по стеку и шагам см. **`README.md`** (разделы «Стек технологий», «Синхронизация», «Выборка данных»). Сверка объёмов с источником и интерпретация **`sync_window_days`**: **`docs/SYNC_DIAGNOSTICS.md`**.
 
 Порядок, в котором появляются **факты** и обновляются **дашборды** (колонка **«Сводка ошибок»** и карточки, вызывающие `egisz_friendly_*`, требуют актуального `001_schema.sql` в Postgres).
 

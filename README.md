@@ -26,6 +26,8 @@
 
 **Запуск:** по расписанию — DAG **Apache Airflow** `egisz_corp_firebird_to_postgres` (задача вызывает `run_sync` с путём конфига из переменных Airflow); вручную — **Flask** Config UI через **`sync_routes`** (фоновый поток, single-flight: повторный запуск, пока идёт синк, отклоняется). Проверка соединений с источником и DWH может выполняться отдельной задачей DAG до синхронизации.
 
+**Диагностика полноты данных:** сверка `sync_window_days`, `full_scan`, `batch_size` с актуальным конфигом и сравнение COUNT во Firebird и PostgreSQL — см. **[`docs/SYNC_DIAGNOSTICS.md`](docs/SYNC_DIAGNOSTICS.md)** и SQL-шаблоны [`sql/003_diagnostic_counts_firebird.sql`](sql/003_diagnostic_counts_firebird.sql), [`sql/004_diagnostic_counts_postgres.sql`](sql/004_diagnostic_counts_postgres.sql).
+
 ### Выборка данных (Sampling)
 Извлечение данных из Firebird реализовано по принципу инкрементальной дозагрузки:
 * **Курсор (watermark) по LOGID:** в **`etl_state`** хранится последний обработанный **`LOGID`**; после каждого пакета значение сдвигается вперёд до максимума **`LOGID`** на обработанной странице.
