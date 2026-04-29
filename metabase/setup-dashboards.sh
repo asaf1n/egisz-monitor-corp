@@ -326,7 +326,12 @@ create_card() {
     | .table.columns = (
         if ($display == "table")
            and ($query | test("v_egisz_transactions_enriched_ui|stg_parse_errors")) then
-          [ { "name": "Связанное сообщение", "enabled": false } ]
+          (.table.columns // []) as $cols
+          | if ($cols | length) == 0 then
+              [ { "name": "Связанное сообщение", "enabled": false } ]
+            else
+              ($cols | map(if (.name // "") == "Связанное сообщение" then . + { "enabled": false } else . end))
+            end
         else
           ((.table.columns // {}) + {
             "[\"name\",\"clinic_id\"]": { "display_as": null },

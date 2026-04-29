@@ -6,13 +6,13 @@
 | :--- | :--- |
 | `namespace.yaml` | Namespace `egisz-corp` |
 | `postgres/*` | StatefulSet Postgres, сервисы, Job `egisz-reports-schema-init` (`sql/001_schema.sql`, `002_etl_state.sql`) |
-| `metabase.yaml` | Deployment Metabase (`egisz-corp-metabase:local`, см. ниже), Service (NodePort 30300, `metabase-lb`), `hostPort` 3000 для `http://127.0.0.1:3000/` |
+| `metabase.yaml` | Deployment Metabase (`egisz-corp-metabase:k8s-v9`, см. ниже), Service (NodePort 30300, `metabase-lb`), `hostPort` 3000 для `http://127.0.0.1:3000/` |
 | `metabase-admin-secret*.yaml` | Учётка администратора API/UI Metabase (шаблон `*.example`) |
 | `conf-ui.yaml` | Config UI (ETL-конфиг) |
 | `local/egisz_corp.yaml` | Пример конфигурации для секрета `egisz-corp-conf-ui-config` (локальная отладка) |
 | `airflow/` | Отдельно: Helm/Airflow (см. `k8s/airflow/README.md`) |
 
-**Образ Metabase в кластере:** `egisz-corp-metabase:local`, `imagePullPolicy: IfNotPresent` — собирается локально (`metabase/Dockerfile`, `.\start.ps1 -Action build` создаёт тег `:local` после `latest`). Если в поде **нет** `/app/verify-corp-stack.sh`: `.\metabase\force-k8s-mb-image.ps1` или `build` + `apply`/`deploy`. Старый сценарий с одним только `:latest` в манифесте давал устаревший digest в кэше ноды.
+**Образ Metabase в кластере:** `egisz-corp-metabase:k8s-v9` (версионируемый тег в манифесте; bump при изменении `metabase_dashboards/` или скриптов), `imagePullPolicy: IfNotPresent` — образ собирается локально (`metabase/Dockerfile`, `.\start.ps1 -Action build` также создаёт `:local` для `metabase/provision-local.ps1`). Если в поде **нет** `/app/verify-corp-stack.sh`: `.\metabase\force-k8s-mb-image.ps1` или `build` + `apply`/`deploy`.
 
 ---
 

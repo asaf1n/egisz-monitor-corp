@@ -89,7 +89,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT \"localUid СЭМД\", \"JID клиники\", \"Хост клиники (VPN ГОСТ)\", \"OID организации\", \"Код СЭМД\", \"Наименование СЭМД\", \"Наименование клиники\", \"ИНН клиники\", \"OID клиники\", \"EMDR ID\", \"Дата регистрации\", (SELECT LEFT(string_agg(NULLIF(TRIM(err->>'code'), ''), '; ' ORDER BY ord), 200) FROM jsonb_array_elements(\"Ошибки JSON\") WITH ORDINALITY AS e(err, ord) WHERE NULLIF(TRIM(err->>'code'), '') IS NOT NULL) AS \"Коды РЭМД\", (SELECT LEFT(string_agg(NULLIF(err->>'message', ''), '; ' ORDER BY ord), 500) FROM jsonb_array_elements(\"Ошибки JSON\") WITH ORDINALITY AS e(err, ord) WHERE NULLIF(err->>'message', '') IS NOT NULL) AS \"Текст ошибки\", \"Сводка ошибок\", \"Обработано\", \"Связанное сообщение\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] AND \"Статус\" = 'error' ORDER BY \"Обработано\" DESC NULLS LAST LIMIT 50",
+          "query": "SELECT \"localUid СЭМД\", \"JID клиники\", \"Хост клиники (VPN ГОСТ)\", \"OID организации\", \"Код СЭМД\", \"Наименование СЭМД\", \"Наименование клиники\", \"ИНН клиники\", \"OID клиники\", \"Рег. номер РЭМД (emdrid)\", \"Дата регистрации\", (SELECT LEFT(string_agg(NULLIF(TRIM(err->>'code'), ''), '; ' ORDER BY ord), 200) FROM jsonb_array_elements(\"Ошибки JSON\") WITH ORDINALITY AS e(err, ord) WHERE NULLIF(TRIM(err->>'code'), '') IS NOT NULL) AS \"Коды РЭМД\", (SELECT LEFT(string_agg(NULLIF(err->>'message', ''), '; ' ORDER BY ord), 500) FROM jsonb_array_elements(\"Ошибки JSON\") WITH ORDINALITY AS e(err, ord) WHERE NULLIF(err->>'message', '') IS NOT NULL) AS \"Текст ошибки\", \"Сводка ошибок\", \"Обработано\", \"Связанное сообщение\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] AND \"Статус\" = 'error' ORDER BY \"Обработано\" DESC NULLS LAST LIMIT 50",
           "template-tags": {
             "dwh_date": {
               "id": "f3000002-0002-4002-8002-000000000001",
@@ -143,8 +143,8 @@
           "[\"name\",\"OID клиники\"]": {
             "column_title": "OID клиники"
           },
-          "[\"name\",\"EMDR ID\"]": {
-            "column_title": "EMDR ID"
+          "[\"name\",\"Рег. номер РЭМД (emdrid)\"]": {
+            "column_title": "Рег. номер РЭМД (emdrid)"
           },
           "[\"name\",\"Дата регистрации\"]": {
             "column_title": "Дата регистрации"

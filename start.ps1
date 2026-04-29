@@ -120,8 +120,8 @@ function Invoke-DockerBuild {
     Write-Host "[Docker] Building egisz-corp-metabase..." -ForegroundColor Yellow
     docker build @nc -f metabase/Dockerfile -t egisz-corp-metabase:latest $Root
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    # :k8s-v8 + :local = тот же digest, что :latest. В k8s/metabase.yaml образ — :k8s-v8 (bump v9… при смене скриптов/дашбордов), иначе kubelet Docker Desktop держит старый digest для имени тега.
-    docker tag egisz-corp-metabase:latest egisz-corp-metabase:k8s-v8
+    # :k8s-v9 + :local = тот же digest, что :latest. В k8s/metabase.yaml образ — :k8s-v9 (bump v10… при смене скриптов/дашбордов), иначе kubelet Docker Desktop держит старый digest для имени тега.
+    docker tag egisz-corp-metabase:latest egisz-corp-metabase:k8s-v9
     if ($LASTEXITCODE -ne 0) { exit 1 }
     docker tag egisz-corp-metabase:latest egisz-corp-metabase:local
     if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -184,7 +184,7 @@ function Invoke-KindLoadImagesIfNeeded {
     if ($LASTEXITCODE -ne 0) { exit 1 }
     kind load docker-image egisz-corp-metabase:latest --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    kind load docker-image egisz-corp-metabase:k8s-v8 --name $name
+    kind load docker-image egisz-corp-metabase:k8s-v9 --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }
     kind load docker-image egisz-corp-metabase:local --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }

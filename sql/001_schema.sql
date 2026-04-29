@@ -287,7 +287,7 @@ INSERT INTO dim_column_display_labels (source_object, source_column, display_lab
     ('v_egisz_transactions_enriched', 'kind_code', 'Код СЭМД'),
     ('v_egisz_transactions_enriched', 'kind_name', 'Наименование СЭМД'),
     ('v_egisz_transactions_enriched', 'status', 'Статус'),
-    ('v_egisz_transactions_enriched', 'emdr_id', 'EMDR ID'),
+    ('v_egisz_transactions_enriched', 'emdr_id', 'Рег. номер РЭМД (emdrid)'),
     ('v_egisz_transactions_enriched', 'errors_json', 'Ошибки JSON'),
     (
         'v_egisz_transactions_enriched',
@@ -319,7 +319,7 @@ SELECT
     kind_code::text AS "Код СЭМД",
     kind_name AS "Наименование СЭМД",
     status AS "Статус",
-    emdr_id AS "EMDR ID",
+    emdr_id AS "Рег. номер РЭМД (emdrid)",
     errors_json AS "Ошибки JSON",
     errors_friendly AS "Сводка ошибок",
     registration_date AS "Дата регистрации",

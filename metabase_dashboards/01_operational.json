@@ -64,10 +64,23 @@
       "visualization_settings": {
         "table": {
           "columns": [
-            {
-              "name": "Связанное сообщение",
-              "enabled": false
-            }
+            { "name": "Статус", "enabled": true },
+            { "name": "Код СЭМД", "enabled": true },
+            { "name": "Наименование СЭМД", "enabled": true },
+            { "name": "JID клиники", "enabled": true },
+            { "name": "Рег. номер РЭМД (emdrid)", "enabled": true },
+            { "name": "Сводка ошибок", "enabled": true },
+            { "name": "localUid СЭМД", "enabled": true },
+            { "name": "Хост клиники (VPN ГОСТ)", "enabled": true },
+            { "name": "OID организации", "enabled": true },
+            { "name": "Ошибки JSON", "enabled": false },
+            { "name": "Дата регистрации", "enabled": false },
+            { "name": "Обработано", "enabled": false },
+            { "name": "День (тренд)", "enabled": false },
+            { "name": "Наименование клиники", "enabled": false },
+            { "name": "ИНН клиники", "enabled": false },
+            { "name": "OID клиники", "enabled": false },
+            { "name": "Связанное сообщение", "enabled": false }
           ]
         },
         "column_settings": {
@@ -77,8 +90,8 @@
           "[\"name\",\"localUid СЭМД\"]": {
             "column_title": "localUid СЭМД"
           },
-          "[\"name\",\"EMDR ID\"]": {
-            "column_title": "EMDR ID"
+          "[\"name\",\"Рег. номер РЭМД (emdrid)\"]": {
+            "column_title": "Рег. номер РЭМД (emdrid)"
           },
           "[\"name\",\"OID клиники\"]": {
             "column_title": "OID клиники"
