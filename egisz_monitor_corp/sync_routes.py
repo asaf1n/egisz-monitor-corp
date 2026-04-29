@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from typing import Any
 
+_state_lock = threading.Lock()
 _state: dict[str, Any] = {
     "running": False,
     "message": "",
@@ -16,7 +17,8 @@ _state: dict[str, Any] = {
 
 def _run_sync_job(config_path: str) -> None:
     def log(m: str) -> None:
-        _state["message"] = m
+        with _state_lock:
+            _state["message"] = m
 
     try:
         import os
@@ -26,8 +28,10 @@ def _run_sync_job(config_path: str) -> None:
         from egisz_monitor_corp.etl import run_sync
 
         cfg = load_corp_config()
+
         def on_progress_detail(payload: dict[str, Any]) -> None:
-            _state["progress"] = payload
+            with _state_lock:
+                _state["progress"] = payload
 
         stats = run_sync(
             cfg,
@@ -35,43 +39,48 @@ def _run_sync_job(config_path: str) -> None:
             progress_cb=log,
             progress_detail_cb=on_progress_detail,
         )
-        _state["last_stats"] = {
-            "fetched": stats.fetched,
-            "facts_upserted": stats.facts_upserted,
-            "staging_errors": stats.staging_errors,
-            "max_log_id": stats.max_log_id,
-            "cursor_after": stats.last_cursor_after,
-        }
-        _state["error"] = None
-        _state["message"] = "Готово."
+        with _state_lock:
+            _state["last_stats"] = {
+                "fetched": stats.fetched,
+                "facts_upserted": stats.facts_upserted,
+                "staging_errors": stats.staging_errors,
+                "max_log_id": stats.max_log_id,
+                "cursor_after": stats.last_cursor_after,
+            }
+            _state["error"] = None
+            _state["message"] = "Готово."
     except Exception as e:  # pragma: no cover
-        _state["error"] = str(e)
-        _state["message"] = f"Ошибка: {e}"
+        with _state_lock:
+            _state["error"] = str(e)
+            _state["message"] = f"Ошибка: {e}"
     finally:
-        _state["running"] = False
+        with _state_lock:
+            _state["running"] = False
 
 
 def try_start_sync(config_path: str) -> tuple[bool, str]:
-    if _state["running"]:
-        return False, "Синхронизация уже выполняется."
-    _state["running"] = True
-    _state["error"] = None
-    _state["message"] = "Запуск..."
-    _state["last_stats"] = None
-    _state["progress"] = None
+    with _state_lock:
+        if _state["running"]:
+            return False, "Синхронизация уже выполняется."
+        _state["running"] = True
+        _state["error"] = None
+        _state["message"] = "Запуск..."
+        _state["last_stats"] = None
+        _state["progress"] = None
     t = threading.Thread(target=_run_sync_job, args=(config_path,), daemon=True)
     t.start()
     return True, "Синхронизация запущена в фоне."
 
 
 def get_sync_state() -> dict[str, Any]:
-    return {
-        "running": _state["running"],
-        "message": _state["message"],
-        "error": _state["error"],
-        "last_stats": _state["last_stats"],
-        "progress": _state["progress"],
-    }
+    with _state_lock:
+        return {
+            "running": _state["running"],
+            "message": _state["message"],
+            "error": _state["error"],
+            "last_stats": _state["last_stats"],
+            "progress": _state["progress"],
+        }
 
 
 def register_sync_routes(app: Any, config_path_resolver: Any) -> None:

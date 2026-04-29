@@ -66,10 +66,6 @@ PAGE = """
         </p>
       </div>
 
-      <div id="cfgMessageWrap" class="mb-6 hidden rounded-md p-4 border" role="status">
-        <div id="cfgMessageText" class="whitespace-pre-wrap"></div>
-      </div>
-
       <form id="configForm" class="space-y-4" action="#" onsubmit="return false;">
 
         <div class="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-x-8 lg:gap-y-0 lg:items-start xl:gap-x-10">
@@ -90,23 +86,22 @@ PAGE = """
               <input name="fb_port" type="number" value="{{ fb.port }}" required class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
           </div>
-          <div class="mt-2.5 grid gap-2.5 grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,10rem)] md:items-start">
+          <div class="mt-2.5 grid gap-2.5 grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,10rem)] md:items-end">
             <label class="block min-w-0">
-              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">database (alias/path)</span>
+              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">database</span>
               <input name="fb_database" value="{{ fb.database }}" required class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
-              <p class="mt-1 text-[10px] text-[#6B7280] leading-snug">Точно как на сервере Firebird: имя из <code class="text-[#9CA3AF]">aliases.conf</code> или полный путь к .fdb. Если в логе <code class="text-[#9CA3AF]">CreateFile … «имя»</code> — сервер не нашёл алиас/файл (часто путают <code class="text-[#9CA3AF]">proxy_egisz</code> и <code class="text-[#9CA3AF]">proxy-egisz</code>).</p>
             </label>
-            <label class="block w-full md:max-w-none md:justify-self-stretch self-start">
+            <label class="block w-full md:max-w-none md:justify-self-stretch">
               <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">charset</span>
               <input name="fb_charset" value="{{ fb.charset }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
           </div>
-          <div class="mt-2.5 grid gap-2.5 grid-cols-1 md:grid-cols-[minmax(0,11rem)_minmax(0,1fr)] md:items-end">
-            <label class="block w-full md:max-w-none md:justify-self-stretch">
+          <div class="mt-2.5 flex flex-col sm:flex-row flex-wrap justify-center items-stretch sm:items-end gap-3 sm:gap-4 w-full max-w-xl mx-auto">
+            <label class="block w-full sm:w-36 sm:flex-none shrink-0">
               <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">user</span>
               <input name="fb_user" value="{{ fb.user }}" required class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
-            <label class="block min-w-0">
+            <label class="block w-full sm:flex-1 sm:min-w-[12rem] sm:max-w-md">
               <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">password</span>
               <input name="fb_password" type="password" value="{{ fb.password }}" autocomplete="current-password" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
@@ -151,6 +146,10 @@ PAGE = """
             </label>
           </div>
         </div>
+        </div>
+
+        <div id="connStatusStrip" class="rounded-md border border-transparent bg-transparent px-3 py-2 min-h-[2.75rem] flex items-center justify-center text-center text-xs sm:text-sm font-mono transition-[background-color,border-color,color] duration-150" role="status" aria-live="polite">
+          <span id="connStatusText" class="text-inherit leading-snug break-words max-w-[min(100%,64rem)]"></span>
         </div>
 
         <div class="pt-3 grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 border-t border-[#1B2940]">
@@ -223,6 +222,40 @@ PAGE = """
   </div>
 
   <script>
+  let lastSyncJson = { running: false, error: null, message: '', last_stats: null };
+  let lastUiMessage = { ok: true, text: '' };
+  const STRIP_BASE =
+    'rounded-md border px-3 py-2 min-h-[2.75rem] flex items-center justify-center text-center text-xs sm:text-sm font-mono transition-[background-color,border-color,color] duration-150';
+  function refreshConnStatusStrip() {
+    const wrap = document.getElementById('connStatusStrip');
+    const textEl = document.getElementById('connStatusText');
+    if (!wrap || !textEl) return;
+    const j = lastSyncJson;
+    wrap.className = STRIP_BASE;
+    textEl.className = 'leading-snug break-words max-w-[min(100%,64rem)]';
+    if (j.running) {
+      wrap.classList.add('border-[#509EE3]/55', 'bg-[#509EE3]/18', 'text-[#BFDBFE]');
+      textEl.textContent = 'Синхронизация';
+      return;
+    }
+    if (j.error) {
+      wrap.classList.add('border-orange-800/80', 'bg-orange-900/25', 'text-orange-300');
+      textEl.textContent = 'Ошибка синхронизации/ETL';
+      return;
+    }
+    if (lastUiMessage.text) {
+      if (lastUiMessage.ok) {
+        wrap.classList.add('border-emerald-800/80', 'bg-emerald-900/25', 'text-emerald-400');
+      } else {
+        wrap.classList.add('border-rose-800/80', 'bg-rose-900/25', 'text-rose-400');
+      }
+      textEl.textContent = lastUiMessage.text;
+      return;
+    }
+    wrap.classList.add('border-transparent', 'bg-transparent');
+    textEl.textContent = '';
+    textEl.classList.add('text-transparent');
+  }
   const PHASE_RU = {
     counting: 'Подсчёт строк в Firebird…',
     exchangelog_ready: 'К журналу EXCHANGELOG',
@@ -381,27 +414,20 @@ PAGE = """
     try {
       const r = await fetch('/api/sync/status');
       const j = await r.json();
+      lastSyncJson = j;
       renderProgress(j);
+      refreshConnStatusStrip();
       const parts = [j.message || '', j.running ? 'Статус: выполняется' : 'Статус: ожидание'];
       if (j.error) parts.push('Ошибка: ' + j.error);
       if (j.last_stats) parts.push(JSON.stringify(j.last_stats, null, 2));
       el.textContent = parts.filter(Boolean).join(String.fromCharCode(10));
-    } catch (e) { el.textContent = 'Ошибка опроса: ' + e; }
+    } catch (e) {
+      el.textContent = 'Ошибка опроса: ' + e;
+    }
   }
   function showCfgMessage(ok, text) {
-    const wrap = document.getElementById('cfgMessageWrap');
-    const body = document.getElementById('cfgMessageText');
-    wrap.classList.remove(
-      'hidden',
-      'bg-emerald-900/30', 'border-emerald-800', 'text-emerald-400',
-      'bg-rose-900/30', 'border-rose-800', 'text-rose-400'
-    );
-    if (ok) {
-      wrap.classList.add('bg-emerald-900/30', 'border', 'border-emerald-800', 'text-emerald-400');
-    } else {
-      wrap.classList.add('bg-rose-900/30', 'border', 'border-rose-800', 'text-rose-400');
-    }
-    body.textContent = text || '';
+    lastUiMessage = { ok: !!ok, text: text || '' };
+    refreshConnStatusStrip();
   }
   async function postConfigForm(url) {
     const fd = new FormData(document.getElementById('configForm'));
@@ -449,10 +475,11 @@ PAGE = """
     const r = await fetch('/api/sync/start', { method: 'POST' });
     const j = await r.json();
     el.textContent = j.message || JSON.stringify(j);
-    pollSync();
+    await pollSync();
   };
   setInterval(pollSync, 1200);
   pollSync();
+  refreshConnStatusStrip();
   window.addEventListener('pageshow', function () {
     pollSync();
   });
