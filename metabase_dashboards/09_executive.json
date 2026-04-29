@@ -86,13 +86,13 @@
     },
     {
       "name": "Топ причин ошибок (ЕГИСЗ, доля)",
-      "description": "До 8 наиболее частых текстов ошибок по `egisz_friendly_error_item` при статусе error.",
+      "description": "До 8 наиболее частых текстов по первому элементу «Ошибки JSON» на транзакцию (`egisz_friendly_error_item`; один документ = один учёт).",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 56) AS \"Тип ошибки\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui env, jsonb_array_elements(env.\"Ошибки JSON\") AS e(err) WHERE env.\"Статус\" = 'error' AND (NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL) AND 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ORDER BY 2 DESC LIMIT 8",
+          "query": "SELECT COALESCE( ( SELECT LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 56) FROM jsonb_array_elements(COALESCE(env.\"Ошибки JSON\", '[]'::jsonb)) AS e(err) WHERE NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL LIMIT 1 ), '(ошибка без деталей)' ) AS \"Тип ошибки\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui env WHERE env.\"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ORDER BY 2 DESC LIMIT 8",
           "template-tags": {
             "dwh_date": {
               "id": "f90000c2-c002-4002-8002-000000000001",
@@ -293,13 +293,13 @@
     },
     {
       "name": "Ошибки по типу (код ЕГИСЗ)",
-      "description": "По `egisz_friendly_error_item`. Фильтр по дате «Обработано».",
+      "description": "По первому элементу «Ошибки JSON» на транзакцию (`egisz_friendly_error_item`). Фильтр по дате «Обработано».",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 72) AS \"Тип ошибки\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui env, jsonb_array_elements(env.\"Ошибки JSON\") AS e(err) WHERE env.\"Статус\" = 'error' AND (NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL) AND 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ORDER BY 2 DESC LIMIT 20",
+          "query": "SELECT COALESCE( ( SELECT LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 72) FROM jsonb_array_elements(COALESCE(env.\"Ошибки JSON\", '[]'::jsonb)) AS e(err) WHERE NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL LIMIT 1 ), '(ошибка без деталей)' ) AS \"Тип ошибки\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui env WHERE env.\"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ORDER BY 2 DESC LIMIT 20",
           "template-tags": {
             "dwh_date": {
               "id": "f9000006-0006-4006-8006-000000000001",
