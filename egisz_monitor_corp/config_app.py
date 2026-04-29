@@ -23,7 +23,7 @@ PAGE = """
 <html lang="ru">
 <head>
   <meta charset="utf-8"/>
-  <title>EGISZ Corp — конфигурация</title>
+  <title>FB2PG Sync Configuration</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     /* ~50px tall inputs; shell uses most of viewport width with a capped max for ultra-wide */
@@ -52,14 +52,14 @@ PAGE = """
 <body class="min-h-screen bg-[#121826] text-white">
   <div class="w-full max-w-[min(88rem,calc(100vw-2rem))] mx-auto px-[clamp(1rem,4vw,2.5rem)] py-3 sm:py-5">
     <nav class="flex items-center justify-center gap-3 text-xs mb-3">
-      <span class="text-[#509EE3]">Конфигурация</span>
+      <span class="text-[#509EE3]">FB2PG Sync</span>
       <span class="text-[#4B5563]">|</span>
       <a href="/" class="text-[#4B5563] transition hover:text-[#509EE3]">Обновить страницу</a>
     </nav>
 
     <section class="rounded-xl bg-[#0F1522] px-4 py-4 sm:px-6 lg:px-8 sm:py-5 shadow-lg border border-[#1B2940]">
       <div class="mb-4 border-b border-[#1B2940] pb-3">
-        <h1 class="text-base sm:text-lg font-semibold text-white">Конфигурация БД (EGISZ Monitor Corp)</h1>
+        <h1 class="text-base sm:text-lg font-semibold text-white">FB2PG Sync Configuration</h1>
         <p class="mt-0.5 text-xs sm:text-sm text-[#9CA3AF]">
           Файл: <code class="text-[#509EE3]">{{ path }}</code><br/>
           Переопределение: переменная окружения <code class="text-[#509EE3]">EGISZ_CORP_CONFIG</code> или <code class="text-[#509EE3]">CONFIG_WRITE_PATH</code>.
@@ -90,25 +90,25 @@ PAGE = """
               <input name="fb_port" type="number" value="{{ fb.port }}" required class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
           </div>
-          <div class="mt-2.5 grid gap-2.5 grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,11rem)] md:items-start">
+          <div class="mt-2.5 grid gap-2.5 grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,10rem)] md:items-start">
             <label class="block min-w-0">
               <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">database (alias/path)</span>
               <input name="fb_database" value="{{ fb.database }}" required class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
               <p class="mt-1 text-[10px] text-[#6B7280] leading-snug">Точно как на сервере Firebird: имя из <code class="text-[#9CA3AF]">aliases.conf</code> или полный путь к .fdb. Если в логе <code class="text-[#9CA3AF]">CreateFile … «имя»</code> — сервер не нашёл алиас/файл (часто путают <code class="text-[#9CA3AF]">proxy_egisz</code> и <code class="text-[#9CA3AF]">proxy-egisz</code>).</p>
             </label>
+            <label class="block w-full md:max-w-none md:justify-self-stretch self-start">
+              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">charset</span>
+              <input name="fb_charset" value="{{ fb.charset }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+            </label>
+          </div>
+          <div class="mt-2.5 grid gap-2.5 grid-cols-1 md:grid-cols-[minmax(0,11rem)_minmax(0,1fr)] md:items-end">
             <label class="block w-full md:max-w-none md:justify-self-stretch">
               <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">user</span>
               <input name="fb_user" value="{{ fb.user }}" required class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
-          </div>
-          <div class="mt-2.5 grid gap-2.5 grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,7.25rem)] md:items-end">
             <label class="block min-w-0">
               <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">password</span>
               <input name="fb_password" type="password" value="{{ fb.password }}" autocomplete="current-password" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
-            </label>
-            <label class="block w-full md:max-w-none md:justify-self-stretch">
-              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">charset</span>
-              <input name="fb_charset" value="{{ fb.charset }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
           </div>
         </div>
