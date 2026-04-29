@@ -13,7 +13,7 @@
   ],
   "cards": [
     {
-      "name": "Топ клиник с зависшими документами",
+      "name": "08 · Топ клиник с зависшими документами",
       "description": "Клиники с наибольшим количеством документов без ответа, с JID для различения одинаковых наименований.",
       "table_ref": "v_rpt_documents_no_response_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_rpt_documents_no_response_ui", "field_name": "Отправлено" } },
@@ -41,6 +41,7 @@
         "graph.metrics": [
           "Количество"
         ],
+        "graph.show_values": true,
         "column_settings": {
           "[\"name\",\"JID клиники\"]": {
             "column_title": "JID клиники"
@@ -61,7 +62,7 @@
       "col": 0
     },
     {
-      "name": "Возраст зависших документов",
+      "name": "08 · Возраст зависших документов",
       "description": "Распределение по времени ожидания; «сейчас» для расчёта — момент последней «Отправлено» в снимке.",
       "table_ref": "v_rpt_documents_no_response_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_rpt_documents_no_response_ui", "field_name": "Отправлено" } },
@@ -107,7 +108,7 @@
       "col": 12
     },
     {
-      "name": "Зависшие документы по типам СЭМД",
+      "name": "08 · Зависшие по типам СЭМД",
       "description": "Распределение документов без ответа по коду и наименованию СЭМД.",
       "table_ref": "v_rpt_documents_no_response_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_rpt_documents_no_response_ui", "field_name": "Отправлено" } },
@@ -156,7 +157,7 @@
       "col": 0
     },
     {
-      "name": "Зависшие — детализация",
+      "name": "08 · Зависшие — детализация",
       "description": "До 500 строк: ИД документа (localUid), код и наименование СЭМД, клиника (JID и наименование), дата отправки и корзина возраста относительно снимка очереди.",
       "table_ref": "v_rpt_documents_no_response_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_rpt_documents_no_response_ui", "field_name": "Отправлено" } },

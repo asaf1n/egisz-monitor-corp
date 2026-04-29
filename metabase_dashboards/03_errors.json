@@ -5,7 +5,7 @@
   "parameters": [
     {
       "id": "d4e5f6a7-b8c9-0d1e-2f3a-4b5c6d7e8f0a1",
-      "name": "Период (дата/диапазон, staging и витрина — см. вопросы)",
+      "name": "Период (staging: created_at; витрина: Обработано)",
       "slug": "dwh_date_filter",
       "type": "date/all-options",
       "sectionId": "date"
@@ -20,7 +20,7 @@
   ],
   "cards": [
     {
-      "name": "Ошибки парсинга (stg_parse_errors)",
+      "name": "03 · Ошибки парсинга (stg_parse_errors)",
       "description": "Последние 100 записей staging; field filter по **created_at**.",
       "table_ref": "stg_parse_errors",
       "metabase-field-filters": { "dwh_date": { "table_ref": "stg_parse_errors", "field_name": "created_at" } },
@@ -50,6 +50,14 @@
       },
       "display": "table",
       "visualization_settings": {
+        "table": {
+          "columns": [
+            {
+              "name": "Связанное сообщение",
+              "enabled": false
+            }
+          ]
+        },
         "column_settings": {
           "[\"name\",\"Номер записи\"]": {
             "column_title": "№ записи"
@@ -74,7 +82,7 @@
       "col": 0
     },
     {
-      "name": "Ошибки СЭМД",
+      "name": "03 · Отказы РЭМД (витрина, деталь)",
       "description": "Последние error-строки из витрины: коды РЭМД, исходные тексты, колонка «Сводка ошибок» с витрины (строка целиком: «·» между item, «—» внутри Schematron).",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
@@ -96,6 +104,14 @@
       },
       "display": "table",
       "visualization_settings": {
+        "table": {
+          "columns": [
+            {
+              "name": "Связанное сообщение",
+              "enabled": false
+            }
+          ]
+        },
         "column_settings": {
           "[\"name\",\"Связанное сообщение\"]": {
             "column_title": "Связанное сообщение (relatesToMessage)"

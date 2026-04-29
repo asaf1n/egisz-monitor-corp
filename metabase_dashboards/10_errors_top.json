@@ -13,7 +13,7 @@
   ],
   "cards": [
     {
-      "name": "Итоги по ошибкам за период",
+      "name": "10 · Итоги по ошибкам за период",
       "description": "Сколько транзакций со статусом error, сколько разных кодов СЭМД и клиник в этом срезе.",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
@@ -48,7 +48,7 @@
       "col": 0
     },
     {
-      "name": "Доля топ-ошибок (ЕГИСЗ)",
+      "name": "10 · Доля топ-ошибок (ЕГИСЗ)",
       "description": "До 8 наиболее частых формулировок по первому элементу «Ошибки JSON»; хвост — «Прочие типы ошибок». «Итого» = все error за период.",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
@@ -71,6 +71,7 @@
       "display": "pie",
       "visualization_settings": {
         "pie.show_legend": true,
+        "pie.show_total": true,
         "pie.percent_visibility": "legend",
         "column_settings": {
           "[\"name\",\"Тип ошибки\"]": { "column_title": "Тип ошибки" },
@@ -83,7 +84,7 @@
       "col": 0
     },
     {
-      "name": "Доля ошибок по СЭМД",
+      "name": "10 · Доля ошибок по СЭМД",
       "description": "Топ-10 кодов СЭМД среди error + «Остальные»; «Итого» = все error за период.",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
@@ -106,6 +107,7 @@
       "display": "pie",
       "visualization_settings": {
         "pie.show_legend": true,
+        "pie.show_total": true,
         "pie.percent_visibility": "legend",
         "column_settings": {
           "[\"name\",\"Код СЭМД\"]": { "column_title": "Код СЭМД" },
@@ -118,7 +120,7 @@
       "col": 8
     },
     {
-      "name": "Доля ошибок по клиникам",
+      "name": "10 · Доля ошибок по клиникам",
       "description": "Топ-10 клиник по числу error + «Остальные клиники»; «Итого» = все error за период.",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
@@ -141,6 +143,7 @@
       "display": "pie",
       "visualization_settings": {
         "pie.show_legend": true,
+        "pie.show_total": true,
         "pie.percent_visibility": "legend",
         "column_settings": {
           "[\"name\",\"Клиника\"]": { "column_title": "Клиника" },
@@ -153,7 +156,7 @@
       "col": 16
     },
     {
-      "name": "Рейтинг типов ошибок (топ-25)",
+      "name": "10 · Рейтинг типов ошибок (топ-25)",
       "description": "Горизонтальные бары по первому элементу «Ошибки JSON» на транзакцию (один документ = один учёт).",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
@@ -190,7 +193,7 @@
       "col": 0
     },
     {
-      "name": "Рейтинг СЭМД по числу ошибок",
+      "name": "10 · Рейтинг СЭМД по числу ошибок",
       "description": "Код и наименование СЭМД.",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
@@ -228,7 +231,7 @@
       "col": 12
     },
     {
-      "name": "Рейтинг клиник по ошибкам",
+      "name": "10 · Рейтинг клиник по ошибкам",
       "description": "Топ-25 клиник (JID + короткое имя).",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
@@ -265,7 +268,7 @@
       "col": 0
     },
     {
-      "name": "Сводка: тип ошибки × СЭМД × клиника",
+      "name": "10 · Сводка: тип ошибки × СЭМД × клиника",
       "description": "До 400 строк: группировка по трём измерениям и счётчик (итоги по строкам = частные случаи).",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },

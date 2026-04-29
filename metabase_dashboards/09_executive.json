@@ -5,7 +5,7 @@
   "parameters": [
     {
       "id": "a8f3c2b1-4d5e-6f70-a8b9-c0d1e2f3a4b5",
-      "name": "Период (дата, витрина + очередь по полям в карточках)",
+      "name": "Период по дате (карточки: «Обработано» или «Отправлено»)",
       "slug": "dwh_date_filter",
       "type": "date/all-options",
       "sectionId": "date"
@@ -13,7 +13,7 @@
   ],
   "cards": [
     {
-      "name": "KPI по снимку",
+      "name": "09 · KPI по снимку",
       "description": "Первые два значения — последний календарный день в «Обработано»; «Очередь в окне фильтра» — count по v_rpt с `dwh_date` на «Отправлено».",
       "table_ref": "v_rpt_documents_no_response_ui",
       "metabase-field-filters": {
@@ -50,7 +50,7 @@
       "col": 0
     },
     {
-      "name": "Статусы (доля за период)",
+      "name": "09 · Статусы за период (доля)",
       "description": "Круговая диаграмма: успех / ошибка / неизвестно по дате «Обработано».",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
@@ -73,6 +73,7 @@
       "display": "pie",
       "visualization_settings": {
         "pie.show_legend": true,
+        "pie.show_total": true,
         "pie.percent_visibility": "legend",
         "column_settings": {
           "[\"name\",\"Статус\"]": { "column_title": "Статус" },
@@ -85,7 +86,7 @@
       "col": 0
     },
     {
-      "name": "Топ причин ошибок (ЕГИСЗ, доля)",
+      "name": "09 · Топ причин ошибок (ЕГИСЗ, доля)",
       "description": "До 8 наиболее частых текстов по первому элементу «Ошибки JSON»; хвост — «Прочие типы ошибок». «Итого» = все error за период.",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
@@ -108,6 +109,7 @@
       "display": "pie",
       "visualization_settings": {
         "pie.show_legend": true,
+        "pie.show_total": true,
         "pie.percent_visibility": "legend",
         "column_settings": {
           "[\"name\",\"Тип ошибки\"]": { "column_title": "Тип ошибки" },
@@ -120,7 +122,7 @@
       "col": 8
     },
     {
-      "name": "Ошибки по СЭМД (доля)",
+      "name": "09 · Ошибки по СЭМД (доля)",
       "description": "Круговая диаграмма по коду СЭМД для error (топ 10 + «Остальные»; «Итого» = все error).",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
@@ -143,6 +145,7 @@
       "display": "pie",
       "visualization_settings": {
         "pie.show_legend": true,
+        "pie.show_total": true,
         "pie.percent_visibility": "legend",
         "column_settings": {
           "[\"name\",\"Тип СЭМД\"]": { "column_title": "Код СЭМД" },
@@ -155,7 +158,7 @@
       "col": 16
     },
     {
-      "name": "Всего обработано за период",
+      "name": "09 · Объём по СЭМД и клиникам",
       "description": "Объём транзакций с разрезом по типу СЭМД и клинике. Фильтр — по дате «Обработано».",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
@@ -191,7 +194,7 @@
       "col": 0
     },
     {
-      "name": "Успешно за период",
+      "name": "09 · Успешных транзакций",
       "description": "Количество успешных транзакций в выбранном периоде (дата обработки).",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
@@ -222,7 +225,7 @@
       "col": 6
     },
     {
-      "name": "% Ошибок за период",
+      "name": "09 · Доля ошибок по срезам (таблица)",
       "description": "Доля ошибок в разрезе СЭМД, клиники, типа ошибки. Фильтр по «Обработано».",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
@@ -261,7 +264,7 @@
       "col": 12
     },
     {
-      "name": "Документов в ожидании",
+      "name": "09 · Очередь: документов в ожидании",
       "description": "Текущая величина выборки очереди в выбранном диапазоне дат «Отправлено».",
       "table_ref": "v_rpt_documents_no_response_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_rpt_documents_no_response_ui", "field_name": "Отправлено" } },
@@ -292,7 +295,7 @@
       "col": 18
     },
     {
-      "name": "Ошибки по типу (код ЕГИСЗ)",
+      "name": "09 · Рейтинг формулировок ошибок ЕГИСЗ",
       "description": "По первому элементу «Ошибки JSON» на транзакцию (`egisz_friendly_error_item`). Фильтр по дате «Обработано».",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
@@ -326,7 +329,7 @@
       "col": 0
     },
     {
-      "name": "Ошибки по типу СЭМД",
+      "name": "09 · Рейтинг ошибок по коду СЭМД",
       "description": "Разрез по коду СЭМД при статусе error. Фильтр по «Обработано».",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
@@ -360,7 +363,7 @@
       "col": 8
     },
     {
-      "name": "Клиники с ошибками",
+      "name": "09 · Рейтинг клиник по ошибкам",
       "description": "Топ клиник по числу error за период. Фильтр по «Обработано».",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
@@ -394,7 +397,7 @@
       "col": 16
     },
     {
-      "name": "Очередь: срок ожидания",
+      "name": "09 · Очередь: срок ожидания",
       "description": "Распределение по сроку ожидания; фильтр по дате «Отправлено».",
       "table_ref": "v_rpt_documents_no_response_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_rpt_documents_no_response_ui", "field_name": "Отправлено" } },
@@ -428,7 +431,7 @@
       "col": 0
     },
     {
-      "name": "Очередь: по типу СЭМД",
+      "name": "09 · Очередь: по типу СЭМД",
       "description": "Ожидающие ответа по коду СЭМД. Фильтр по «Отправлено».",
       "table_ref": "v_rpt_documents_no_response_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_rpt_documents_no_response_ui", "field_name": "Отправлено" } },
@@ -462,7 +465,7 @@
       "col": 8
     },
     {
-      "name": "Очередь: топ клиник",
+      "name": "09 · Очередь: топ клиник",
       "description": "Клиники с наибольшим числом ожидающих. Фильтр по «Отправлено».",
       "table_ref": "v_rpt_documents_no_response_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_rpt_documents_no_response_ui", "field_name": "Отправлено" } },
