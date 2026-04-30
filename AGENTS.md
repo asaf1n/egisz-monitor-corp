@@ -50,7 +50,7 @@
 |------|------------|
 | `metabase_dashboards/*.json` | Дашборды как код; имена и native-SQL карточек |
 | `metabase_dashboards/README.md` | Соответствие файлов (`01_operational.json` … `10_errors_top.json`) и имён в UI |
-| `metabase/Dockerfile` | Образ **`egisz-monitor-metabase`** (теги `:k8s-v9`, `:local` — см. `start.ps1 -Action build`) |
+| `metabase/Dockerfile` | Образ **`egisz-monitor-metabase`** (теги `:k8s-v10`, `:local` — см. `start.ps1 -Action build`) |
 | `metabase/provision.sh` | Старт пода: провижининг из `/app/metabase_dashboards/` |
 | `metabase/setup-dashboards.sh` | Импорт JSON в коллекцию администратора |
 | `metabase/provision-local.ps1` | Локальный провижининг к Metabase на `localhost:3000` |
@@ -67,7 +67,7 @@
 |------|------------|
 | `k8s/` | Обзор: [`k8s/README.md`](k8s/README.md) — Postgres, Metabase, conf-ui, примеры секретов |
 | `k8s/postgres/` | StatefulSet, сервисы, Job **`egisz-reports-schema-init`** (`001_schema.sql`, `002_etl_state.sql`), Job’ы Metabase app DB и (при необходимости) Airflow metadata |
-| `k8s/metabase.yaml` | Deployment Metabase (образ `egisz-monitor-metabase:k8s-v9`) |
+| `k8s/metabase.yaml` | Deployment Metabase (образ `egisz-monitor-metabase:k8s-v10`) |
 | `k8s/conf-ui.yaml` | Config UI (Flask + `sync_routes`) |
 | `k8s/local/egisz_corp.yaml` | Пример фрагмента конфига для секрета conf-ui |
 | `k8s/airflow/` | Helm/values для DAG `egisz_corp_firebird_to_postgres` |

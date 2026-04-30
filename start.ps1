@@ -5,7 +5,7 @@
 # deploy: kind cluster egisz-local if needed, docker build, load images into kind, apply manifests,
 # schema for egisz_reports, airflow DB; DROP/CREATE БД приложения Metabase (metabase) + provision дашбордов;
 # rollout restart conf-ui; verify with one recovery restart on mismatch. Does not clear Firebird / ETL log export state.
-# apply: пересборка образа Config UI (Flask) + kubectl apply без сброса БД Metabase; web — только port-forward (образ не обновляет).
+# apply: пересборка образа Config UI (Flask) + kubectl apply без сброса БД Metabase; по умолчанию rollout и conf-ui, и Metabase (холодный JVM). -SkipMetabaseRolloutRestart — только conf-ui.
 
 param(
     [ValidateSet("deploy", "reset-deploy", "reset-metabase", "build", "apply", "status", "verify", "web", "forward", "stop-forward", "metabase-provision-local", "test", "help")]
@@ -18,7 +18,9 @@ param(
     # With -Action deploy / apply / reset-deploy: skip automatic port-forward (conf-ui 8080, Metabase 3000 on localhost + open browser). By default those actions start forward in the background unless -BackgroundPortForward:$false.
     [switch]$SkipPortForwardAfterDeploy,
     # With -Action build or apply: docker build --no-cache (build: conf-ui + Metabase; apply: conf-ui only).
-    [switch]$DockerNoCache
+    [switch]$DockerNoCache,
+    # With -Action apply only: не делать kubectl rollout restart deployment/metabase (быстрее, если меняли только Config UI).
+    [switch]$SkipMetabaseRolloutRestart
 )
 
 $ErrorActionPreference = "Stop"
@@ -76,7 +78,7 @@ egisz-monitor-corp\start.ps1
   reset-deploy      remove legacy Compose Postgres volume if present; delete namespace egisz-monitor; docker build --no-cache; then как deploy (включая сброс БД Metabase) + smoke + verify + port-forward
   reset-metabase    только DROP/CREATE БД Metabase (без полного deploy). Витрина egisz_reports не трогается. Если меняли JSON дашбордов: сначала .\start.ps1 -Action build
   build             docker build only (K8s images); use -DockerNoCache for --no-cache
-  apply             docker build Config UI из репозитория + kubectl apply; без сброса БД Metabase; kind load при kind-контексте; rollout restart Metabase+conf-ui; port-forward 8080/3000 + browser. Образ Metabase не пересобирается (для него: build | deploy | reset-deploy). -DockerNoCache — полная пересборка conf-ui.
+  apply             docker build Config UI + kubectl apply; rollout restart Metabase+conf-ui (или только conf-ui: -SkipMetabaseRolloutRestart). -DockerNoCache — полная пересборка conf-ui.
   metabase-provision-local  docker build Metabase + setup-dashboards.sh к Metabase на localhost:3000 (см. metabase/provision-local.ps1 - параметры)
   status            kubectl get pods,svc -n egisz-monitor
   web | forward     port-forward only (образы не трогает). После правок UI: .\start.ps1 -Action apply (или build + apply)
@@ -91,6 +93,7 @@ Parameters:
   -SkipKindCluster         do not run kind create; kubectl cluster-info must work
   -DockerNoCache           with -Action build or apply: pass --no-cache to docker build (conf-ui; при build ещё и Metabase)
   -SkipPortForwardAfterDeploy   only with deploy / apply / reset-deploy: do not start kubectl port-forward or open browser after verify
+  -SkipMetabaseRolloutRestart   only with -Action apply: skip rollout restart Metabase (faster when only conf-ui changed)
   (deploy/apply/reset-deploy: forwards 8080+3000 only; full stack incl. Postgres: .\start.ps1 -Action web. Foreground kubectl windows: -BackgroundPortForward:$false)
 
 K8s from your PC (Docker Desktop / kind): after deploy/apply, start.ps1 runs port-forward so http://127.0.0.1:8080 and :3000 work. Alternatively use NodePorts 30808 / 30300 without port-forward (see deploy summary).
@@ -129,8 +132,8 @@ function Invoke-DockerBuild {
     }
     docker build @nc -f metabase/Dockerfile -t egisz-monitor-metabase:latest $Root
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    # :k8s-v9 + :local = тот же digest, что :latest. В k8s/metabase.yaml образ — :k8s-v9 (bump v10… при смене скриптов/дашбордов), иначе kubelet Docker Desktop держит старый digest для имени тега.
-    docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:k8s-v9
+    # :k8s-v10 + :local = тот же digest, что :latest. В k8s/metabase.yaml образ — :k8s-v10 (bump v11… при смене скриптов/дашбордов), иначе kubelet Docker Desktop держит старый digest для имени тега.
+    docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:k8s-v10
     if ($LASTEXITCODE -ne 0) { exit 1 }
     docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:local
     if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -193,7 +196,7 @@ function Invoke-KindLoadImagesIfNeeded {
     if ($LASTEXITCODE -ne 0) { exit 1 }
     kind load docker-image egisz-monitor-metabase:latest --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    kind load docker-image egisz-monitor-metabase:k8s-v9 --name $name
+    kind load docker-image egisz-monitor-metabase:k8s-v10 --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }
     kind load docker-image egisz-monitor-metabase:local --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -502,7 +505,9 @@ function Invoke-KubectlApply {
     param(
         [switch]$ResetNamespace,
         # deploy / reset-deploy: DROP/CREATE БД metabase после apply Metabase (витрина не трогается). apply — без этого флага.
-        [switch]$ResetMetabaseAppDb
+        [switch]$ResetMetabaseAppDb,
+        # apply: не перезапускать Metabase (только conf-ui), чтобы не ждать холодный JVM + readiness.
+        [switch]$SkipMetabaseRolloutRestart
     )
 
     Initialize-LocalKubernetesCluster
@@ -564,6 +569,9 @@ function Invoke-KubectlApply {
     Publish-ConfUiImageToDockerDesktopK8s
 
     if ($ResetMetabaseAppDb) {
+        Invoke-CorpRolloutRestartMetabaseAndConfUi -SkipMetabase
+    } elseif ($SkipMetabaseRolloutRestart) {
+        Write-Host "[kubectl] apply: пропуск rollout restart Metabase (-SkipMetabaseRolloutRestart); перезапуск только conf-ui..." -ForegroundColor DarkGray
         Invoke-CorpRolloutRestartMetabaseAndConfUi -SkipMetabase
     } else {
         Invoke-CorpRolloutRestartMetabaseAndConfUi
@@ -988,7 +996,7 @@ switch ($Action) {
         Write-Host "[apply] Пересборка образа Config UI из текущего кода (Metabase не трогаем)..." -ForegroundColor Cyan
         Invoke-DockerBuildConfUi -DockerNoCache:$DockerNoCache
         Invoke-KindLoadImagesIfNeeded
-        Invoke-KubectlApply
+        Invoke-KubectlApply -SkipMetabaseRolloutRestart:$SkipMetabaseRolloutRestart
         Show-DeployInfo
         Invoke-K8sSmokeTests
         Invoke-K8sCorpStackVerify

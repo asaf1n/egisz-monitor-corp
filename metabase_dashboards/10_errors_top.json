@@ -49,13 +49,13 @@
     },
     {
       "name": "10 · Доля топ-ошибок (ЕГИСЗ)",
-      "description": "До 8 наиболее частых формулировок по первому элементу «Ошибки JSON»; хвост — «Прочие типы ошибок». «Итого» = все error за период.",
+      "description": "До 8 наиболее частых формулировок по первому элементу «Ошибки JSON»; хвост — «Остальные (N)», N = число транзакций вне топ‑8. Детализация — карточка «10 · Рейтинг типов ошибок (топ‑25)» на этом дашборде. «Итого» = все error за период.",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано IPS" } },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH per_err AS ( SELECT COALESCE( ( SELECT LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 52) FROM jsonb_array_elements(COALESCE(env.\"Ошибки JSON\", '[]'::jsonb)) AS e(err) WHERE NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL LIMIT 1 ), '(ошибка без деталей)' ) AS err_lbl, COUNT(*)::bigint AS cnt FROM public.v_egisz_transactions_enriched_ui env WHERE env.\"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ), ranked AS ( SELECT err_lbl, cnt, ROW_NUMBER() OVER (ORDER BY cnt DESC) AS rn FROM per_err ) SELECT CASE WHEN rn <= 8 THEN err_lbl ELSE 'Прочие типы ошибок' END AS \"Тип ошибки\", SUM(cnt)::bigint AS \"Количество\" FROM ranked GROUP BY 1 ORDER BY 2 DESC",
+          "query": "WITH per_err AS ( SELECT COALESCE( ( SELECT LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 52) FROM jsonb_array_elements(COALESCE(env.\"Ошибки JSON\", '[]'::jsonb)) AS e(err) WHERE NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL LIMIT 1 ), '(ошибка без деталей)' ) AS err_lbl, COUNT(*)::bigint AS cnt FROM public.v_egisz_transactions_enriched_ui env WHERE env.\"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ), ranked AS ( SELECT err_lbl, cnt, ROW_NUMBER() OVER (ORDER BY cnt DESC) AS rn FROM per_err ), tail AS ( SELECT COALESCE(SUM(cnt), 0)::bigint AS tail_cnt FROM ranked WHERE rn > 8 ) SELECT CASE WHEN r.rn <= 8 THEN r.err_lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END AS \"Тип ошибки\", SUM(r.cnt)::bigint AS \"Количество\" FROM ranked r CROSS JOIN tail t GROUP BY CASE WHEN r.rn <= 8 THEN r.err_lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END ORDER BY 2 DESC",
           "template-tags": {
             "dwh_date": {
               "id": "fa000002-0002-4002-8002-000000000001",
@@ -73,6 +73,7 @@
         "pie.show_legend": true,
         "pie.show_total": true,
         "pie.percent_visibility": "legend",
+        "pie.slice_threshold": 0,
         "column_settings": {
           "[\"name\",\"Тип ошибки\"]": { "column_title": "Тип ошибки" },
           "[\"name\",\"Количество\"]": { "number_separators": ".", "decimals": 0 }
@@ -85,13 +86,13 @@
     },
     {
       "name": "10 · Доля ошибок по СЭМД",
-      "description": "Топ-10 кодов СЭМД среди error + «Остальные»; «Итого» = все error за период.",
+      "description": "Топ-10 кодов СЭМД среди error; хвост — «Остальные (N)». «Итого» = все error за период.",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано IPS" } },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH per_code AS ( SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS lbl, COUNT(*)::bigint AS cnt FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ), ranked AS ( SELECT lbl, cnt, ROW_NUMBER() OVER (ORDER BY cnt DESC) AS rn FROM per_code ) SELECT CASE WHEN rn <= 10 THEN lbl ELSE 'Остальные коды СЭМД' END AS \"Код СЭМД\", SUM(cnt)::bigint AS \"Количество\" FROM ranked GROUP BY 1 ORDER BY 2 DESC",
+          "query": "WITH per_code AS ( SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS lbl, COUNT(*)::bigint AS cnt FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ), ranked AS ( SELECT lbl, cnt, ROW_NUMBER() OVER (ORDER BY cnt DESC) AS rn FROM per_code ), tail AS ( SELECT COALESCE(SUM(cnt), 0)::bigint AS tail_cnt FROM ranked WHERE rn > 10 ) SELECT CASE WHEN r.rn <= 10 THEN r.lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END AS \"Код СЭМД\", SUM(r.cnt)::bigint AS \"Количество\" FROM ranked r CROSS JOIN tail t GROUP BY CASE WHEN r.rn <= 10 THEN r.lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END ORDER BY 2 DESC",
           "template-tags": {
             "dwh_date": {
               "id": "fa000003-0003-4003-8003-000000000001",
@@ -109,6 +110,7 @@
         "pie.show_legend": true,
         "pie.show_total": true,
         "pie.percent_visibility": "legend",
+        "pie.slice_threshold": 0,
         "column_settings": {
           "[\"name\",\"Код СЭМД\"]": { "column_title": "Код СЭМД" },
           "[\"name\",\"Количество\"]": { "number_separators": ".", "decimals": 0 }
@@ -121,13 +123,13 @@
     },
     {
       "name": "10 · Доля ошибок по клиникам",
-      "description": "Топ-10 клиник по числу error + «Остальные клиники»; «Итого» = все error за период.",
+      "description": "Топ-10 клиник по числу error; хвост — «Остальные (N)». «Итого» = все error за период.",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано IPS" } },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH per_clinic AS ( SELECT (LEFT(COALESCE(NULLIF(TRIM(\"Наименование клиники\"), ''), ''), 24) || ' | ' || \"JID клиники\"::text) AS lbl, COUNT(*)::bigint AS cnt FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ), ranked AS ( SELECT lbl, cnt, ROW_NUMBER() OVER (ORDER BY cnt DESC) AS rn FROM per_clinic ) SELECT CASE WHEN rn <= 10 THEN lbl ELSE 'Остальные клиники' END AS \"Клиника\", SUM(cnt)::bigint AS \"Количество\" FROM ranked GROUP BY 1 ORDER BY 2 DESC",
+          "query": "WITH per_clinic AS ( SELECT (LEFT(COALESCE(NULLIF(TRIM(\"Наименование клиники\"), ''), ''), 24) || ' | ' || \"JID клиники\"::text) AS lbl, COUNT(*)::bigint AS cnt FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ), ranked AS ( SELECT lbl, cnt, ROW_NUMBER() OVER (ORDER BY cnt DESC) AS rn FROM per_clinic ), tail AS ( SELECT COALESCE(SUM(cnt), 0)::bigint AS tail_cnt FROM ranked WHERE rn > 10 ) SELECT CASE WHEN r.rn <= 10 THEN r.lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END AS \"Клиника\", SUM(r.cnt)::bigint AS \"Количество\" FROM ranked r CROSS JOIN tail t GROUP BY CASE WHEN r.rn <= 10 THEN r.lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END ORDER BY 2 DESC",
           "template-tags": {
             "dwh_date": {
               "id": "fa000004-0004-4004-8004-000000000001",
@@ -145,6 +147,7 @@
         "pie.show_legend": true,
         "pie.show_total": true,
         "pie.percent_visibility": "legend",
+        "pie.slice_threshold": 0,
         "column_settings": {
           "[\"name\",\"Клиника\"]": { "column_title": "Клиника" },
           "[\"name\",\"Количество\"]": { "number_separators": ".", "decimals": 0 }

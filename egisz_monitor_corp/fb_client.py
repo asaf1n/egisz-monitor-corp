@@ -25,6 +25,32 @@ def connect_firebird(cfg: FirebirdConfig):  # type: ignore[no-untyped-def]
     )
 
 
+def fetch_firebird_source_peaks(cfg: FirebirdConfig) -> dict[str, Any]:
+    """
+    Снимок «верхушек» справочника в Firebird: последний EGMID в EGISZ_MESSAGES,
+    последний MODIFYDATE в EGISZ_LICENSES (для конфиг-UI и диагностики).
+    """
+    out: dict[str, Any] = {"max_egmid": None, "max_licenses_modifydate": None, "error": None}
+    try:
+        r1 = fetch_all(cfg, "SELECT MAX(m.EGMID) AS max_egmid FROM EGISZ_MESSAGES m")
+        r2 = fetch_all(cfg, "SELECT MAX(l.MODIFYDATE) AS max_licenses_modifydate FROM EGISZ_LICENSES l")
+        if r1:
+            v = r1[0].get("max_egmid")
+            if v is not None:
+                try:
+                    out["max_egmid"] = int(v)
+                except (TypeError, ValueError):
+                    out["max_egmid"] = v
+        if r2:
+            v2 = r2[0].get("max_licenses_modifydate")
+            if v2 is not None:
+                iso = getattr(v2, "isoformat", None)
+                out["max_licenses_modifydate"] = iso() if callable(iso) else str(v2)
+    except Exception as e:  # pragma: no cover - network / driver
+        out["error"] = str(e)
+    return out
+
+
 def fetch_all(cfg: FirebirdConfig, sql: str, params: Sequence[Any] | Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
     """Run SELECT and return list of row dicts (lowercase keys)."""
     con = connect_firebird(cfg)

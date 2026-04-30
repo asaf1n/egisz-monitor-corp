@@ -147,7 +147,7 @@ def refresh_outbound_documents_staging(con, rows: list[dict[str, Any]]) -> None:
 
 
 def fetch_pg_sync_snapshot(con, pipeline: str) -> dict[str, Any]:  # type: ignore[no-untyped-def]
-    """Последняя активность витрины, курсор LOGID и MAX(EGMID) из staging исходящих."""
+    """Последняя активность витрины, курсор LOGID и MAX(egmid) в stg_egisz_outbound_documents (окно ETL)."""
     with con.cursor() as cur:
         cur.execute(
             """

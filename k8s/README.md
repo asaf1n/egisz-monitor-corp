@@ -6,13 +6,13 @@
 | :--- | :--- |
 | `namespace.yaml` | Namespace `egisz-monitor` |
 | `postgres/*` | StatefulSet Postgres, сервисы, Job `egisz-reports-schema-init` (`sql/001_schema.sql`, `002_etl_state.sql`) |
-| `metabase.yaml` | Deployment Metabase (`egisz-monitor-metabase:k8s-v9`, см. ниже), Service (NodePort 30300, `metabase-lb`), `hostPort` 3000 для `http://127.0.0.1:3000/` |
+| `metabase.yaml` | Deployment Metabase (`egisz-monitor-metabase:k8s-v10`, см. ниже), Service (NodePort 30300, `metabase-lb` LoadBalancer → обычно `http://127.0.0.1:3000/` на Docker Desktop; без `hostPort` у пода) |
 | `metabase-admin-secret*.yaml` | Учётка администратора API/UI Metabase (шаблон `*.example`) |
 | `conf-ui.yaml` | Config UI (ETL-конфиг) |
 | `local/egisz_corp.yaml` | Пример конфигурации для секрета `egisz-corp-conf-ui-config` (локальная отладка) |
 | `airflow/` | Отдельно: Helm/Airflow (см. `k8s/airflow/README.md`) |
 
-**Образ Metabase в кластере:** `egisz-monitor-metabase:k8s-v9` (версионируемый тег в манифесте; bump при изменении `metabase_dashboards/` или скриптов), `imagePullPolicy: IfNotPresent` — образ собирается локально (`metabase/Dockerfile`, `.\start.ps1 -Action build` также создаёт `:local` для `metabase/provision-local.ps1`). Если в поде **нет** `/app/verify-corp-stack.sh`: `.\metabase\force-k8s-mb-image.ps1` или `build` + `apply`/`deploy`.
+**Образ Metabase в кластере:** `egisz-monitor-metabase:k8s-v10` (версионируемый тег в манифесте; bump при изменении `metabase_dashboards/` или скриптов), `imagePullPolicy: IfNotPresent` — образ собирается локально (`metabase/Dockerfile`, `.\start.ps1 -Action build` также создаёт `:local` для `metabase/provision-local.ps1`). Если в поде **нет** `/app/verify-corp-stack.sh`: `.\metabase\force-k8s-mb-image.ps1` или `build` + `apply`/`deploy`.
 
 ---
 
@@ -70,7 +70,7 @@
 | Сервис | В кластере | Примечание |
 | :--- | :--- | :--- |
 | **PostgreSQL** | `postgres.egisz-monitor.svc.cluster.local:5432` | Витрина `egisz_reports` |
-| **Metabase** | `metabase:3000` | С хоста: LB / `hostPort` 3000 / port-forward, см. `docs/METABASE.md` |
+| **Metabase** | `metabase:3000` | С хоста: LoadBalancer / NodePort 30300 / port-forward, см. `docs/METABASE.md` |
 | **Config UI** | `conf-ui:8080` | Конфигурация ETL |
 | **Airflow** | согласно `k8s/airflow/` | DAG ETL, опционально |
 

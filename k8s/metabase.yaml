@@ -44,7 +44,7 @@ metadata:
     app.kubernetes.io/name: metabase
 spec:
   replicas: 1
-  # hostPort:3000 не совместим с RollingUpdate: следующий pod не сможет занять порт, пока жив старый.
+  # Recreate: один под Metabase; без hostPort на ноде (иначе Pending при занятом :3000).
   strategy:
     type: Recreate
   selector:
@@ -59,14 +59,15 @@ spec:
         - name: metabase
           # Сборка: docker build -f metabase/Dockerfile -t egisz-monitor-metabase:latest . && docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:local
           # IfNotPresent: Docker Desktop подставляет образ из локального Docker Engine (см. docs.docker.com/desktop/kubernetes).
-          # Тег :k8s-v9 (не :local): bump при изменении Dockerfile/скриптов/дашбордов — иначе kubelet Docker Desktop держит старый digest для имени тега.
-          image: egisz-monitor-metabase:k8s-v9
+          # Тег :k8s-v10 (не :local): bump при изменении Dockerfile/скриптов/дашбордов — иначе kubelet Docker Desktop держит старый digest для имени тега.
+          image: egisz-monitor-metabase:k8s-v10
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000
               name: http
-              # Локальная отладка (Docker Desktop / kind): с хоста — http://127.0.0.1:3000/ без port-forward
-              hostPort: 3000
+              # Без hostPort: иначе на однонодовом кластере под часто зависает в Pending (порт 3000 занят
+              # прошлым подом / процессом на хосте). Доступ: Service metabase-lb (Docker Desktop → :3000),
+              # NodePort 30300, либо port-forward из start.ps1.
           env:
             - name: LANG
               value: "C.UTF-8"
@@ -139,8 +140,9 @@ spec:
             httpGet:
               path: /api/health
               port: 3000
-            initialDelaySeconds: 90
-            periodSeconds: 15
+            # JVM + миграции: первый успешный /api/health обычно раньше 90s; слишком большой delay растягивает rollout после apply.
+            initialDelaySeconds: 55
+            periodSeconds: 12
             timeoutSeconds: 5
             failureThreshold: 20
           resources:
