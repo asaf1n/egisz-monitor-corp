@@ -64,29 +64,55 @@
       "visualization_settings": {
         "table": {
           "columns": [
-            { "name": "JID клиники", "enabled": true },
-            { "name": "Наименование клиники", "enabled": true },
+            { "name": "Обработано IPS", "enabled": true },
             { "name": "Статус", "enabled": true },
+            { "name": "JID клиники", "enabled": true },
             { "name": "Код СЭМД", "enabled": true },
             { "name": "Наименование СЭМД", "enabled": true },
-            { "name": "Рег. номер РЭМД (emdrid)", "enabled": true },
             { "name": "Сводка ошибок", "enabled": true },
-            { "name": "localUid СЭМД", "enabled": true },
+            { "name": "Рег. номер РЭМД (emdrid)", "enabled": true },
+            { "name": "Зарегистрирован в ЕГИСЗ РЭМД", "enabled": true },
             { "name": "Хост клиники (VPN ГОСТ)", "enabled": true },
             { "name": "OID организации", "enabled": true },
-            { "name": "Зарегистрирован в ЕГИСЗ РЭМД", "enabled": false },
-            { "name": "Создание СЭМД", "enabled": false },
-            { "name": "Обработано IPS", "enabled": false },
-            { "name": "День (тренд)", "enabled": false },
-            { "name": "Ошибки JSON", "enabled": false },
-            { "name": "ИНН клиники", "enabled": false },
-            { "name": "OID клиники", "enabled": false },
-            { "name": "Связанное сообщение", "enabled": false }
+            { "name": "localUid СЭМД", "enabled": true },
+            { "name": "Ошибки JSON", "enabled": true },
+            { "name": "Создание СЭМД", "enabled": true },
+            { "name": "День (тренд)", "enabled": true },
+            { "name": "Наименование клиники", "enabled": true },
+            { "name": "ИНН клиники", "enabled": true },
+            { "name": "OID клиники", "enabled": true },
+            { "name": "Связанное сообщение", "enabled": true }
           ]
         },
+        "table.columns": [
+          { "name": "Обработано IPS", "enabled": true },
+          { "name": "Статус", "enabled": true },
+          { "name": "JID клиники", "enabled": true },
+          { "name": "Код СЭМД", "enabled": true },
+          { "name": "Наименование СЭМД", "enabled": true },
+          { "name": "Сводка ошибок", "enabled": true },
+          { "name": "Рег. номер РЭМД (emdrid)", "enabled": true },
+          { "name": "Зарегистрирован в ЕГИСЗ РЭМД", "enabled": true },
+          { "name": "Хост клиники (VPN ГОСТ)", "enabled": true },
+          { "name": "OID организации", "enabled": true },
+          { "name": "localUid СЭМД", "enabled": true },
+          { "name": "Ошибки JSON", "enabled": true },
+          { "name": "Создание СЭМД", "enabled": true },
+          { "name": "День (тренд)", "enabled": true },
+          { "name": "Наименование клиники", "enabled": true },
+          { "name": "ИНН клиники", "enabled": true },
+          { "name": "OID клиники", "enabled": true },
+          { "name": "Связанное сообщение", "enabled": true }
+        ],
+        "table.column_widths": [null, null, null, 76, 216, 568, null, 197],
+        "table.pivot_column": "Рег. номер РЭМД (emdrid)",
+        "table.cell_column": "Связанное сообщение",
         "column_settings": {
           "[\"name\",\"Обработано IPS\"]": {
-            "column_title": "Обработано IPS"
+            "column_title": "Обработано IPS",
+            "date_style": "D MMMM, YYYY",
+            "date_abbreviate": true,
+            "time_style": "HH:mm"
           },
           "[\"name\",\"localUid СЭМД\"]": {
             "column_title": "localUid СЭМД"
@@ -104,7 +130,10 @@
             "column_title": "Хост клиники (VPN ГОСТ)"
           },
           "[\"name\",\"Зарегистрирован в ЕГИСЗ РЭМД\"]": {
-            "column_title": "Зарегистрирован в ЕГИСЗ РЭМД"
+            "column_title": "Зарегистрирован в ЕГИСЗ РЭМД",
+            "date_style": "D MMMM, YYYY",
+            "date_abbreviate": true,
+            "time_style": "HH:mm"
           },
           "[\"name\",\"Создание СЭМД\"]": {
             "column_title": "Создание СЭМД"

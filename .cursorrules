@@ -114,3 +114,28 @@
 При недоступной PostgreSQL: `{"ok": false, "errors": ["PostgreSQL недоступен: ..."]}` со статусом 200 (graceful degrade — UI показывает заметку, не падает).
 
 **Куда смотреть при сигнале:** см. таблицу триажа в **`docs/INTEGRATION_AUDIT.md` §3.7**.
+
+---
+
+## Параллельный запуск ETL: CronJob ↔ UI-кнопка
+
+`run_sync` берёт session-level **`pg_try_advisory_lock(hash(pipeline_name))`** в начале и освобождает в `finally`. Это устраняет гонку между:
+
+- **CronJob `egisz-corp-sync`** (`k8s/etl-cron.yaml`, `*/15 * * * *`, `concurrencyPolicy: Forbid`, тот же образ что conf-ui),
+- **UI-кнопкой «Синхронизировать сейчас»** в Config UI (`sync_routes._state` единый процесс под gunicorn).
+
+Если оба стартуют одновременно — второй получает `PipelineLockBusyError`:
+
+- CLI (`egisz-monitor sync`) → `sync_skipped` на stderr и exit-код **75** (Job в k8s — Failed, без двойной записи в PG).
+- UI → баннер «Параллельный sync уже идёт (возможно, его запустил CronJob…). Подождите 1–2 минуты и повторите».
+
+Lock — **session-level**: автоматически снимается при разрыве соединения с Postgres, поэтому крэш воркера не оставляет «навечно занятый» pipeline. Ручной reset не нужен.
+
+`run_sync` для тестируемости разнесён на:
+
+- `_load_enrichment_cache(cfg)` → `EnrichmentCache` (Firebird `EGISZ_LICENSES`+`JPERSONS`);
+- `_count_exchangelog_total(cfg, base_sql, …)` → `int` (для прогрес-бара UI);
+- `_process_exchangelog_pages(...)` → `_PageStats` (пагинация по `LOGID`, парсинг, UPSERT факта/измерений);
+- `_refresh_outbound_documents(cfg, pg, …)` (снимок `stg_egisz_outbound_documents`).
+
+Юнит-тесты — `tests/test_etl_helpers.py` (без живого Firebird/Postgres, с mock-fetch и FakeConn для advisory lock).

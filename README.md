@@ -121,7 +121,7 @@ Firebird EXCHANGELOG / EGISZ_MESSAGES
 
 - `.\start.ps1 -Action deploy` и `reset-deploy` пересоздают базу приложения Metabase `metabase` и заново провижинят дашборды.
 - `.\start.ps1 -Action apply` применяет манифесты и перезапускает сервисы, но сохраняет существующую базу приложения Metabase.
-- После изменения JSON дашбордов нужен новый образ Metabase: `.\start.ps1 -Action build`, затем перезапуск Metabase или `reset-metabase` (тег `:k8s-v13` уже зашит в `start.ps1` и `k8s/metabase.yaml`; **bump** при следующем изменении JSON или скриптов).
+- После изменения JSON дашбордов нужен новый образ Metabase: `.\start.ps1 -Action build`, затем перезапуск Metabase. По умолчанию (`METABASE_FORCE_PROVISION=auto` в `k8s/metabase.yaml`) provisioning **пропускается**, если все 11 EGISZ-дашбордов уже есть — dashboard ID не меняются между rollout-ами. Чтобы принудительно перезалить из новых JSON: `.\start.ps1 -Action reset-metabase` (DROP БД metabase, fresh provision). Тег `:k8s-v15` уже зашит в `start.ps1` и `k8s/metabase.yaml`; **bump** при следующем изменении JSON или скриптов.
 - Обновление только схемы витрины или данных ETL не требует пересборки образа Metabase.
 
 ### Healthcheck сервиса интеграции

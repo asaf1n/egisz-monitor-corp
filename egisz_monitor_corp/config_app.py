@@ -641,8 +641,10 @@ PAGE = """
       licEl.title = '';
     }
     try {
-      const r = await fetch('/api/pg/sync-snapshot');
+      const r = await fetch('/api/pg/sync-snapshot', { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
       const j = await r.json();
+      POLL_FAIL.snap = 0;
       if (!j.ok) {
         hint.textContent = j.error || 'Не удалось прочитать PostgreSQL';
         hint.classList.add('text-orange-300');
@@ -686,7 +688,12 @@ PAGE = """
         licEl.title = '';
       }
     } catch (e) {
-      hint.textContent = String(e);
+      POLL_FAIL.snap += 1;
+      if (POLL_FAIL.snap <= 2) return;
+      const transport = isFetchTransportError(e);
+      hint.textContent = transport
+        ? 'Снимок недоступен: conf-ui не отвечает. Повтор автоматический.'
+        : String(e && e.message ? e.message : e);
       hint.classList.add('text-orange-300');
       clearSnap();
     }
@@ -740,8 +747,10 @@ PAGE = """
     const proxyList = document.getElementById('hcProxyDb');
     if (!hint || !summary || !signalsList || !clinicsList || !proxyList) return;
     try {
-      const r = await fetch('/api/healthcheck');
+      const r = await fetch('/api/healthcheck', { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
       const j = await r.json();
+      POLL_FAIL.hc = 0;
       const lvl = (j.level_summary && typeof j.level_summary === 'object') ? j.level_summary : { red: 0, yellow: 0, green: 0 };
       summary.querySelectorAll('[data-count]').forEach(function (el) {
         const k = el.getAttribute('data-count');
@@ -848,7 +857,12 @@ PAGE = """
         proxyList.appendChild(li);
       }
     } catch (e) {
-      hint.textContent = 'Ошибка опроса /api/healthcheck: ' + e;
+      POLL_FAIL.hc += 1;
+      if (POLL_FAIL.hc <= 2) return;
+      const transport = isFetchTransportError(e);
+      hint.textContent = transport
+        ? 'Healthcheck временно недоступен (conf-ui перезапускается).'
+        : 'Ошибка опроса /api/healthcheck: ' + (e && e.message ? e.message : e);
       hint.classList.add('text-orange-300');
     }
   }
@@ -874,11 +888,22 @@ PAGE = """
       }
     });
   });
+  // Счётчики последовательных сбоев fetch: сценарий «conf-ui pod пересоздаётся, port-forward
+  // разорван» теперь сначала молчит, потом показывает аккуратную диагностику без визуального шума.
+  const POLL_FAIL = { sync: 0, snap: 0, hc: 0 };
+  function isFetchTransportError(e) {
+    if (!e) return false;
+    const name = e && e.name ? String(e.name) : '';
+    const msg = e && e.message ? String(e.message) : String(e);
+    return name === 'TypeError' && /fetch|network|load failed/i.test(msg);
+  }
   async function pollSync() {
     const el = document.getElementById('syncStatus');
     try {
-      const r = await fetch('/api/sync/status');
+      const r = await fetch('/api/sync/status', { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
       const j = await r.json();
+      POLL_FAIL.sync = 0;
       lastSyncJson = j;
       renderProgress(j);
       refreshConnStatusStrip();
@@ -894,7 +919,14 @@ PAGE = """
       if (j.last_stats) parts.push(JSON.stringify(j.last_stats, null, 2));
       el.textContent = parts.filter(Boolean).join(String.fromCharCode(10));
     } catch (e) {
-      el.textContent = 'Ошибка опроса: ' + e;
+      POLL_FAIL.sync += 1;
+      // Один-два пропущенных тика во время rollout/port-forward — нормальное явление, не шумим.
+      if (POLL_FAIL.sync <= 2) return;
+      const transport = isFetchTransportError(e);
+      const reason = transport
+        ? 'conf-ui недоступен (rollout / port-forward / sleep). Повтор через несколько секунд.'
+        : ('Ошибка опроса: ' + (e && e.message ? e.message : e));
+      el.textContent = reason;
     }
   }
   function showCfgMessage(ok, text) {
@@ -949,27 +981,42 @@ PAGE = """
     el.textContent = j.message || JSON.stringify(j);
     await pollSync();
   };
-  setInterval(function () {
+  // Опрос только пока вкладка видима. Скрытая вкладка через 5–10 минут sleep'а
+  // получала залп fetch'ей разом и стабильно ловила TypeError: Failed to fetch.
+  let fastTimer = null;
+  let slowTimer = null;
+  function startPolling() {
+    if (fastTimer == null) {
+      fastTimer = setInterval(function () {
+        pollSync();
+        pollPgSnapshot();
+      }, 1500);
+    }
+    if (slowTimer == null) {
+      slowTimer = setInterval(function () {
+        pollHealthcheck();
+      }, 30000);
+    }
+  }
+  function stopPolling() {
+    if (fastTimer != null) { clearInterval(fastTimer); fastTimer = null; }
+    if (slowTimer != null) { clearInterval(slowTimer); slowTimer = null; }
+  }
+  function kickAllPolls() {
     pollSync();
     pollPgSnapshot();
-  }, 1200);
-  setInterval(function () {
     pollHealthcheck();
-  }, 30000);
-  pollSync();
-  pollPgSnapshot();
-  pollHealthcheck();
+  }
+  startPolling();
+  kickAllPolls();
   refreshConnStatusStrip();
-  window.addEventListener('pageshow', function () {
-    pollSync();
-    pollPgSnapshot();
-    pollHealthcheck();
-  });
+  window.addEventListener('pageshow', kickAllPolls);
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'visible') {
-      pollSync();
-      pollPgSnapshot();
-      pollHealthcheck();
+      startPolling();
+      kickAllPolls();
+    } else {
+      stopPolling();
     }
   });
   </script>
@@ -1110,6 +1157,16 @@ def create_app() -> Flask:
             return jsonify({"ok": False, "message": f"PostgreSQL: {e}"})
         return jsonify({"ok": True, "message": "PostgreSQL: OK"})
 
+    @app.get("/healthz")
+    def healthz():  # type: ignore[no-untyped-def]
+        """Лёгкий пробник для k8s readiness/liveness — без обращения к БД и без файлового I/O.
+
+        Если pod процесс жив и Flask отвечает — пробник 200; недоступность Postgres/Firebird
+        диагностируется отдельно через /api/healthcheck. Это устраняет каскад «pod NotReady →
+        endpoints removed → 1.2s polling в браузере получает TypeError: Failed to fetch».
+        """
+        return jsonify({"ok": True})
+
     @app.get("/api/pg/sync-snapshot")
     def api_pg_sync_snapshot():  # type: ignore[no-untyped-def]
         p = config_path()
@@ -1123,7 +1180,36 @@ def create_app() -> Flask:
             finally:
                 con.close()
             staging_egmid = snap.get("egmid")
-            fb_peaks = fetch_firebird_source_peaks(cfg.firebird)
+
+            # Зависший Firebird блокировал /api/pg/sync-snapshot и через бэкап TCP-сокетов в воркере
+            # давал TypeError: Failed to fetch в браузере. Watchdog зеркалит подход /api/healthcheck.
+            from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutureTimeout
+
+            fb_peaks: dict[str, Any] = {
+                "max_egmid": None,
+                "max_licenses_modifydate": None,
+                "error": None,
+            }
+            ex = ThreadPoolExecutor(max_workers=1)
+            try:
+                fut = ex.submit(fetch_firebird_source_peaks, cfg.firebird)
+                try:
+                    fb_peaks = fut.result(timeout=4.0)
+                except _FutureTimeout:
+                    fb_peaks = {
+                        "max_egmid": None,
+                        "max_licenses_modifydate": None,
+                        "error": "timeout",
+                    }
+                except Exception as e:  # pragma: no cover - сеть/драйвер
+                    fb_peaks = {
+                        "max_egmid": None,
+                        "max_licenses_modifydate": None,
+                        "error": str(e),
+                    }
+            finally:
+                ex.shutdown(wait=False, cancel_futures=True)
+
             if fb_peaks.get("max_egmid") is not None:
                 snap["egmid"] = fb_peaks["max_egmid"]
             snap["licenses_modifydate"] = fb_peaks.get("max_licenses_modifydate")

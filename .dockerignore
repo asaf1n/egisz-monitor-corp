@@ -1,0 +1,54 @@
+# Уменьшаем build context для docker/web/Dockerfile и metabase/Dockerfile.
+# Файлы конфига (k8s/local/, *.example.yaml) и SQL остаются — Dockerfile их COPY-ит явно.
+.git/
+.github/
+.gitignore
+.gitattributes
+
+# Виртуальные окружения и кеши Python.
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Тесты не нужны в runtime образе (gunicorn их не запускает).
+tests/
+
+# IDE / редакторы.
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Артефакты сборки.
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Локальные секреты / стейт start.ps1.
+.egisz-monitor-port-forward.pids
+k8s/local/
+k8s/postgres/postgres-credentials.yaml
+k8s/metabase-admin-secret.yaml
+
+# Большие/неиспользуемые ресурсы Metabase (для образа conf-ui они не нужны;
+# metabase/Dockerfile сам их COPY-ит из metabase_dashboards/).
+metabase_dashboards/.manifest.sha256
+
+# Документация и переписки агента.
+docs/
+*.md
+!README.md
+agent-transcripts/
+terminals/
+
+# Временные файлы Windows.
+Thumbs.db
+desktop.ini

@@ -24,8 +24,36 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# PS 7.3+ под $ErrorActionPreference=Stop конвертирует stderr нативных команд (docker build,
+# kubectl exec, etc.) в terminating error, даже если exit-code = 0. Многоступенчатый buildkit
+# пишет «#0 building with desktop-linux» в stderr — оно валится. Отключаем сцепку: свой код
+# проверяет $LASTEXITCODE после каждой нативной команды.
+if ($PSVersionTable.PSVersion.Major -ge 7) {
+    $PSNativeCommandUseErrorActionPreference = $false
+}
 $Root = $PSScriptRoot
 Set-Location $Root
+
+# Безопасный запуск нативной команды (docker, kubectl, kind): подавляет конверсию stderr
+# в RemoteException на PS 5.1 + $ErrorActionPreference=Stop. Возвращает exit-code в $LASTEXITCODE.
+# Использование: Invoke-Native docker build @nc -f docker/web/Dockerfile -t egisz-conf-ui:latest $Root
+function Invoke-Native {
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        # 2>&1 объединяет stderr в успешный pipeline; ErrorRecord-объекты приводим к строкам через
+        # ToString() — иначе Write-Host напечатает «System.Management.Automation.RemoteException».
+        & $args[0] $args[1..($args.Count - 1)] 2>&1 | ForEach-Object {
+            if ($_ -is [System.Management.Automation.ErrorRecord]) {
+                [Console]::Error.WriteLine($_.Exception.Message)
+            } else {
+                Write-Host $_
+            }
+        }
+    } finally {
+        $ErrorActionPreference = $prevEAP
+    }
+}
 
 $script:KindClusterName = "egisz-local"
 
@@ -118,9 +146,9 @@ function Invoke-DockerBuildConfUi {
         Write-Host "[Docker] Building Config UI with --no-cache..." -ForegroundColor Yellow
     }
     Write-Host "[Docker] Building egisz-conf-ui (Config UI)..." -ForegroundColor Yellow
-    docker build @nc -f docker/web/Dockerfile -t egisz-conf-ui:latest $Root
+    Invoke-Native docker build @nc -f docker/web/Dockerfile -t egisz-conf-ui:latest $Root
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    docker tag egisz-conf-ui:latest egisz-conf-ui:corp-web
+    Invoke-Native docker tag egisz-conf-ui:latest egisz-conf-ui:corp-web
     if ($LASTEXITCODE -ne 0) { exit 1 }
     Write-Host "[Docker] egisz-conf-ui OK" -ForegroundColor Green
 }
@@ -133,12 +161,12 @@ function Invoke-DockerBuild {
     if ($DockerNoCache) {
         $nc = @("--no-cache")
     }
-    docker build @nc -f metabase/Dockerfile -t egisz-monitor-metabase:latest $Root
+    Invoke-Native docker build @nc -f metabase/Dockerfile -t egisz-monitor-metabase:latest $Root
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    # :k8s-v13 + :local = тот же digest, что :latest. В k8s/metabase.yaml образ — :k8s-v13 (bump v14… при смене скриптов/дашбордов), иначе kubelet Docker Desktop держит старый digest для имени тега.
-    docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:k8s-v13
+    # :k8s-v15 + :local = тот же digest, что :latest. В k8s/metabase.yaml образ — :k8s-v15 (bump v16… при смене скриптов/дашбордов), иначе kubelet Docker Desktop держит старый digest для имени тега.
+    Invoke-Native docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:k8s-v15
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:local
+    Invoke-Native docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:local
     if ($LASTEXITCODE -ne 0) { exit 1 }
     Write-Host "[Docker] OK" -ForegroundColor Green
 }
@@ -199,7 +227,7 @@ function Invoke-KindLoadImagesIfNeeded {
     if ($LASTEXITCODE -ne 0) { exit 1 }
     kind load docker-image egisz-monitor-metabase:latest --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    kind load docker-image egisz-monitor-metabase:k8s-v13 --name $name
+    kind load docker-image egisz-monitor-metabase:k8s-v15 --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }
     kind load docker-image egisz-monitor-metabase:local --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -613,6 +641,14 @@ function Invoke-KubectlApply {
     if ($LASTEXITCODE -ne 0) { exit 1 }
     Publish-ConfUiImageToDockerDesktopK8s
 
+    # CronJob периодического sync ETL (см. k8s/etl-cron.yaml). Использует тот же образ
+    # egisz-conf-ui:corp-web; конфликт с UI-кнопкой исключён через pg_try_advisory_lock.
+    $cronYaml = Join-Path $Root "k8s\etl-cron.yaml"
+    if (Test-Path $cronYaml) {
+        kubectl apply -f $cronYaml
+        if ($LASTEXITCODE -ne 0) { exit 1 }
+    }
+
     if ($ResetMetabaseAppDb) {
         Invoke-CorpRolloutRestartMetabaseAndConfUi -SkipMetabase
     } elseif ($SkipMetabaseRolloutRestart) {
@@ -636,7 +672,9 @@ function Invoke-ConfUiFirebirdDriverSelfTest {
     cmd /c 'kubectl -n egisz-monitor get deploy conf-ui -o name 1>nul 2>nul'
     if ($LASTEXITCODE -ne 0) { return }
     Write-Host "[verify] conf-ui pod: Firebird client library + firebird.driver..." -ForegroundColor Cyan
-    kubectl -n egisz-monitor exec deploy/conf-ui -- python -c "from firebird.driver import fbapi; fbapi.load_api(); print('firebird.driver OK')"
+    # -c conf-ui: подавляем «Defaulted container … out of: conf-ui, seed-config (init)» от kubectl
+    # на stderr — иначе PowerShell с $ErrorActionPreference=Stop падает на безобидном NOTICE.
+    kubectl -n egisz-monitor exec deploy/conf-ui -c conf-ui -- python -c "from firebird.driver import fbapi; fbapi.load_api(); print('firebird.driver OK')"
     if ($LASTEXITCODE -ne 0) {
         Write-Host "ERROR: Firebird driver check in conf-ui failed (see docker/web/Dockerfile libfbclient2)." -ForegroundColor Red
         exit 1

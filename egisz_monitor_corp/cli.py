@@ -9,7 +9,13 @@ import sys
 from egisz_monitor_corp.config_loader import load_corp_config
 from egisz_monitor_corp.etl import run_sync
 from egisz_monitor_corp.fb_client import fetch_all
-from egisz_monitor_corp.pg_warehouse import apply_sql_files, connect_pg, ensure_etl_state_table, test_pg_connection
+from egisz_monitor_corp.pg_warehouse import (
+    PipelineLockBusyError,
+    apply_sql_files,
+    connect_pg,
+    ensure_etl_state_table,
+    test_pg_connection,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -33,7 +39,16 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "sync":
         cfg = load_corp_config()
-        stats = run_sync(cfg, dry_run=args.dry_run, progress_cb=lambda m: print(m, file=sys.stderr))
+        try:
+            stats = run_sync(
+                cfg, dry_run=args.dry_run, progress_cb=lambda m: print(m, file=sys.stderr)
+            )
+        except PipelineLockBusyError as e:
+            # CronJob и UI-кнопка делят один advisory lock в Postgres. Если параллельно стартанул
+            # другой процесс — выходим с кодом 75 (EX_TEMPFAIL), Kubernetes Job увидит it as Failed
+            # и отразит причину в логах, не повторяя попытку до следующего расписания.
+            print(f"sync_skipped: {e}", file=sys.stderr)
+            return 75
         print(
             f"fetched={stats.fetched} facts={stats.facts_upserted} staging_errors={stats.staging_errors} "
             f"max_log_id={stats.max_log_id} cursor_after={stats.last_cursor_after}"

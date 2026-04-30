@@ -1,4 +1,6 @@
 # PostgreSQL для DWH (Metabase / ETL). Данные на PVC.
+# Тюнинг через args: -c key=value — canonical способ для образа postgres:* (см. docker-library/postgres
+# entrypoint.sh: forward args в postgres). 25% RAM на shared_buffers (limit=2Gi).
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -22,6 +24,30 @@ spec:
       containers:
         - name: postgres
           image: postgres:16-bookworm
+          # Tuning параметры. shared_buffers=512MB (25% RAM-limit) — больше WAL-cache, меньше дисковых read'ов
+          # для тяжёлых SELECT'ов Metabase. work_mem 16MB — одна страница ETL × ~5 sort'ов помещается без spill.
+          # log_min_duration_statement=1000 — медленные запросы (>1s) попадают в `kubectl logs postgres-0`.
+          args:
+            - "-c"
+            - "shared_buffers=512MB"
+            - "-c"
+            - "effective_cache_size=1536MB"
+            - "-c"
+            - "work_mem=16MB"
+            - "-c"
+            - "maintenance_work_mem=128MB"
+            - "-c"
+            - "max_wal_size=1GB"
+            - "-c"
+            - "min_wal_size=80MB"
+            - "-c"
+            - "wal_compression=on"
+            - "-c"
+            - "log_min_duration_statement=1000"
+            - "-c"
+            - "log_lock_waits=on"
+            - "-c"
+            - "log_temp_files=0"
           ports:
             - containerPort: 5432
               name: postgres
@@ -42,13 +68,15 @@ spec:
             - name: data
               mountPath: /var/lib/postgresql/data
           resources:
-            # Docker Desktop / kind single-node often cannot schedule 4Gi limits; keep modest.
+            # ETL с пагинацией 500 строк и UPSERT через execute_values + Metabase queries:
+            # фактическое RSS 600-900Mi на ноутбуке. Поднимаем limit до 2Gi, чтобы OOMKilled
+            # не отстрелил pod на пиковой ETL-странице с тяжёлыми JSON aggregation'ами.
             requests:
               cpu: "100m"
-              memory: "256Mi"
+              memory: "512Mi"
             limits:
               cpu: "2"
-              memory: "1536Mi"
+              memory: "2Gi"
           startupProbe:
             exec:
               command:
@@ -65,14 +93,19 @@ spec:
                 - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 3
+          # liveness initialDelaySeconds=120: shared_buffers=512MB + WAL replay при крэше
+          # могут занимать > 60s. timeout 5s + failureThreshold 4 — даём 80s до restart.
           livenessProbe:
             exec:
               command:
                 - /bin/sh
                 - -c
                 - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
-            initialDelaySeconds: 60
+            initialDelaySeconds: 120
             periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 4
   volumeClaimTemplates:
     - metadata:
         name: data

@@ -36,13 +36,23 @@ step 3 "GET /api/user/current (personal_collection_id)"
 ROOT_ID="$(curl -sS "${MB_URL}/api/user/current" "${HDR[@]}" | jq -r '.personal_collection_id // empty')"
 [[ -n "${ROOT_ID}" && "${ROOT_ID}" != "null" ]] || die "personal_collection_id missing"
 
-step 4 "GET /api/collection/:id/items (дашборды в корне)"
-ITEMS="$(curl -sS "${MB_URL}/api/collection/${ROOT_ID}/items" "${HDR[@]}")"
-ND="$(echo "${ITEMS}" | mb_json_list | jq '[.[] | select(.model == "dashboard")] | length')"
-[[ "${ND:-0}" -ge 1 ]] || die "no dashboards in personal collection root"
+step 4 "GET /api/collection + /api/dashboard (дашборды в personal/namespaced коллекциях)"
+# provision.sh кладёт дашборды в namespaced collection «ЕГИСЗ Мониторинг сервиса интеграции»
+# с is_personal=true; ROOT_ID = личная коллекция админа (отдельная). Smoke считает дашборды в обеих.
+PERSONAL_IDS_JSON="$(curl -sS "${MB_URL}/api/collection" "${HDR[@]}" \
+  | mb_json_list \
+  | jq -c --arg rid "${ROOT_ID}" '[.[] | select((.is_personal == true) or ((.id | tostring) == ($rid | tostring))) | (.id | tostring)] | unique')"
+PERSONAL_IDS_JSON="${PERSONAL_IDS_JSON:-[]}"
 
-EXEC_ID="$(echo "${ITEMS}" | mb_json_list | jq -r '.[] | select(.model=="dashboard" and .name=="09 Управленческий дашборд") | .id' | head -n1)"
-OP_ID="$(echo "${ITEMS}" | mb_json_list | jq -r '.[] | select(.model=="dashboard" and .name=="01 Оперативный мониторинг") | .id' | head -n1)"
+DASHBOARDS="$(curl -sS "${MB_URL}/api/dashboard" "${HDR[@]}" | mb_json_list \
+  | jq -c --argjson pids "${PERSONAL_IDS_JSON}" '
+      [.[] | select(.collection_id != null and ((.collection_id | tostring) | IN($pids[])))]
+    ')"
+ND="$(echo "${DASHBOARDS}" | jq 'length')"
+[[ "${ND:-0}" -ge 1 ]] || die "no dashboards in any personal collection"
+
+EXEC_ID="$(echo "${DASHBOARDS}" | jq -r '.[] | select(.name=="09 Управленческий дашборд") | .id' | head -n1)"
+OP_ID="$(echo "${DASHBOARDS}" | jq -r '.[] | select(.name=="01 Оперативный мониторинг") | .id' | head -n1)"
 [[ -n "${EXEC_ID}" && "${EXEC_ID}" != "null" ]] || die "dashboard 09 not found"
 [[ -n "${OP_ID}" && "${OP_ID}" != "null" ]] || die "dashboard 01 not found"
 

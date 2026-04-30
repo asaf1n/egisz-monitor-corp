@@ -43,7 +43,7 @@
 
 ## Тесты (`tests/`)
 
-`pytest`: `test_parser.py`, `test_sql_util.py`, `test_config_loader.py`, `test_fb_client.py`, `test_pg_warehouse.py` (мок healthcheck-снапшота PG), `test_config_app.py` (Flask test client для `/api/healthcheck`). После изменений парсера, SQL или эндпоинтов — прогон тестов из корня (`start.ps1 -Action test` или `pytest`).
+`pytest`: `test_parser.py`, `test_sql_util.py`, `test_config_loader.py`, `test_fb_client.py`, `test_pg_warehouse.py` (мок healthcheck-снапшота PG), `test_config_app.py` (Flask test client для `/api/healthcheck`), `test_etl_helpers.py` (расщепление `run_sync`: `_load_enrichment_cache`, `_count_exchangelog_total`, advisory lock в Postgres). После изменений парсера, SQL или эндпоинтов — прогон тестов из корня (`start.ps1 -Action test` или `pytest`).
 
 ## Metabase
 
@@ -51,7 +51,7 @@
 |------|------------|
 | `metabase_dashboards/*.json` | Дашборды как код; имена и native-SQL карточек |
 | `metabase_dashboards/README.md` | Соответствие файлов (`01_operational.json` … `11_healthcheck.json`) и имён в UI |
-| `metabase/Dockerfile` | Образ **`egisz-monitor-metabase`** (теги `:k8s-v13`, `:local` — см. `start.ps1 -Action build`; bump при смене JSON/скриптов) |
+| `metabase/Dockerfile` | Образ **`egisz-monitor-metabase`** (теги `:k8s-v15`, `:local` — см. `start.ps1 -Action build`; non-root UID 1500, multi-stage `--virtual` apk-deps, HEALTHCHECK; bump при смене JSON/скриптов) |
 | `metabase/provision.sh` | Старт пода: провижининг из `/app/metabase_dashboards/` |
 | `metabase/setup-dashboards.sh` | Импорт JSON в коллекцию администратора |
 | `metabase/provision-local.ps1` | Локальный провижининг к Metabase на `localhost:3000` |
@@ -68,8 +68,9 @@
 |------|------------|
 | `k8s/` | Обзор: [`k8s/README.md`](k8s/README.md) — Postgres, Metabase, conf-ui, примеры секретов |
 | `k8s/postgres/` | StatefulSet, сервисы, Job **`egisz-reports-schema-init`** (`001_schema.sql`, `002_etl_state.sql`, `005_healthcheck.sql`), Job’ы Metabase app DB и (при необходимости) Airflow metadata |
-| `k8s/metabase.yaml` | Deployment Metabase (образ `egisz-monitor-metabase:k8s-v13`) |
-| `k8s/conf-ui.yaml` | Config UI (Flask + `sync_routes`) |
+| `k8s/metabase.yaml` | Deployment Metabase (образ `egisz-monitor-metabase:k8s-v15`); `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75 -XX:+UseG1GC`, startupProbe (240s), `METABASE_FORCE_PROVISION=auto` (идемпотентный provision — dashboard ID не меняются) |
+| `k8s/conf-ui.yaml` | Config UI (gunicorn 1×16t + `sync_routes`); non-root UID 10001, `/healthz`, RollingUpdate `maxUnavailable=0` |
+| `k8s/etl-cron.yaml` | **CronJob `egisz-corp-sync`**: `*/15 * * * *`, тот же образ `egisz-conf-ui:corp-web`, CLI `egisz-monitor sync`, `concurrencyPolicy: Forbid` + advisory lock в Postgres против гонки с UI-кнопкой |
 | `k8s/local/egisz_corp.yaml` | Пример фрагмента конфига для секрета conf-ui |
 | `k8s/airflow/` | Helm/values для DAG `egisz_corp_firebird_to_postgres` |
 | `airflow/dags/egisz_corp_etl_dag.py` | Вызов `run_sync` |
@@ -90,6 +91,17 @@
 | Config UI: вкладки **Snapshot / Healthcheck** | Snapshot — текущие `EGMID/LOGID/MODIFYDATE` (как раньше). Healthcheck — сигналы, top-3 клиники, прокси-БД (опрос `/api/healthcheck` каждые 30 c). |
 | Дашборд `metabase_dashboards/11_healthcheck.json` | «11 Healthcheck интеграции»: сигналы, heatmap клиник × дни, age-buckets очереди, тренд parse-errors, сводка прокси-БД. |
 | Полный аудит | `docs/INTEGRATION_AUDIT.md` (3 фокуса: техника/бизнес/healthcheck). |
+
+## ETL: pipeline и параллельный запуск
+
+`etl.run_sync` расщеплён на чистые функции (см. `etl.py`):
+
+- `_load_enrichment_cache` — Firebird → справочники EGISZ_LICENSES/JPERSONS в один проход.
+- `_count_exchangelog_total` — COUNT для UI-прогресса; падение FB не ломает sync.
+- `_process_exchangelog_pages` — пагинация по LOGID + парсинг + UPSERT факта/измерений (повышает сабфазы `fetch_page` / `parsing` / `page_done`).
+- `_refresh_outbound_documents` — снимок `stg_egisz_outbound_documents` в одну транзакцию.
+
+**Single-flight на уровне БД**: в начале `run_sync` берём `pg_try_advisory_lock(hash(pipeline_name))`. Помеченный CronJob `egisz-corp-sync` (по расписанию `*/15 * * * *`) и UI-кнопка «Синхронизировать сейчас» защищены от гонки — второй процесс выйдет с `PipelineLockBusyError` (CLI exit 75, UI показывает «параллельный sync уже идёт»). Lock — session-level: автоматически освобождается при разрыве соединения, без ручного reset после крэша воркера.
 
 ## Типичные задачи агента
 

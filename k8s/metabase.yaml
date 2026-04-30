@@ -55,12 +55,25 @@ spec:
       labels:
         app.kubernetes.io/name: metabase
     spec:
+      # securityContext дублирует USER 1500:1500 из metabase/Dockerfile. Без явного runAsUser в k8s
+      # containerd Docker Desktop иногда падает с «no users found» при резолвинге USER из image config
+      # (multi-arch manifest list); явный numeric UID/GID решает проблему.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1500
+        runAsGroup: 1500
+        fsGroup: 1500
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: metabase
           # Сборка: docker build -f metabase/Dockerfile -t egisz-monitor-metabase:latest . && docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:local
           # IfNotPresent: Docker Desktop подставляет образ из локального Docker Engine (см. docs.docker.com/desktop/kubernetes).
-          # Тег :k8s-v13 (не :local): bump при изменении Dockerfile/скриптов/дашбордов — иначе kubelet Docker Desktop держит старый digest для имени тега.
-          image: egisz-monitor-metabase:k8s-v13
+          # Тег :k8s-v15 (не :local): bump при изменении Dockerfile/скриптов/дашбордов — иначе kubelet Docker Desktop держит старый digest для имени тега.
+          # v15: provision.sh идемпотентен (METABASE_FORCE_PROVISION=auto/true/false) — dashboards id не меняются при rollout restart;
+          #      Dockerfile с --virtual + USER metabase + HEALTHCHECK; livenessProbe + JAVA_TOOL_OPTIONS для G1GC и MaxRAMPercentage.
+          # v14: фикс verify-corp-stack.sh + smoke-metabase-ui.sh — теперь учитывают namespaced is_personal collection.
+          image: egisz-monitor-metabase:k8s-v15
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000
@@ -133,18 +146,49 @@ spec:
                 secretKeyRef:
                   name: postgres-credentials
                   key: POSTGRES_PASSWORD
+            # Идемпотентный provisioning: если в БД metabase уже есть >= /app/metabase_dashboards/*.json,
+            # provision.sh пропускает setup-dashboards.sh, dashboard ID сохраняются между restart'ами.
+            # auto — детект по числу EGISZ дашбордов; true — всегда пересоздавать (через bump тега и
+            # rollout restart); false — никогда (для отладки). Force re-provision: start.ps1 -Action reset-metabase.
+            - name: METABASE_FORCE_PROVISION
+              value: "auto"
+            # JVM-тюнинг для контейнера: heap = 75% memory limit (G1GC; кратно snappier чем дефолтный
+            # ParallelGC у Metabase), быстрый OOM-exit вместо «зависшего» pod'а — k8s рестартит чище.
+            - name: JAVA_TOOL_OPTIONS
+              value: "-XX:MaxRAMPercentage=75 -XX:+UseG1GC -XX:+ExitOnOutOfMemoryError -Djava.net.preferIPv4Stack=true"
           volumeMounts:
             - name: shared
               mountPath: /shared
+          # startupProbe: «холодный старт JVM + миграции» (до ~4 минут на ноутбуке). Пока он жив,
+          # liveness/readiness не выполняются — kubelet не убивает pod даже если первое /api/health
+          # отвечает только через 90s.
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            failureThreshold: 40
+            periodSeconds: 6
+            timeoutSeconds: 5
+          # readiness берёт работу после startupProbe (initialDelaySeconds: 0). Делаем её агрессивной:
+          # после прогрева JVM /api/health отвечает за <50 ms, поэтому tight loop без затяжек.
           readinessProbe:
             httpGet:
               path: /api/health
               port: 3000
-            # JVM + миграции: первый успешный /api/health обычно раньше 90s; слишком большой delay растягивает rollout после apply.
-            initialDelaySeconds: 55
-            periodSeconds: 12
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # liveness — последний рубеж: если 4 раза подряд /api/health не ответил — pod умер
+          # (deadlock в Jetty / OOM без exit-code 137). 4 × 20s = 80s до restart.
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 0
+            periodSeconds: 20
             timeoutSeconds: 5
-            failureThreshold: 20
+            failureThreshold: 4
           resources:
             requests:
               memory: "1Gi"

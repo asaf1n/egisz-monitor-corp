@@ -34,7 +34,10 @@ flowchart LR
 | :--- | :--- | :--- |
 | `egisz-monitor sync` | [egisz_monitor_corp/cli.py](../egisz_monitor_corp/cli.py) | Каждый запуск — отдельный процесс. |
 | `POST /api/sync/start` | [egisz_monitor_corp/sync_routes.py](../egisz_monitor_corp/sync_routes.py) | **Single-flight** через `_state_lock` + `threading.Thread`; повторный запуск во время активного синка отклоняется. |
+| Kubernetes `CronJob egisz-corp-sync` | [k8s/etl-cron.yaml](../k8s/etl-cron.yaml) | `*/15 * * * *`, тот же образ что conf-ui, `concurrencyPolicy: Forbid`, `activeDeadlineSeconds: 1800`. |
 | Airflow DAG | `airflow/dags/egisz_corp_etl_dag.py` | Полагается на расписание Airflow и инкрементный курсор `etl_state.last_log_id`. |
+
+**Защита от гонки CronJob ↔ UI-кнопки** реализована **session-level** advisory lock'ом в Postgres: `pg_try_advisory_lock(hash(pipeline_name))` берётся в начале `run_sync` (см. [`pg_warehouse.try_acquire_pipeline_lock`](../egisz_monitor_corp/pg_warehouse.py)). Если другой процесс уже владеет локом — `run_sync` бросает `PipelineLockBusyError`, CLI выходит с кодом 75 (`sync_skipped`), UI показывает «параллельный sync уже идёт». Lock автоматически освобождается при разрыве соединения, поэтому крэш воркера не оставляет «навечно занято» — ручной reset не нужен.
 
 ### 1.2 Курсор и инкрементальность
 

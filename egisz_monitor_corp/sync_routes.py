@@ -26,6 +26,7 @@ def _run_sync_job(config_path: str) -> None:
         os.environ["EGISZ_CORP_CONFIG"] = config_path
         from egisz_monitor_corp.config_loader import load_corp_config
         from egisz_monitor_corp.etl import run_sync
+        from egisz_monitor_corp.pg_warehouse import PipelineLockBusyError
 
         cfg = load_corp_config()
 
@@ -49,6 +50,13 @@ def _run_sync_job(config_path: str) -> None:
             }
             _state["error"] = None
             _state["message"] = "Готово."
+    except PipelineLockBusyError as e:  # pragma: no cover - конфликт CronJob ↔ UI
+        with _state_lock:
+            _state["error"] = str(e)
+            _state["message"] = (
+                "Параллельный sync уже идёт (возможно, его запустил CronJob egisz-corp-sync). "
+                "Подождите 1–2 минуты и повторите."
+            )
     except Exception as e:  # pragma: no cover
         with _state_lock:
             _state["error"] = str(e)

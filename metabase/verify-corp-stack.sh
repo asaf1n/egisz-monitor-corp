@@ -59,7 +59,7 @@ if [ -z "${TOKEN}" ] || [ "${TOKEN}" = "null" ]; then
   exit 1
 fi
 
-log "Metabase: dashboards in admin personal collection (root)"
+log "Metabase: dashboards in admin personal collection (or any namespaced is_personal collection)"
 ME_JSON="$(curl -sS "${MB_URL}/api/user/current" -H "X-Metabase-Session: ${TOKEN}")"
 ROOT_ID="$(echo "${ME_JSON}" | jq -r '.personal_collection_id // empty')"
 if [ -z "${ROOT_ID}" ] || [ "${ROOT_ID}" = "null" ]; then
@@ -67,15 +67,31 @@ if [ -z "${ROOT_ID}" ] || [ "${ROOT_ID}" = "null" ]; then
   exit 1
 fi
 
+# provision.sh кладёт дашборды в namespaced collection «ЕГИСЗ Мониторинг сервиса интеграции»
+# с is_personal=true (а не в дефолтную «Личная коллекция admin'а»). Поэтому считаем дашборды
+# и в дефолтной personal collection ROOT_ID, и в любой коллекции с is_personal=true.
+PERSONAL_IDS_JSON="$(curl -sS "${MB_URL}/api/collection" -H "X-Metabase-Session: ${TOKEN}" \
+  | mb_list \
+  | jq -c --arg rid "${ROOT_ID}" '
+      [
+        .[]
+        | select((.is_personal == true) or ((.id | tostring) == ($rid | tostring)))
+        | .id | tostring
+      ] | unique
+    ')"
+PERSONAL_IDS_JSON="${PERSONAL_IDS_JSON:-[]}"
+
 ITEMS="$(curl -sS "${MB_URL}/api/collection/${ROOT_ID}/items" -H "X-Metabase-Session: ${TOKEN}")"
-ND="$(echo "${ITEMS}" | mb_list | jq -r '[.[] | select(((.model // "") | ascii_downcase) == "dashboard")] | length')"
+ND="$(curl -sS "${MB_URL}/api/dashboard" -H "X-Metabase-Session: ${TOKEN}" \
+  | mb_list \
+  | jq -r --argjson pids "${PERSONAL_IDS_JSON}" '
+      [.[] | select(.collection_id != null and ((.collection_id | tostring) | IN($pids[])))] | length
+    ')"
 ND="${ND:-0}"
 
-# Fallback: в части сборок список «items» не содержит model=dashboard, хотя дашборды уже в коллекции.
 if [ "${ND:-0}" -lt 1 ]; then
-  ND="$(curl -sS "${MB_URL}/api/dashboard" -H "X-Metabase-Session: ${TOKEN}" | mb_list | jq -r --arg rid "${ROOT_ID}" '
-    [.[] | select(.collection_id != null and ((.collection_id | tostring) == ($rid | tostring)))] | length
-  ')"
+  # Fallback: items дефолтной personal collection — на случай старых деплоев, где провижин клал в admin's personal.
+  ND="$(echo "${ITEMS}" | mb_list | jq -r '[.[] | select(((.model // "") | ascii_downcase) == "dashboard")] | length')"
   ND="${ND:-0}"
 fi
 
@@ -107,12 +123,14 @@ EXEC_JSON="/app/metabase_dashboards/09_executive.json"
 if [ -f "${EXEC_JSON}" ]; then
   EXP_CARDS="$(jq '.cards | length' "${EXEC_JSON}")"
   EXEC_NAME="$(jq -r '.name' "${EXEC_JSON}")"
-  EXEC_DID="$(echo "${ITEMS}" | mb_list | jq -r --arg n "${EXEC_NAME}" '.[] | select(((.model // "") | ascii_downcase) == "dashboard" and .name == $n) | .id' | head -n1)"
+  EXEC_DID="$(curl -sS "${MB_URL}/api/dashboard" -H "X-Metabase-Session: ${TOKEN}" \
+    | mb_list \
+    | jq -r --arg n "${EXEC_NAME}" --argjson pids "${PERSONAL_IDS_JSON}" '
+        [.[] | select(.name == $n and (.collection_id != null) and ((.collection_id | tostring) | IN($pids[])))]
+        | sort_by(.id) | last | .id // empty
+      ')"
   if [ -z "${EXEC_DID}" ] || [ "${EXEC_DID}" = "null" ]; then
-    EXEC_DID="$(curl -sS "${MB_URL}/api/dashboard" -H "X-Metabase-Session: ${TOKEN}" | mb_list | jq -r --arg n "${EXEC_NAME}" --arg rid "${ROOT_ID}" '
-      [.[] | select(.name == $n and (.collection_id != null) and ((.collection_id | tostring) == ($rid | tostring)))]
-      | sort_by(.id) | last | .id // empty
-    ')"
+    EXEC_DID="$(echo "${ITEMS}" | mb_list | jq -r --arg n "${EXEC_NAME}" '.[] | select(((.model // "") | ascii_downcase) == "dashboard" and .name == $n) | .id' | head -n1)"
   fi
   if [ -z "${EXEC_DID}" ] || [ "${EXEC_DID}" = "null" ]; then
     log "FAIL: dashboard \"${EXEC_NAME}\" not in personal collection (provisioning may have failed)"

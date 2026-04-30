@@ -94,7 +94,59 @@ if [ "${HAS_USER_SETUP}" != "true" ]; then
   fi
 fi
 
-if [ -x /app/setup-dashboards.sh ]; then
+log_info "Authenticating in Metabase..."
+SESSION_TOKEN="$(curl -s -X POST "${MB_URL}/api/session" \
+  -H "Content-Type: application/json" \
+  -d "{\"username\":\"${ADMIN_EMAIL}\",\"password\":\"${ADMIN_PASSWORD}\"}" | jq -r '.id')"
+
+if [ -z "${SESSION_TOKEN}" ] || [ "${SESSION_TOKEN}" = "null" ]; then
+  echo "Failed to authenticate in Metabase"
+  exit 1
+fi
+
+# Идемпотентный provisioning: setup-dashboards.sh при каждом старте пересоздаёт дашборды
+# с новыми id'ами — это ломает закладки в браузере и ссылки в документации после rollout
+# restart. Вместо этого считаем количество существующих "EGISZ" дашбордов (имя начинается
+# с "01 ".."11 ") и пропускаем provisioning, если он уже выполнен. Принудительная пере-
+# заливка — env METABASE_FORCE_PROVISION=true или Action reset-metabase (DROP/CREATE БД).
+EXPECTED_DASHBOARDS=0
+if [ -d /app/metabase_dashboards ]; then
+  for _f in /app/metabase_dashboards/*.json; do
+    [ -f "${_f}" ] && EXPECTED_DASHBOARDS=$((EXPECTED_DASHBOARDS + 1)) || true
+  done
+fi
+
+EXISTING_DASHBOARDS="$(curl -sS "${MB_URL}/api/dashboard" \
+  -H "X-Metabase-Session: ${SESSION_TOKEN}" \
+  | jq -r '
+      (if type == "array" then . elif (.data | type == "array") then .data else [] end)
+      | [.[] | select(.archived != true) | select(.name | test("^[0-9][0-9] "))] | length
+    ' 2>/dev/null || echo 0)"
+EXISTING_DASHBOARDS="${EXISTING_DASHBOARDS:-0}"
+
+PROVISION_DASHBOARDS=1
+FORCE_FLAG="${METABASE_FORCE_PROVISION:-auto}"
+case "${FORCE_FLAG}" in
+  true|1|yes|on)
+    log_info "METABASE_FORCE_PROVISION=${FORCE_FLAG}: dashboards will be re-provisioned (existing IDs will change)"
+    PROVISION_DASHBOARDS=1
+    ;;
+  false|0|no|off|never)
+    log_info "METABASE_FORCE_PROVISION=${FORCE_FLAG}: skipping dashboard provisioning unconditionally"
+    PROVISION_DASHBOARDS=0
+    ;;
+  auto|*)
+    if [ "${EXPECTED_DASHBOARDS}" -gt 0 ] && [ "${EXISTING_DASHBOARDS}" -ge "${EXPECTED_DASHBOARDS}" ]; then
+      log_info "Skipping provisioning: ${EXISTING_DASHBOARDS}/${EXPECTED_DASHBOARDS} EGISZ dashboards already in Metabase application DB. Set METABASE_FORCE_PROVISION=true (or run 'start.ps1 -Action reset-metabase') to re-create."
+      PROVISION_DASHBOARDS=0
+    else
+      log_info "Provisioning dashboards: have ${EXISTING_DASHBOARDS} of ${EXPECTED_DASHBOARDS} expected EGISZ dashboards in Metabase."
+      PROVISION_DASHBOARDS=1
+    fi
+    ;;
+esac
+
+if [ -x /app/setup-dashboards.sh ] && [ "${PROVISION_DASHBOARDS}" = "1" ]; then
   log_info "Waiting for DWH schema in Postgres (needed for dashboard provisioning)..."
   SCHEMA_SQL="SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('fact_egisz_transactions', 'v_egisz_transactions_enriched', 'v_egisz_transactions_enriched_ui', 'etl_state');"
   SCHEMA_CHECK="0"
@@ -124,16 +176,11 @@ if [ -x /app/setup-dashboards.sh ]; then
   else
     echo "[provision] Warning: Application database schema not fully initialized after wait (need fact + v_egisz_transactions_enriched + v_egisz_transactions_enriched_ui + etl_state). Skipping dashboard provisioning. Run egisz-monitor apply-schema and restart Metabase."
   fi
-fi
-
-log_info "Authenticating in Metabase..."
-SESSION_TOKEN="$(curl -s -X POST "${MB_URL}/api/session" \
-  -H "Content-Type: application/json" \
-  -d "{\"username\":\"${ADMIN_EMAIL}\",\"password\":\"${ADMIN_PASSWORD}\"}" | jq -r '.id')"
-
-if [ -z "${SESSION_TOKEN}" ] || [ "${SESSION_TOKEN}" = "null" ]; then
-  echo "Failed to authenticate in Metabase"
-  exit 1
+elif [ "${PROVISION_DASHBOARDS}" = "1" ]; then
+  log_info "Note: /app/setup-dashboards.sh is missing; provisioning skipped."
+else
+  # Используется ниже verify-corp-stack.sh для гейтинга проверки.
+  SCHEMA_CHECK="${EXISTING_DASHBOARDS}"
 fi
 
 DASHBOARD_ID="$(curl -s "${MB_URL}/api/dashboard" \

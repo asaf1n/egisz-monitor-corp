@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -16,14 +17,67 @@ except ImportError as e:  # pragma: no cover
     raise ImportError("psycopg2-binary is required for ETL.") from e
 
 
+def _pipeline_lock_key(pipeline: str) -> int:
+    """Стабильный bigint-ключ для pg_try_advisory_lock из имени пайплайна (первые 8 байт MD5)."""
+    digest = hashlib.md5(pipeline.encode("utf-8")).digest()[:8]
+    n = int.from_bytes(digest, "big", signed=False)
+    # PostgreSQL advisory lock принимает bigint (signed int64).
+    if n >= 1 << 63:
+        n -= 1 << 64
+    return n
+
+
+def try_acquire_pipeline_lock(con, pipeline: str) -> bool:  # type: ignore[no-untyped-def]
+    """Session-level advisory lock: защищает run_sync от параллельного запуска (CronJob ↔ UI-кнопка).
+
+    Lock освобождается автоматически при разрыве соединения (Postgres) — это устраняет
+    залипание после crash'а воркера. Используется именно session-level (не xact), чтобы
+    держать лок поверх множества коммитов внутри run_sync.
+    """
+    key = _pipeline_lock_key(pipeline)
+    with con.cursor() as cur:
+        cur.execute("SELECT pg_try_advisory_lock(%s)", (key,))
+        row = cur.fetchone()
+    con.commit()
+    return bool(row and row[0])
+
+
+def release_pipeline_lock(con, pipeline: str) -> None:  # type: ignore[no-untyped-def]
+    """Освобождает session-level advisory lock; идемпотентно при пропуске лока."""
+    key = _pipeline_lock_key(pipeline)
+    try:
+        with con.cursor() as cur:
+            cur.execute("SELECT pg_advisory_unlock(%s)", (key,))
+            cur.fetchone()
+        con.commit()
+    except Exception:  # pragma: no cover - rollback при закрытом con
+        try:
+            con.rollback()
+        except Exception:
+            pass
+
+
+class PipelineLockBusyError(RuntimeError):
+    """Бросаем, когда другой процесс уже держит advisory lock пайплайна."""
+
+
 def connect_pg(cfg: PostgresConfig):  # type: ignore[no-untyped-def]
+    # statement_timeout (5 мин) защищает sync и UI от зависших SELECT/UPSERT на стороне PG;
+    # idle_in_transaction_session_timeout (10 мин) убивает «забытые» транзакции при крэше воркера.
+    # SET LOCAL внутри fetch_healthcheck_snapshot переопределяет эти значения локально (10s) и не конфликтует.
+    pg_options = (
+        f"-c search_path={cfg.schema} "
+        "-c statement_timeout=300000 "
+        "-c idle_in_transaction_session_timeout=600000"
+    )
     con = psycopg2.connect(
         host=cfg.host,
         port=cfg.port,
         dbname=cfg.database,
         user=cfg.user,
         password=cfg.password,
-        options=f"-c search_path={cfg.schema}",
+        options=pg_options,
+        connect_timeout=10,
     )
     con.set_client_encoding("UTF8")
     con.autocommit = False
