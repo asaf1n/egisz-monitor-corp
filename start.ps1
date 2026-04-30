@@ -8,7 +8,7 @@
 # apply: пересборка образа Config UI (Flask) + kubectl apply без сброса БД Metabase; по умолчанию rollout и conf-ui, и Metabase (холодный JVM). -SkipMetabaseRolloutRestart — только conf-ui.
 
 param(
-    [ValidateSet("deploy", "reset-deploy", "reset-metabase", "build", "apply", "status", "verify", "web", "forward", "stop-forward", "metabase-provision-local", "test", "help")]
+    [ValidateSet("deploy", "reset-deploy", "reset-metabase", "build", "apply", "restart-metabase", "restart-conf-ui", "restart-web", "status", "verify", "web", "forward", "stop-forward", "metabase-provision-local", "test", "help")]
     [string]$Action = "deploy",
     [switch]$SkipKindCluster,
     # With -Action web / forward: do not bind localhost:5432 (skip if another Postgres already uses 5432).
@@ -79,6 +79,9 @@ egisz-monitor-corp\start.ps1
   reset-metabase    только DROP/CREATE БД Metabase (без полного deploy). Витрина egisz_reports не трогается. Если меняли JSON дашбордов: сначала .\start.ps1 -Action build
   build             docker build only (K8s images); use -DockerNoCache for --no-cache
   apply             docker build Config UI + kubectl apply; rollout restart Metabase+conf-ui (или только conf-ui: -SkipMetabaseRolloutRestart). -DockerNoCache — полная пересборка conf-ui.
+  restart-metabase  только kubectl rollout restart deployment/metabase + ожидание Ready (образ уже в кластере; после build — apply или этот action).
+  restart-conf-ui   только rollout restart deployment/conf-ui + ожидание Ready.
+  restart-web       rollout restart Metabase и conf-ui + ожидание обоих (без docker build и без apply манифестов).
   metabase-provision-local  docker build Metabase + setup-dashboards.sh к Metabase на localhost:3000 (см. metabase/provision-local.ps1 - параметры)
   status            kubectl get pods,svc -n egisz-monitor
   web | forward     port-forward only (образы не трогает). После правок UI: .\start.ps1 -Action apply (или build + apply)
@@ -132,8 +135,8 @@ function Invoke-DockerBuild {
     }
     docker build @nc -f metabase/Dockerfile -t egisz-monitor-metabase:latest $Root
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    # :k8s-v10 + :local = тот же digest, что :latest. В k8s/metabase.yaml образ — :k8s-v10 (bump v11… при смене скриптов/дашбордов), иначе kubelet Docker Desktop держит старый digest для имени тега.
-    docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:k8s-v10
+    # :k8s-v13 + :local = тот же digest, что :latest. В k8s/metabase.yaml образ — :k8s-v13 (bump v14… при смене скриптов/дашбордов), иначе kubelet Docker Desktop держит старый digest для имени тега.
+    docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:k8s-v13
     if ($LASTEXITCODE -ne 0) { exit 1 }
     docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:local
     if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -196,7 +199,7 @@ function Invoke-KindLoadImagesIfNeeded {
     if ($LASTEXITCODE -ne 0) { exit 1 }
     kind load docker-image egisz-monitor-metabase:latest --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    kind load docker-image egisz-monitor-metabase:k8s-v10 --name $name
+    kind load docker-image egisz-monitor-metabase:k8s-v13 --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }
     kind load docker-image egisz-monitor-metabase:local --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -361,6 +364,46 @@ CREATE DATABASE metabase OWNER
     }
 }
 
+function Invoke-CorpRolloutRestartMetabaseOnly {
+    $ns = "egisz-monitor"
+    kubectl -n $ns get deploy metabase -o name 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERROR: deployment/metabase not found in $ns." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "[kubectl] rollout restart deployment/metabase..." -ForegroundColor Cyan
+    kubectl -n $ns rollout restart deployment/metabase
+    if ($LASTEXITCODE -ne 0) { exit 1 }
+}
+
+function Invoke-CorpRolloutRestartConfUiOnly {
+    $ns = "egisz-monitor"
+    kubectl -n $ns get deploy conf-ui -o name 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERROR: deployment/conf-ui not found in $ns." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "[kubectl] rollout restart deployment/conf-ui..." -ForegroundColor Cyan
+    kubectl -n $ns rollout restart deployment/conf-ui
+    if ($LASTEXITCODE -ne 0) { exit 1 }
+}
+
+function Wait-CorpMetabaseRollout {
+    Write-Host "[kubectl] Waiting for Metabase (up to 10m)..." -ForegroundColor Cyan
+    kubectl -n egisz-monitor rollout status deployment/metabase --timeout=600s
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "WARN: Metabase not Ready in 10m. Check: kubectl -n egisz-monitor logs deploy/metabase --tail=80" -ForegroundColor Yellow
+    }
+}
+
+function Wait-CorpConfUiRollout {
+    Write-Host "[kubectl] Waiting for conf-ui (up to 3m)..." -ForegroundColor Cyan
+    kubectl -n egisz-monitor rollout status deployment/conf-ui --timeout=180s
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "WARN: conf-ui not Ready in 3m. Check: kubectl -n egisz-monitor describe deploy/conf-ui" -ForegroundColor Yellow
+    }
+}
+
 function Invoke-CorpRolloutRestartMetabaseAndConfUi {
     # После docker build + kind load / docker-desktop образ :local и conf-ui уже на ноде, но без нового пода
     # kubelet может держать старый слой. Перезапуск deployment (все контексты k8s) гарантирует старт с новым образом и provision.sh.
@@ -420,11 +463,12 @@ function Invoke-PostgresEnsureAppRole {
 }
 
 function Invoke-PostgresSchemaInit {
-    Write-Host "[kubectl] ConfigMap + Job: apply schema to egisz_reports..." -ForegroundColor Cyan
+    Write-Host "[kubectl] ConfigMap + Job: apply schema to egisz_reports (001 + 002 + 005)..." -ForegroundColor Cyan
     $sql1 = Join-Path $Root "sql\001_schema.sql"
     $sql2 = Join-Path $Root "sql\002_etl_state.sql"
-    if (-not (Test-Path $sql1) -or -not (Test-Path $sql2)) {
-        Write-Host "ERROR: Missing sql\001_schema.sql or sql\002_etl_state.sql" -ForegroundColor Red
+    $sql5 = Join-Path $Root "sql\005_healthcheck.sql"
+    if (-not (Test-Path $sql1) -or -not (Test-Path $sql2) -or -not (Test-Path $sql5)) {
+        Write-Host "ERROR: Missing sql\001_schema.sql, sql\002_etl_state.sql or sql\005_healthcheck.sql" -ForegroundColor Red
         exit 1
     }
     # Do not pipe ConfigMap YAML through PowerShell: it can transcode UTF-8 SQL aliases to '?'.
@@ -433,7 +477,8 @@ function Invoke-PostgresSchemaInit {
     if ($LASTEXITCODE -ne 0) { exit 1 }
     kubectl -n egisz-monitor create configmap egisz-reports-schema `
         --from-file=001_schema.sql=$sql1 `
-        --from-file=002_etl_state.sql=$sql2
+        --from-file=002_etl_state.sql=$sql2 `
+        --from-file=005_healthcheck.sql=$sql5
     if ($LASTEXITCODE -ne 0) { exit 1 }
     kubectl -n egisz-monitor delete job/egisz-reports-schema-init --ignore-not-found
     kubectl apply -f (Join-Path $Root "k8s\postgres\egisz-reports-schema-job.yaml")
@@ -577,16 +622,11 @@ function Invoke-KubectlApply {
         Invoke-CorpRolloutRestartMetabaseAndConfUi
     }
 
-    Write-Host "[kubectl] Waiting for Metabase (first start can take several minutes)..." -ForegroundColor Cyan
-    kubectl -n egisz-monitor rollout status deployment/metabase --timeout=600s
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "WARN: Metabase not Ready in 10m. Check: kubectl -n egisz-monitor logs deploy/metabase" -ForegroundColor Yellow
-    }
-
-    Write-Host "[kubectl] Waiting for conf-ui (Config UI)..." -ForegroundColor Cyan
-    kubectl -n egisz-monitor rollout status deployment/conf-ui --timeout=180s
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "WARN: conf-ui not Ready in 3m. Check: kubectl -n egisz-monitor describe deploy/conf-ui" -ForegroundColor Yellow
+    if ($SkipMetabaseRolloutRestart -and -not $ResetMetabaseAppDb) {
+        Wait-CorpConfUiRollout
+    } else {
+        Wait-CorpMetabaseRollout
+        Wait-CorpConfUiRollout
     }
 
     Write-Host "[kubectl] Apply finished." -ForegroundColor Green
@@ -964,7 +1004,7 @@ function Show-DeployInfo {
     Write-Host "Credentials (local dev):" -ForegroundColor Cyan
     Write-Host "  Postgres: db=egisz_reports user=egisz pass=egisz (in cluster: postgres:5432)" -ForegroundColor White
     Write-Host '  Metabase: admin@egisz.local / egisz — дашборды 01–10 в корне Personal collection (deploy уже сбрасывает БД metabase; точечно: reset-metabase)' -ForegroundColor White
-    Write-Host "  Config UI: правки egisz_monitor_corp (Flask) — .\start.ps1 -Action apply пересобирает образ; libfbclient/Dockerfile — .\start.ps1 -Action build" -ForegroundColor White
+    Write-Host "  Config UI: правки Flask — .\start.ps1 -Action apply (-SkipMetabaseRolloutRestart без перезапуска Metabase); только рестарт пода — restart-conf-ui; Metabase — restart-metabase / restart-web" -ForegroundColor White
     Write-Host "  Firebird: host.docker.internal:3050 в k8s\local\egisz_corp.yaml" -ForegroundColor White
     Write-Host "  Standard ports: deploy/apply already forwarded 8080/3000 unless you used -SkipPortForwardAfterDeploy; or run: .\start.ps1 -Action web" -ForegroundColor White
     Write-Host ""
@@ -1003,6 +1043,43 @@ switch ($Action) {
         if (-not $SkipPortForwardAfterDeploy) {
             Invoke-CorpPortForwardIfRequestedAfterK8s -BackgroundSwitchPresent:$PSBoundParameters.ContainsKey('BackgroundPortForward') -BackgroundEnabled:$BackgroundPortForward -ConfAndMetabaseOnly
         }
+    }
+    "restart-metabase" {
+        Write-NestedSiblingMonitorWarning
+        Initialize-LocalKubernetesCluster
+        if (-not (Test-KubectlResponds)) {
+            Write-Host "ERROR: kubectl cluster-info failed." -ForegroundColor Red
+            exit 1
+        }
+        Write-Banner "restart-metabase"
+        Invoke-CorpRolloutRestartMetabaseOnly
+        Wait-CorpMetabaseRollout
+        Write-Host "[restart-metabase] Готово." -ForegroundColor Green
+    }
+    "restart-conf-ui" {
+        Write-NestedSiblingMonitorWarning
+        Initialize-LocalKubernetesCluster
+        if (-not (Test-KubectlResponds)) {
+            Write-Host "ERROR: kubectl cluster-info failed." -ForegroundColor Red
+            exit 1
+        }
+        Write-Banner "restart-conf-ui"
+        Invoke-CorpRolloutRestartConfUiOnly
+        Wait-CorpConfUiRollout
+        Write-Host "[restart-conf-ui] Готово." -ForegroundColor Green
+    }
+    "restart-web" {
+        Write-NestedSiblingMonitorWarning
+        Initialize-LocalKubernetesCluster
+        if (-not (Test-KubectlResponds)) {
+            Write-Host "ERROR: kubectl cluster-info failed." -ForegroundColor Red
+            exit 1
+        }
+        Write-Banner "restart-web (Metabase + conf-ui)"
+        Invoke-CorpRolloutRestartMetabaseAndConfUi
+        Wait-CorpMetabaseRollout
+        Wait-CorpConfUiRollout
+        Write-Host "[restart-web] Готово." -ForegroundColor Green
     }
     "status" {
         kubectl -n egisz-monitor get pods,svc -o wide

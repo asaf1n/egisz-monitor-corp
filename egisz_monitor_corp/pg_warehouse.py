@@ -146,6 +146,169 @@ def refresh_outbound_documents_staging(con, rows: list[dict[str, Any]]) -> None:
         )
 
 
+def fetch_healthcheck_snapshot(con, *, top_clinics: int = 5) -> dict[str, Any]:  # type: ignore[no-untyped-def]
+    """
+    Снимок healthcheck витрины: сигналы, top-N проблемных клиник, прокси-БД.
+
+    Использует представления из sql/005_healthcheck.sql:
+      - v_health_signals — пять сигналов (error_rate_high, unknown_high,
+        parse_errors_burst, queue_red_24h, cursor_stale).
+      - v_health_by_clinic — агрегаты по клиникам за 24h.
+      - v_health_proxy_db — счётчики staging исходящих + последний апдейт ETL.
+
+    Краткий statement_timeout (10 секунд) защищает Config UI от зависания при
+    долгом сканировании.
+    """
+    out: dict[str, Any] = {
+        "signals": [],
+        "by_clinic_top": [],
+        "proxy_db": {},
+        "level_summary": {"red": 0, "yellow": 0, "green": 0},
+        "errors": [],
+    }
+    with con.cursor() as cur:
+        cur.execute("SET LOCAL statement_timeout = '10s'")
+        try:
+            cur.execute(
+                """
+                SELECT code, title, level, value, value_unit, denominator, hint
+                FROM v_health_signals
+                ORDER BY CASE level
+                    WHEN 'red' THEN 0
+                    WHEN 'yellow' THEN 1
+                    WHEN 'green' THEN 2
+                    ELSE 3
+                END, code
+                """
+            )
+            for code, title, level, value, value_unit, denominator, hint in cur.fetchall():
+                lvl = (level or "green").lower()
+                if lvl in out["level_summary"]:
+                    out["level_summary"][lvl] += 1
+                out["signals"].append(
+                    {
+                        "code": code,
+                        "title": title,
+                        "level": lvl,
+                        "value": float(value) if value is not None else None,
+                        "value_unit": value_unit,
+                        "denominator": int(denominator) if denominator is not None else None,
+                        "hint": hint,
+                    }
+                )
+        except psycopg2.Error as e:  # pragma: no cover - relies on schema in PG
+            con.rollback()
+            out["errors"].append(f"v_health_signals: {e}")
+
+    with con.cursor() as cur:
+        cur.execute("SET LOCAL statement_timeout = '10s'")
+        try:
+            cur.execute(
+                """
+                SELECT
+                    jid, clinic_name, clinic_inn, clinic_mo_oid,
+                    facts_24h, success_24h, errors_24h, unknown_24h,
+                    error_rate_24h, unknown_rate_24h, pending_now,
+                    last_seen_at, health_level
+                FROM v_health_by_clinic
+                ORDER BY
+                    CASE health_level
+                        WHEN 'red' THEN 0
+                        WHEN 'yellow' THEN 1
+                        ELSE 2
+                    END,
+                    error_rate_24h DESC NULLS LAST,
+                    pending_now DESC NULLS LAST,
+                    facts_24h DESC NULLS LAST
+                LIMIT %s
+                """,
+                (int(top_clinics),),
+            )
+            for row in cur.fetchall():
+                (
+                    jid,
+                    clinic_name,
+                    inn,
+                    fir,
+                    facts_24h,
+                    success_24h,
+                    errors_24h,
+                    unknown_24h,
+                    error_rate_24h,
+                    unknown_rate_24h,
+                    pending_now,
+                    last_seen_at,
+                    health_level,
+                ) = row
+                out["by_clinic_top"].append(
+                    {
+                        "jid": int(jid) if jid is not None else None,
+                        "clinic_name": clinic_name,
+                        "clinic_inn": inn,
+                        "clinic_mo_oid": fir,
+                        "facts_24h": int(facts_24h or 0),
+                        "success_24h": int(success_24h or 0),
+                        "errors_24h": int(errors_24h or 0),
+                        "unknown_24h": int(unknown_24h or 0),
+                        "error_rate_24h": float(error_rate_24h) if error_rate_24h is not None else None,
+                        "unknown_rate_24h": float(unknown_rate_24h) if unknown_rate_24h is not None else None,
+                        "pending_now": int(pending_now or 0),
+                        "last_seen_at": last_seen_at.isoformat() if last_seen_at else None,
+                        "health_level": (health_level or "green").lower(),
+                    }
+                )
+        except psycopg2.Error as e:  # pragma: no cover
+            con.rollback()
+            out["errors"].append(f"v_health_by_clinic: {e}")
+
+    with con.cursor() as cur:
+        cur.execute("SET LOCAL statement_timeout = '10s'")
+        try:
+            cur.execute(
+                """
+                SELECT
+                    stg_outbound_total, stg_without_egmid, stg_without_jid,
+                    staging_max_egmid, staging_max_sent_at,
+                    pending_total, pending_1h, pending_1_24h, pending_older_24h,
+                    etl_last_update, etl_last_log_id
+                FROM v_health_proxy_db
+                """
+            )
+            row = cur.fetchone()
+            if row:
+                (
+                    stg_total,
+                    stg_no_egmid,
+                    stg_no_jid,
+                    staging_max_egmid,
+                    staging_max_sent_at,
+                    pending_total,
+                    pending_1h,
+                    pending_1_24h,
+                    pending_older_24h,
+                    etl_last_update,
+                    etl_last_log_id,
+                ) = row
+                out["proxy_db"] = {
+                    "stg_outbound_total": int(stg_total or 0),
+                    "stg_without_egmid": int(stg_no_egmid or 0),
+                    "stg_without_jid": int(stg_no_jid or 0),
+                    "staging_max_egmid": int(staging_max_egmid) if staging_max_egmid is not None else None,
+                    "staging_max_sent_at": staging_max_sent_at.isoformat() if staging_max_sent_at else None,
+                    "pending_total": int(pending_total or 0),
+                    "pending_1h": int(pending_1h or 0),
+                    "pending_1_24h": int(pending_1_24h or 0),
+                    "pending_older_24h": int(pending_older_24h or 0),
+                    "etl_last_update": etl_last_update.isoformat() if etl_last_update else None,
+                    "etl_last_log_id": int(etl_last_log_id) if etl_last_log_id is not None else None,
+                }
+        except psycopg2.Error as e:  # pragma: no cover
+            con.rollback()
+            out["errors"].append(f"v_health_proxy_db: {e}")
+
+    return out
+
+
 def fetch_pg_sync_snapshot(con, pipeline: str) -> dict[str, Any]:  # type: ignore[no-untyped-def]
     """Последняя активность витрины, курсор LOGID и MAX(egmid) в stg_egisz_outbound_documents (окно ETL)."""
     with con.cursor() as cur:

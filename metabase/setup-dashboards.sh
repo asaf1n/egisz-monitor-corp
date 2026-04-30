@@ -285,11 +285,15 @@ create_card() {
   local description="$(echo "$parsed_json" | jq -r '.description')"
   local query="$(echo "$parsed_json" | jq -r '.dataset_query.native.query')"
   local display="$(echo "$parsed_json" | jq -r '.display')"
-  local meta_json
-  meta_json="$(get_database_metadata)"
+  local meta_file="/tmp/mb_db_metadata.${APP_DB_ID:-0}.json"
+  if [ ! -s "$meta_file" ]; then
+    # Кэшируем метаданные витрины в файл — иначе передача через --argjson "$meta_json"
+    # может упереться в Linux ARG_MAX (~128KB) на крупной витрине.
+    get_database_metadata > "$meta_file"
+  fi
   local template_tags
   template_tags="$(
-    echo "$parsed_json" | jq -c --argjson meta "$meta_json" '
+    echo "$parsed_json" | jq -c --slurpfile metaArr "$meta_file" '
       # Сопоставление поля фильтра: точное имя из JSON, затем колонка с «IPS» в имени (обход расхождений UTF-8 в shell/jq).
       def resolve_field_id($meta; $tr; $fn):
         (
@@ -349,7 +353,8 @@ create_card() {
             null
           end
         );
-      (.dataset_query.native["template-tags"] // {}) as $tags
+      ($metaArr[0]) as $meta
+      | (.dataset_query.native["template-tags"] // {}) as $tags
       | (.["metabase-field-filters"] // {}) as $ff
       | if ($ff | length) == 0 then
           $tags

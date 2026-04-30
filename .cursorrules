@@ -61,5 +61,56 @@
 - **Обогащённо:** `v_egisz_transactions_enriched` / **`v_egisz_transactions_enriched_ui`**.
 - **Очередь без факта:** `stg_egisz_outbound_documents` → **`v_rpt_documents_no_response`** / **`*_ui`**.
 - **Ошибки разбора:** **`stg_parse_errors`**.
+- **Healthcheck:** `v_health_by_clinic`, `v_health_signals`, `v_health_proxy_db` (см. ниже).
 
-Полное DDL и комментарии — **`sql/001_schema.sql`**.
+Полное DDL и комментарии — **`sql/001_schema.sql`** (основная витрина) и **`sql/005_healthcheck.sql`** (healthcheck-витрина).
+
+---
+
+## Healthcheck витрина и сигналы
+
+Источник: **`sql/005_healthcheck.sql`** — три представления + UI-обёртки `*_ui`. Эти представления **независимы** от Metabase: их также читают эндпоинт `/api/healthcheck` в Config UI и unit-тесты (`tests/test_pg_warehouse.py`).
+
+| View | Что внутри |
+|------|-----------|
+| `v_health_by_clinic` | Одна строка на клинику: `facts_24h`, `errors_24h`, `unknown_24h`, `error_rate_24h`, `unknown_rate_24h`, `pending_now` (из `v_rpt_documents_no_response`), `last_seen_at`, `health_level` (`green`/`yellow`/`red`). |
+| `v_health_signals` | 5 фиксированных строк-сигналов с уровнями: `error_rate_high`, `unknown_high`, `parse_errors_burst`, `queue_red_24h`, `cursor_stale`. |
+| `v_health_proxy_db` | Сводка staging исходящих + age-buckets очереди + `etl_state.last_log_id` и его `updated_at`. |
+
+**Как читать дашборд `11 Healthcheck интеграции` (`metabase_dashboards/11_healthcheck.json`):**
+
+1. **Сигналы** (верхняя таблица) и **Сводка по уровням** (pie) — общее состояние сервиса.
+2. **Топ клиник по error rate (24ч)** + **Heatmap клиники × дни** — массовая проверка по клиникам. Heatmap полезен для поиска **долгоиграющих** проблем (vs точечного выпада).
+3. **Возраст очереди без ответа** (3 столбца: < 1ч, 1–24ч, > 24ч) — здоровье очереди исходящих.
+4. **Тренд ошибок парсинга** — состояние канала данных (`stg_parse_errors`), не вины МИС.
+5. **Сводка прокси-БД** — снимок `staging_max_egmid`, `etl_last_log_id`, `etl_last_update`. Расхождение `staging_max_egmid` ↔ `fb_max_egmid` (см. Config UI вкладка Healthcheck) подсвечивает «застой» приёма из источника.
+
+**Пороговая логика:**
+
+| Сигнал | Уровень red | Уровень yellow |
+|--------|-------------|----------------|
+| `error_rate_high` | error-rate > 10% при `facts_24h ≥ 50` | error-rate > 5% при `facts_24h ≥ 20` |
+| `unknown_high` | — | unknown-rate > 5% при `facts_24h ≥ 20` |
+| `parse_errors_burst` | > 10 строк в `stg_parse_errors` за 1 час | > 0 строк за 1 час |
+| `queue_red_24h` | очередь > 24ч больше 50 документов | очередь > 24ч больше 10 документов |
+| `cursor_stale` | `etl_state.updated_at` старше 6 часов или `NULL` | старше 2 часов |
+
+**Изменение порогов:** редактировать CTE `params` в `v_health_signals` (`sql/005_healthcheck.sql`), затем `apply-schema` (или дождаться следующего `run_sync`). Логика и обоснование в **`docs/INTEGRATION_AUDIT.md` §3**.
+
+**Внешний контракт `/api/healthcheck`** (Flask, `egisz_monitor_corp/config_app.py`):
+
+```json
+{
+  "ok": true,
+  "generated_at": "2026-04-30T10:15:00+00:00",
+  "level_summary": {"red": 1, "yellow": 0, "green": 4},
+  "signals":      [{"code": "error_rate_high", "level": "red", "value": 14.5, "value_unit": "%", "denominator": 320, "hint": "..."}],
+  "by_clinic_top": [{"jid": 12, "clinic_name": "...", "facts_24h": 320, "error_rate_24h": 14.5, "pending_now": 5, "health_level": "red"}],
+  "proxy_db":     {"stg_outbound_total": 4521, "fb_max_egmid": 29261989, "staging_max_egmid": 29261980, "egmid_lag": 9, "pending_older_24h": 19, "etl_last_log_id": 18000123},
+  "errors": []
+}
+```
+
+При недоступной PostgreSQL: `{"ok": false, "errors": ["PostgreSQL недоступен: ..."]}` со статусом 200 (graceful degrade — UI показывает заметку, не падает).
+
+**Куда смотреть при сигнале:** см. таблицу триажа в **`docs/INTEGRATION_AUDIT.md` §3.7**.

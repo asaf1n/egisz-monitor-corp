@@ -154,7 +154,7 @@ def run_sync(
 
     try:
         if pg is not None:
-            apply_sql_files(pg, "001_schema.sql", "002_etl_state.sql")
+            apply_sql_files(pg, "001_schema.sql", "002_etl_state.sql", "005_healthcheck.sql")
             ensure_etl_state_table(pg)
 
         last_id = 0

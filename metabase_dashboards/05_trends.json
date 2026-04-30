@@ -1,6 +1,6 @@
 {
   "name": "05 Тренды и динамика",
-  "description": "Анализ нагрузки. «Тренд»-карточки: [field filter](https://www.metabase.com/docs/v0.60/questions/native-editor/field-filters) по **«День (тренд)»** (календарный критерий в витрине). «Объём по часам» — без глобального date filter (72 ч от max «Обработано»).",
+  "description": "Анализ нагрузки. «Тренд»-карточки: [field filter](https://www.metabase.com/docs/v0.60/questions/native-editor/field-filters) по **«День (тренд)»** (календарный критерий в витрине). «Объём по часам» — без глобального date filter (72 ч от max «Обработано»). Поля витрины: `registration_date` (для трендов МО) и `semd_creation_at` (для распределения по типам СЭМД). Сигналы по доле ошибок и unknown — на дашборде **«11 Healthcheck интеграции»**.",
   "width": "full",
   "parameters": [
     {

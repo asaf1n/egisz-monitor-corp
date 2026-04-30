@@ -1,6 +1,6 @@
 {
   "name": "01 Оперативный мониторинг",
-  "description": "Контроль текущего состояния. Период задаётся [field filter](https://www.metabase.com/docs/v0.60/questions/native-editor/field-filters) `dwh_date` по **«Обработано IPS»**; при необходимости — фильтр по коду СЭМД и JID клиники (v0.60+). Slug фильтров `top_*_filter` совпадают с query string в URL (закладки и шаринг).",
+  "description": "Контроль текущего состояния. Период задаётся [field filter](https://www.metabase.com/docs/v0.60/questions/native-editor/field-filters) `dwh_date` по **«Обработано IPS»** (актуальные поля витрины: `registration_date`, `semd_creation_at`, `processed_at`); при необходимости — фильтр по коду СЭМД и JID клиники (v0.60+). Slug фильтров `top_*_filter` совпадают с query string в URL (закладки и шаринг). Сигналы здоровья сервиса (error_rate, queue, parse_errors) — на дашборде **«11 Healthcheck интеграции»**.",
   "parameters": [
     {
       "id": "a1b2c3d4-e5f6-4789-a01b-01operational0",

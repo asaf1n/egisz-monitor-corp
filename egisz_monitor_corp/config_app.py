@@ -17,7 +17,12 @@ from egisz_monitor_corp.config_loader import (
 )
 from egisz_monitor_corp.fb_client import fetch_all
 from egisz_monitor_corp.fb_client import fetch_firebird_source_peaks
-from egisz_monitor_corp.pg_warehouse import connect_pg, fetch_pg_sync_snapshot, test_pg_connection
+from egisz_monitor_corp.pg_warehouse import (
+    connect_pg,
+    fetch_healthcheck_snapshot,
+    fetch_pg_sync_snapshot,
+    test_pg_connection,
+)
 
 PAGE = """
 <!doctype html>
@@ -36,30 +41,79 @@ PAGE = """
       padding-left: 0.8125rem;
       padding-right: 0.8125rem;
     }
-    pre::-webkit-scrollbar { width: 8px; height: 8px; }
-    pre::-webkit-scrollbar-track { background: #0F1522; }
-    pre::-webkit-scrollbar-thumb { background: #2D3F5E; border-radius: 4px; }
-    pre::-webkit-scrollbar-thumb:hover { background: #3E5A85; }
+    .fixed-scroll::-webkit-scrollbar, pre::-webkit-scrollbar { width: 8px; height: 8px; }
+    .fixed-scroll::-webkit-scrollbar-track, pre::-webkit-scrollbar-track { background: #0F1522; }
+    .fixed-scroll::-webkit-scrollbar-thumb, pre::-webkit-scrollbar-thumb { background: #2D3F5E; border-radius: 4px; }
+    .fixed-scroll::-webkit-scrollbar-thumb:hover, pre::-webkit-scrollbar-thumb:hover { background: #3E5A85; }
+    #syncBanner.sync-theme-blue {
+      border-color: rgba(80, 158, 227, 0.85);
+      background: rgba(12, 74, 110, 0.58);
+    }
+    #syncBanner.sync-theme-green {
+      border-color: rgba(6, 95, 70, 0.8);
+      background: rgba(6, 78, 59, 0.42);
+    }
+    #syncBanner.sync-theme-red {
+      border-color: rgba(159, 18, 57, 0.85);
+      background: rgba(136, 19, 55, 0.44);
+    }
+    #syncBanner.sync-theme-orange {
+      border-color: rgba(194, 65, 12, 0.9);
+      background: rgba(124, 45, 18, 0.5);
+    }
+    #syncBannerProgressFill {
+      background: rgba(34, 211, 238, 0.72);
+      border-right: 1px solid rgba(186, 230, 253, 0.9);
+    }
+    #connStatusProgressFill {
+      background: rgba(34, 211, 238, 0.72);
+      border-right: 1px solid rgba(186, 230, 253, 0.9);
+    }
     #syncBannerProgressFill.sync-progress-indeterminate {
-      width: 36% !important;
-      animation: sync-bar-pulse 1.05s ease-in-out infinite alternate;
+      width: 32% !important;
+      animation: sync-bar-indeterminate 1.15s ease-in-out infinite alternate;
     }
-    @keyframes sync-bar-pulse {
-      from { opacity: 0.4; }
-      to { opacity: 1; }
+    @keyframes sync-bar-indeterminate {
+      from { opacity: 0.45; transform: translateX(-15%); }
+      to { opacity: 1; transform: translateX(225%); }
     }
+    .snap-tab-btn {
+      border-color: #1B2940;
+      background: #0F1522;
+      color: #6B7280;
+    }
+    .snap-tab-btn.is-active {
+      border-color: #509EE3;
+      background: #1B2940;
+      color: #E5F6FF;
+    }
+    .snap-tab-panel.is-hidden { display: none; }
+    .hc-row-red { color: #FECDD3; }
+    .hc-row-yellow { color: #FDE68A; }
+    .hc-row-green { color: #A7F3D0; }
+    .hc-row { display: flex; align-items: baseline; gap: 0.4rem; min-width: 0; }
+    .hc-row .hc-bullet {
+      flex-shrink: 0;
+      width: 0.55rem;
+      height: 0.55rem;
+      border-radius: 9999px;
+      margin-top: 0.15rem;
+    }
+    .hc-bullet-red { background: rgba(244, 63, 94, 0.85); box-shadow: 0 0 0 1px rgba(244, 63, 94, 0.3); }
+    .hc-bullet-yellow { background: rgba(245, 158, 11, 0.85); box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.3); }
+    .hc-bullet-green { background: rgba(16, 185, 129, 0.85); box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.3); }
   </style>
 </head>
-<body class="min-h-screen bg-[#121826] text-white">
-  <div class="w-full max-w-[min(88rem,calc(100vw-2rem))] mx-auto px-[clamp(1rem,4vw,2.5rem)] py-3 sm:py-5">
-    <nav class="flex items-center justify-center gap-3 text-xs mb-3">
+<body class="min-h-screen lg:h-screen bg-[#121826] text-white lg:overflow-hidden">
+  <div class="w-full max-w-[min(88rem,calc(100vw-2rem))] mx-auto px-[clamp(1rem,4vw,2.5rem)] py-3 sm:py-5 lg:h-screen lg:flex lg:flex-col lg:py-3">
+    <nav class="flex shrink-0 items-center justify-center gap-3 text-xs mb-3">
       <span class="text-[#509EE3]">FB2PG Sync</span>
       <span class="text-[#4B5563]">|</span>
       <a href="/" class="text-[#4B5563] transition hover:text-[#509EE3]">Обновить страницу</a>
     </nav>
 
-    <section class="rounded-xl bg-[#0F1522] px-4 py-4 sm:px-6 lg:px-8 sm:py-5 shadow-lg border border-[#1B2940]">
-      <div class="mb-4 border-b border-[#1B2940] pb-3">
+    <section class="rounded-xl bg-[#0F1522] px-4 py-4 sm:px-6 lg:px-8 sm:py-5 lg:py-4 shadow-lg border border-[#1B2940] lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
+      <div class="mb-4 lg:mb-3 border-b border-[#1B2940] pb-3 lg:pb-2 shrink-0">
         <h1 class="text-base sm:text-lg font-semibold text-white">FB2PG Sync Configuration</h1>
         <p class="mt-0.5 text-xs sm:text-sm text-[#9CA3AF]">
           Файл: <code class="text-[#509EE3]">{{ path }}</code><br/>
@@ -67,9 +121,9 @@ PAGE = """
         </p>
       </div>
 
-      <form id="configForm" class="space-y-4" action="#" onsubmit="return false;">
+      <form id="configForm" class="space-y-4 lg:space-y-0 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:gap-3" action="#" onsubmit="return false;">
 
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-x-8 lg:gap-y-0 lg:items-start xl:gap-x-10">
+        <div class="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-x-8 lg:gap-y-0 lg:items-start xl:gap-x-10 lg:shrink-0">
         <!-- Firebird Section -->
         <div class="min-w-0 lg:pr-6 lg:border-r lg:border-[#1B2940]">
           <div class="mb-2">
@@ -149,11 +203,15 @@ PAGE = """
         </div>
         </div>
 
-        <div id="connStatusStrip" class="rounded-md border border-transparent bg-transparent px-3 py-2 min-h-[2.75rem] flex items-center justify-center text-center text-xs sm:text-sm font-mono transition-[background-color,border-color,color] duration-150" role="status" aria-live="polite">
-          <span id="connStatusText" class="text-inherit leading-snug break-words max-w-[min(100%,64rem)]"></span>
+        <div id="connStatusStrip" class="relative rounded-md border border-transparent bg-transparent min-h-[2.75rem] lg:h-[2.75rem] overflow-hidden text-xs sm:text-sm font-mono transition-[background-color,border-color,color] duration-150" role="status" aria-live="polite">
+          <div id="connStatusProgressFill" class="absolute inset-y-0 left-0 top-0 transition-[width] duration-300 ease-out" style="width:0%"></div>
+          <div class="relative z-[1] flex min-h-[2.75rem] items-center justify-center gap-3 px-3 py-2 text-center">
+            <span id="connStatusText" class="text-inherit leading-snug break-words max-w-[min(100%,64rem)]"></span>
+            <span id="connStatusPct" class="hidden shrink-0 font-mono tabular-nums text-inherit min-w-[3rem] text-right"></span>
+          </div>
         </div>
 
-        <div class="pt-3 grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 border-t border-[#1B2940]">
+        <div class="pt-3 lg:pt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 border-t border-[#1B2940] lg:shrink-0">
           <button type="button" id="btnSaveYaml" class="inline-flex min-h-[2.875rem] min-w-0 w-full sm:min-w-[140px] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3.5 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white">
             Сохранить в YAML
           </button>
@@ -165,18 +223,12 @@ PAGE = """
           </button>
         </div>
 
-        <div id="syncBanner" class="relative mt-2 overflow-hidden rounded-lg border border-[#1B2940] bg-[#0B1120] transition-[border-color,background-color] duration-200">
-          <div id="syncBannerProgressFill" class="absolute inset-y-0 left-0 top-0 rounded-l-lg bg-[#509EE3]/40 transition-[width] duration-300 ease-out" style="width:0%"></div>
-          <div class="relative z-[1] flex items-center justify-between gap-3 px-3 py-2.5 min-h-[2.875rem]">
-            <span id="syncBannerTitle" class="text-[11px] uppercase tracking-[0.16em] font-semibold text-[#509EE3]">Синхронизация</span>
-            <span id="syncBannerPct" class="font-mono text-sm text-[#E5E7EB] tabular-nums shrink-0 min-w-[3rem] text-right"></span>
-          </div>
-        </div>
-        <p id="syncProgressMeta" class="mt-2 whitespace-pre-line font-mono text-[10px] text-[#9CA3AF] leading-relaxed min-h-[2.25rem] transition-colors duration-200"></p>
-
-        <div class="pt-4 border-t border-[#1B2940] flex flex-col gap-4">
-          <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 lg:gap-8">
-            <div class="min-w-0 flex-1">
+        <div class="pt-4 lg:pt-3 border-t border-[#1B2940] flex flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(18rem,22rem)_minmax(18rem,1fr)] lg:gap-4 lg:flex-1 lg:min-h-0">
+          <div class="flex min-w-0 flex-col gap-3 lg:min-h-0">
+            <button type="button" id="btnSync" class="inline-flex w-full min-h-[2.875rem] items-center justify-center rounded-md border border-[#F59F36] bg-[#F59F36] px-3.5 py-2.5 font-mono text-sm text-[#121826] transition hover:bg-[#FFB95D]">
+              Запустить синхронизацию
+            </button>
+            <div class="min-w-0">
               <div class="mb-2">
                 <h2 class="text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">ETL Configuration</h2>
               </div>
@@ -196,56 +248,78 @@ PAGE = """
                 <span class="text-xs text-[#9CA3AF]">Полный скан</span>
               </div>
             </div>
-            <div class="shrink-0 flex flex-col items-stretch lg:items-end gap-2 lg:pb-0.5">
-              <button type="button" id="btnSync" class="inline-flex w-full lg:w-auto min-h-[2.875rem] min-w-[min(100%,12.5rem)] lg:min-w-[200px] items-center justify-center rounded-md border border-[#F59F36] bg-[#F59F36] px-3.5 py-2.5 font-mono text-sm text-[#121826] transition hover:bg-[#FFB95D]">
-                Запустить синхронизацию
-              </button>
-            </div>
           </div>
 
-          <div class="w-full max-w-sm rounded-lg border border-[#2D3F5E] bg-[#121826] px-3 py-3 flex flex-col gap-2">
-            <h2 class="text-[10px] uppercase tracking-[0.14em] text-[#509EE3] leading-tight">Последние значения</h2>
-            <p id="pgSnapshotHint" class="text-[11px] text-[#6B7280] leading-snug">Витрина и курсор в PostgreSQL; EGMID и MODIFYDATE лицензий — MAX() в Firebird по YAML (при сбое — см. текст).</p>
-            <div class="space-y-2 text-sm leading-relaxed">
-              <div class="flex items-baseline gap-2 min-w-0 py-0.5">
-                <span class="text-[#9CA3AF] shrink-0 font-medium text-[11px]">Дата:</span>
-                <code id="pgSnapSyncAt" class="min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-xs" data-raw="" title="">—</code>
-                <button type="button" class="pg-snap-copy shrink-0 inline-flex items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-1 text-[#509EE3] hover:bg-[#1B2940]" data-copy="pgSnapSyncAt" title="Копировать" aria-label="Копировать">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
-                </button>
-              </div>
-              <div class="flex items-baseline gap-2 min-w-0 py-0.5">
-                <span class="text-[#9CA3AF] shrink-0 font-medium text-[11px]">LOGID:</span>
-                <code id="pgSnapLogId" class="min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-xs" data-raw="" title="">—</code>
-                <button type="button" class="pg-snap-copy shrink-0 inline-flex items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-1 text-[#509EE3] hover:bg-[#1B2940]" data-copy="pgSnapLogId" title="Копировать" aria-label="Копировать">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
-                </button>
-              </div>
-              <div class="flex items-baseline gap-2 min-w-0 py-0.5">
-                <span class="text-[#9CA3AF] shrink-0 font-medium text-[11px]">EGMID:</span>
-                <code id="pgSnapEgmid" class="min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-xs" data-raw="" title="">—</code>
-                <button type="button" class="pg-snap-copy shrink-0 inline-flex items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-1 text-[#509EE3] hover:bg-[#1B2940]" data-copy="pgSnapEgmid" title="Копировать" aria-label="Копировать">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
-                </button>
-              </div>
-              <div class="flex items-baseline gap-2 min-w-0 py-0.5">
-                <span class="text-[#9CA3AF] shrink-0 font-medium text-[11px]">LICENSES.MODIFYDATE:</span>
-                <code id="pgSnapLicMd" class="min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-xs" data-raw="" title="">—</code>
-                <button type="button" class="pg-snap-copy shrink-0 inline-flex items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-1 text-[#509EE3] hover:bg-[#1B2940]" data-copy="pgSnapLicMd" title="Копировать" aria-label="Копировать">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
-                </button>
-              </div>
+          <div class="w-full rounded-lg border border-[#2D3F5E] bg-[#121826] px-3 py-3 lg:py-2 flex shrink-0 flex-col gap-2 lg:gap-1.5 lg:h-full lg:max-h-none lg:min-h-0 lg:overflow-y-auto fixed-scroll">
+            <div class="flex items-center gap-1.5 shrink-0">
+              <button type="button" id="tabBtnSnapshot" class="snap-tab-btn flex-1 rounded-md border px-2 py-1 text-[10px] uppercase tracking-[0.14em] font-semibold transition" data-tab="snapshot">Snapshot</button>
+              <button type="button" id="tabBtnHealth" class="snap-tab-btn flex-1 rounded-md border px-2 py-1 text-[10px] uppercase tracking-[0.14em] font-semibold transition" data-tab="health">Healthcheck</button>
             </div>
+
+            <section id="tabSnapshot" class="snap-tab-panel flex flex-col gap-2 lg:gap-1.5">
+              <p id="pgSnapshotHint" class="text-[11px] text-[#6B7280] leading-snug">Витрина и курсор в PostgreSQL; EGMID и MODIFYDATE лицензий — MAX() в Firebird по YAML (при сбое — см. текст).</p>
+              <div class="space-y-2 text-sm leading-relaxed">
+                <div class="flex items-baseline gap-2 min-w-0 py-0.5">
+                  <span class="text-[#9CA3AF] shrink-0 font-medium text-[11px]">Дата:</span>
+                  <code id="pgSnapSyncAt" class="min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-xs" data-raw="" title="">—</code>
+                  <button type="button" class="pg-snap-copy shrink-0 inline-flex items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-1 text-[#509EE3] hover:bg-[#1B2940]" data-copy="pgSnapSyncAt" title="Копировать" aria-label="Копировать">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
+                  </button>
+                </div>
+                <div class="flex items-baseline gap-2 min-w-0 py-0.5">
+                  <span class="text-[#9CA3AF] shrink-0 font-medium text-[11px]">LOGID:</span>
+                  <code id="pgSnapLogId" class="min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-xs" data-raw="" title="">—</code>
+                  <button type="button" class="pg-snap-copy shrink-0 inline-flex items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-1 text-[#509EE3] hover:bg-[#1B2940]" data-copy="pgSnapLogId" title="Копировать" aria-label="Копировать">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
+                  </button>
+                </div>
+                <div class="flex items-baseline gap-2 min-w-0 py-0.5">
+                  <span class="text-[#9CA3AF] shrink-0 font-medium text-[11px]">EGMID:</span>
+                  <code id="pgSnapEgmid" class="min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-xs" data-raw="" title="">—</code>
+                  <button type="button" class="pg-snap-copy shrink-0 inline-flex items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-1 text-[#509EE3] hover:bg-[#1B2940]" data-copy="pgSnapEgmid" title="Копировать" aria-label="Копировать">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
+                  </button>
+                </div>
+                <div class="flex items-baseline gap-2 min-w-0 py-0.5">
+                  <span class="text-[#9CA3AF] shrink-0 font-medium text-[11px]">LICENSES.MODIFYDATE:</span>
+                  <code id="pgSnapLicMd" class="min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-xs" data-raw="" title="">—</code>
+                  <button type="button" class="pg-snap-copy shrink-0 inline-flex items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-1 text-[#509EE3] hover:bg-[#1B2940]" data-copy="pgSnapLicMd" title="Копировать" aria-label="Копировать">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            <section id="tabHealth" class="snap-tab-panel hidden flex-col gap-2.5 lg:gap-2">
+              <p id="hcHint" class="text-[11px] text-[#6B7280] leading-snug">Сигналы по витрине + топ-3 проблемные клиники + сводка прокси-БД (см. <code class="text-[#509EE3]">v_health_signals</code>, <code class="text-[#509EE3]">v_health_by_clinic</code>).</p>
+              <div id="hcLevelSummary" class="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.14em]">
+                <span class="rounded-full px-2 py-0.5 border border-rose-700/60 bg-rose-900/20 text-rose-200" data-level="red">red <span data-count="red">0</span></span>
+                <span class="rounded-full px-2 py-0.5 border border-amber-600/60 bg-amber-900/20 text-amber-200" data-level="yellow">yellow <span data-count="yellow">0</span></span>
+                <span class="rounded-full px-2 py-0.5 border border-emerald-700/60 bg-emerald-900/20 text-emerald-300" data-level="green">green <span data-count="green">0</span></span>
+              </div>
+              <div>
+                <h3 class="text-[10px] uppercase tracking-[0.14em] text-[#509EE3] mb-1">Сигналы</h3>
+                <ul id="hcSignals" class="space-y-1.5 text-[11px] leading-snug"></ul>
+              </div>
+              <div>
+                <h3 class="text-[10px] uppercase tracking-[0.14em] text-[#509EE3] mb-1">Топ клиник по проблемам</h3>
+                <ul id="hcClinics" class="space-y-1.5 text-[11px] leading-snug"></ul>
+              </div>
+              <div>
+                <h3 class="text-[10px] uppercase tracking-[0.14em] text-[#509EE3] mb-1">Прокси-БД и курсор</h3>
+                <ul id="hcProxyDb" class="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] leading-snug"></ul>
+              </div>
+            </section>
           </div>
 
-          <div class="rounded-md bg-[#0B1120] px-3 py-2 text-sm text-[#93A1B6] border border-[#1B2940] min-h-0 min-w-0">
+          <div class="rounded-md bg-[#0B1120] px-3 py-2 text-sm text-[#93A1B6] border border-[#1B2940] min-h-0 min-w-0 lg:flex lg:flex-1 lg:flex-col">
             <div class="mb-1 flex items-center justify-between gap-2 min-w-0">
               <div class="text-[10px] uppercase tracking-[0.16em] text-[#509EE3]">system log</div>
               <button type="button" class="pg-snap-copy shrink-0 inline-flex items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-1 text-[#509EE3] hover:bg-[#1B2940]" data-copy="syncStatus" title="Копировать лог" aria-label="Копировать лог">
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
               </button>
             </div>
-            <pre id="syncStatus" class="whitespace-pre-wrap font-mono text-[11px] text-[#D1D5DB] min-h-[2.25rem] max-h-28 lg:max-h-40 overflow-y-auto leading-relaxed"></pre>
+            <pre id="syncStatus" class="whitespace-pre-wrap font-mono text-[11px] text-[#D1D5DB] min-h-[2.25rem] max-h-28 lg:max-h-none lg:flex-1 overflow-y-auto leading-relaxed"></pre>
           </div>
         </div>
       </form>
@@ -256,57 +330,95 @@ PAGE = """
   let lastSyncJson = { running: false, error: null, message: '', last_stats: null };
   let lastUiMessage = { ok: true, text: '' };
   const STRIP_BASE =
-    'rounded-md border px-3 py-2 min-h-[2.75rem] flex items-center justify-center text-center text-xs sm:text-sm font-mono transition-[background-color,border-color,color] duration-150';
+    'relative rounded-md border min-h-[2.75rem] lg:h-[2.75rem] overflow-hidden text-xs sm:text-sm font-mono transition-[background-color,border-color,color] duration-150';
+  function syncProgressPercent(p) {
+    if (!p || typeof p !== 'object') return null;
+    const phase = p.phase || '';
+    if (phase === 'outbound_fetch' || phase === 'outbound_parse' || phase === 'outbound_postgres' || phase === 'outbound_done') {
+      const total = Number(p.outbound_total) || 0;
+      const loaded = Number(p.outbound_loaded) || 0;
+      if (phase === 'outbound_done' || (phase === 'outbound_postgres' && total === 0)) return 100;
+      if (total > 0) return Math.min(100, Math.round((loaded / total) * 100));
+      return 0;
+    }
+    if (phase === 'counting') return 14;
+    const totalRows = Number(p.total_rows);
+    const loadedRows = Number(p.loaded_rows) || 0;
+    if (Number.isFinite(totalRows) && totalRows > 0) return Math.min(100, Math.round((loadedRows / totalRows) * 100));
+    if (Number.isFinite(totalRows) && totalRows === 0) return phase === 'exchangelog_done' ? 100 : 0;
+    return null;
+  }
   function refreshConnStatusStrip() {
     const wrap = document.getElementById('connStatusStrip');
     const textEl = document.getElementById('connStatusText');
-    if (!wrap || !textEl) return;
+    const fill = document.getElementById('connStatusProgressFill');
+    const pctEl = document.getElementById('connStatusPct');
+    if (!wrap || !textEl || !fill || !pctEl) return;
     const j = lastSyncJson;
     wrap.className = STRIP_BASE;
-    textEl.className = 'leading-snug break-words max-w-[min(100%,64rem)]';
+    textEl.className = 'text-inherit leading-snug break-words max-w-[min(100%,64rem)]';
+    fill.style.width = '0%';
+    pctEl.className = 'hidden shrink-0 font-mono tabular-nums text-inherit min-w-[3rem] text-right';
+    pctEl.textContent = '';
     if (j.running) {
-      wrap.classList.add('border-transparent', 'bg-transparent');
-      textEl.textContent = '';
-      textEl.classList.add('text-transparent');
+      const p = j.progress;
+      const phase = p && typeof p === 'object' ? (p.phase || '') : '';
+      const pct = syncProgressPercent(p);
+      wrap.classList.add('border-[#509EE3]/85', 'bg-[#0C4A6E]/60', 'text-[#E5F6FF]');
+      fill.style.width = pct == null ? '32%' : pct + '%';
+      textEl.textContent = 'Синхронизация' + (phase ? ': ' + (PHASE_RU[phase] || phase) : ': подготовка');
+      pctEl.className = 'shrink-0 font-mono tabular-nums text-inherit min-w-[3rem] text-right';
+      pctEl.textContent = pct == null ? '…' : pct + '%';
       return;
     }
     if (j.error) {
-      wrap.classList.add('border-transparent', 'bg-transparent');
-      textEl.textContent = '';
-      textEl.classList.add('text-transparent');
+      wrap.classList.add('border-orange-700/80', 'bg-orange-900/30', 'text-orange-200');
+      textEl.textContent = 'Ошибка синхронизации ETL: ' + String(j.error);
+      pctEl.className = 'shrink-0 font-mono tabular-nums text-inherit min-w-[3rem] text-right';
+      pctEl.textContent = '!';
       return;
     }
     if (lastUiMessage.text) {
       if (lastUiMessage.ok) {
         wrap.classList.add('border-emerald-800/80', 'bg-emerald-900/25', 'text-emerald-400');
       } else {
-        wrap.classList.add('border-rose-800/80', 'bg-rose-900/25', 'text-rose-400');
+        wrap.classList.add('border-rose-800/80', 'bg-rose-900/30', 'text-rose-300');
       }
       textEl.textContent = lastUiMessage.text;
       return;
     }
-    wrap.classList.add('border-transparent', 'bg-transparent');
-    textEl.textContent = '';
-    textEl.classList.add('text-transparent');
+    if (j.last_stats) {
+      wrap.classList.add('border-emerald-800/80', 'bg-emerald-900/25', 'text-emerald-400');
+      textEl.textContent = (j.message && String(j.message).trim()) ? String(j.message).trim() : 'Синхронизация завершена.';
+      return;
+    }
+    wrap.classList.add('border-transparent', 'bg-transparent', 'text-[#9CA3AF]');
+    textEl.textContent = 'Готов к работе';
   }
   const PHASE_RU = {
-    counting: 'Подсчёт строк в Firebird…',
-    exchangelog_ready: 'К журналу EXCHANGELOG',
-    fetch_page: 'Загрузка страницы из Firebird…',
-    parsing: 'Парсинг SOAP / журнал…',
-    page_done: 'Сохранение страницы в PostgreSQL…',
-    exchangelog_done: 'Журнал обработан',
-    outbound_firebird: 'Исходящие: чтение Firebird…',
-    outbound_fetch: 'Исходящие сообщения (EGISZ_MESSAGES)…',
-    outbound_parse: 'Разбор исходящих…',
-    outbound_postgres: 'Исходящие: запись в PostgreSQL…',
-    outbound_done: 'Исходящие: готово',
+    counting: 'Подсчёт строк журнала EXCHANGELOG в Firebird (для прогресса)…',
+    exchangelog_ready: 'К журналу EXCHANGELOG: подготовка пагинации',
+    fetch_page: 'Загрузка страницы EXCHANGELOG из Firebird…',
+    parsing: 'Парсинг SOAP/MSGTEXT и обогащение журнала…',
+    page_done: 'UPSERT фактов и измерений в PostgreSQL — страница сохранена',
+    exchangelog_done: 'Журнал обработан, курсор LOGID обновлён',
+    outbound_firebird: 'Исходящие EGISZ_MESSAGES: чтение из Firebird…',
+    outbound_fetch: 'Исходящие сообщения (EGISZ_MESSAGES): выборка по окну sync_window_days…',
+    outbound_parse: 'Разбор исходящих: дедуп DOCUMENTID, фильтр тестовых клиник…',
+    outbound_postgres: 'Исходящие: запись stg_egisz_outbound_documents в PostgreSQL…',
+    outbound_done: 'Исходящие: snapshot staging обновлён',
   };
-  const SYNC_BANNER_BASE = 'relative mt-2 overflow-hidden rounded-lg transition-[border-color,background-color] duration-200 ';
-  const SYNC_FILL_BLUE = 'absolute inset-y-0 left-0 top-0 rounded-l-lg bg-[#509EE3]/40 transition-[width] duration-300 ease-out';
-  const SYNC_FILL_ORANGE = 'absolute inset-y-0 left-0 top-0 rounded-l-lg bg-[#F59F36]/45 transition-[width] duration-300 ease-out';
+  const SYNC_BANNER_BASE = 'relative mt-2 lg:mt-0 overflow-hidden rounded-lg border transition-[border-color,background-color] duration-200 lg:shrink-0 ';
+  const SYNC_FILL_CURRENT = 'absolute inset-y-0 left-0 top-0 rounded-l-lg transition-[width] duration-300 ease-out';
   const SYNC_TITLE_BLUE = 'text-[11px] uppercase tracking-[0.16em] font-semibold text-[#509EE3]';
-  const SYNC_TITLE_ORANGE = 'text-[11px] uppercase tracking-[0.16em] font-semibold text-orange-300';
+  const SYNC_TITLE_GREEN = 'text-[11px] uppercase tracking-[0.16em] font-semibold text-emerald-200';
+  const SYNC_TITLE_RED = 'text-[11px] uppercase tracking-[0.16em] font-semibold text-rose-100';
+  const SYNC_TITLE_ORANGE = 'text-[11px] uppercase tracking-[0.16em] font-semibold text-orange-100';
+  const SYNC_META_BASE = 'mt-2 lg:mt-0 whitespace-pre-line font-mono text-[10px] leading-relaxed min-h-[2.25rem] lg:h-[4.75rem] lg:overflow-y-auto fixed-scroll transition-colors duration-200 ';
+  function setProgressTheme(banner, theme) {
+    if (!banner) return;
+    banner.className = SYNC_BANNER_BASE + 'sync-theme-' + theme;
+  }
   function setBarIndeterminate(bar, on) {
     if (!bar) return;
     if (on) bar.classList.add('sync-progress-indeterminate');
@@ -321,15 +433,15 @@ PAGE = """
     const p = j.progress;
 
     if (!banner || !titleEl || !fill || !pctEl || !meta) return;
+    fill.className = SYNC_FILL_CURRENT;
 
     if (!j.running && j.error) {
-      banner.className = SYNC_BANNER_BASE + 'border border-orange-700/60 bg-[#1c1308]';
+      setProgressTheme(banner, 'orange');
       titleEl.className = SYNC_TITLE_ORANGE;
       titleEl.textContent = 'Ошибка';
-      fill.className = SYNC_FILL_ORANGE;
       fill.style.width = '100%';
       setBarIndeterminate(fill, false);
-      pctEl.textContent = '';
+      pctEl.textContent = '!';
       const errLine = j.error ? String(j.error) : '';
       const msgLine = (j.message && String(j.message).trim()) ? String(j.message).trim() : '';
       let metaBody = '';
@@ -337,30 +449,41 @@ PAGE = """
       else if (msgLine && errLine) metaBody = msgLine + String.fromCharCode(10) + errLine;
       else metaBody = msgLine || errLine || 'Синхронизация завершилась с ошибкой.';
       meta.textContent = metaBody;
-      meta.className = 'mt-2 whitespace-pre-line font-mono text-[10px] text-orange-200/95 leading-relaxed min-h-[2.25rem] transition-colors duration-200';
+      meta.className = SYNC_META_BASE + 'text-orange-200/95';
       return;
     }
 
     if (!j.running) {
-      banner.className = SYNC_BANNER_BASE + 'border border-[#1B2940] bg-[#0B1120]';
+      if (j.last_stats) {
+        setProgressTheme(banner, 'green');
+        titleEl.className = SYNC_TITLE_GREEN;
+        titleEl.textContent = 'Готово';
+        fill.style.width = '100%';
+        setBarIndeterminate(fill, false);
+        pctEl.textContent = '100%';
+        meta.textContent = (j.message && String(j.message).trim()) ? String(j.message).trim() : 'Синхронизация завершена.';
+        meta.className = SYNC_META_BASE + 'text-emerald-100';
+        return;
+      }
+      setProgressTheme(banner, 'blue');
       titleEl.className = SYNC_TITLE_BLUE;
       titleEl.textContent = 'Синхронизация';
-      fill.className = SYNC_FILL_BLUE;
       fill.style.width = '0%';
       setBarIndeterminate(fill, false);
       pctEl.textContent = '';
       meta.textContent = '';
-      meta.className = 'mt-2 whitespace-pre-line font-mono text-[10px] text-[#9CA3AF] leading-relaxed min-h-[2.25rem] transition-colors duration-200';
+      meta.className = SYNC_META_BASE + 'text-[#9CA3AF]';
       return;
     }
 
-    banner.className = SYNC_BANNER_BASE + 'border border-[#2D4A7A]/70 bg-[#0B1120]';
+    setProgressTheme(banner, 'blue');
     titleEl.className = SYNC_TITLE_BLUE;
     titleEl.textContent = 'Синхронизация';
-    fill.className = SYNC_FILL_BLUE;
-    meta.className = 'mt-2 whitespace-pre-line font-mono text-[10px] text-[#9CA3AF] leading-relaxed min-h-[2.25rem] transition-colors duration-200';
+    meta.className = SYNC_META_BASE + 'text-[#9CA3AF]';
 
     if (!p || typeof p !== 'object') {
+      setProgressTheme(banner, 'orange');
+      titleEl.className = SYNC_TITLE_ORANGE;
       fill.style.width = '';
       setBarIndeterminate(fill, true);
       pctEl.textContent = '…';
@@ -393,6 +516,8 @@ PAGE = """
     }
 
     if (phase === 'outbound_firebird') {
+      setProgressTheme(banner, 'orange');
+      titleEl.className = SYNC_TITLE_ORANGE;
       fill.style.width = '';
       setBarIndeterminate(fill, true);
       pctEl.textContent = '…';
@@ -566,6 +691,168 @@ PAGE = """
       clearSnap();
     }
   }
+  let activeSnapTab = 'snapshot';
+  function setSnapTab(tab) {
+    activeSnapTab = (tab === 'health') ? 'health' : 'snapshot';
+    document.querySelectorAll('.snap-tab-btn').forEach(function (btn) {
+      const tabAttr = btn.getAttribute('data-tab');
+      if (tabAttr === activeSnapTab) btn.classList.add('is-active');
+      else btn.classList.remove('is-active');
+    });
+    const snapPanel = document.getElementById('tabSnapshot');
+    const healthPanel = document.getElementById('tabHealth');
+    if (snapPanel) snapPanel.classList.toggle('hidden', activeSnapTab !== 'snapshot');
+    if (healthPanel) healthPanel.classList.toggle('hidden', activeSnapTab !== 'health');
+  }
+  document.querySelectorAll('.snap-tab-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      const tabAttr = btn.getAttribute('data-tab') || 'snapshot';
+      setSnapTab(tabAttr);
+      if (tabAttr === 'health') pollHealthcheck();
+    });
+  });
+  setSnapTab('snapshot');
+
+  function fmtPctOrNum(value, unit) {
+    if (value == null || Number.isNaN(Number(value))) return '—';
+    if (unit === '%') return Number(value).toFixed(1) + '%';
+    if (unit === 'sec_since_update') {
+      const sec = Math.max(0, Math.round(Number(value)));
+      if (sec < 60) return sec + ' c';
+      if (sec < 3600) return Math.round(sec / 60) + ' мин';
+      return Math.round(sec / 3600) + ' ч';
+    }
+    return String(value);
+  }
+  function fmtNum(value) {
+    if (value == null || Number.isNaN(Number(value))) return '—';
+    return Number(value).toLocaleString('ru-RU');
+  }
+  function fmtIsoShort(s) {
+    if (!s) return '—';
+    return formatPgSyncAtRu(s);
+  }
+  async function pollHealthcheck() {
+    const hint = document.getElementById('hcHint');
+    const summary = document.getElementById('hcLevelSummary');
+    const signalsList = document.getElementById('hcSignals');
+    const clinicsList = document.getElementById('hcClinics');
+    const proxyList = document.getElementById('hcProxyDb');
+    if (!hint || !summary || !signalsList || !clinicsList || !proxyList) return;
+    try {
+      const r = await fetch('/api/healthcheck');
+      const j = await r.json();
+      const lvl = (j.level_summary && typeof j.level_summary === 'object') ? j.level_summary : { red: 0, yellow: 0, green: 0 };
+      summary.querySelectorAll('[data-count]').forEach(function (el) {
+        const k = el.getAttribute('data-count');
+        el.textContent = String(lvl[k] || 0);
+      });
+      hint.textContent = (j.errors && j.errors.length)
+        ? 'Ошибки healthcheck: ' + j.errors.join(' · ')
+        : 'Источник: v_health_signals + v_health_by_clinic + v_health_proxy_db. Снимок ' + (j.generated_at ? formatPgSyncAtRu(j.generated_at) : '—') + '.';
+      hint.classList.toggle('text-orange-300', !!(j.errors && j.errors.length));
+
+      signalsList.innerHTML = '';
+      const sigs = Array.isArray(j.signals) ? j.signals : [];
+      if (!sigs.length) {
+        signalsList.innerHTML = '<li class="text-[#6B7280]">Нет сигналов (витрина не наполнена или схема не применена).</li>';
+      } else {
+        for (const s of sigs) {
+          const li = document.createElement('li');
+          const lvl2 = (s.level || 'green').toLowerCase();
+          li.className = 'hc-row hc-row-' + lvl2;
+          const bullet = document.createElement('span');
+          bullet.className = 'hc-bullet hc-bullet-' + lvl2;
+          li.appendChild(bullet);
+          const body = document.createElement('div');
+          body.className = 'min-w-0 flex-1';
+          const title = document.createElement('div');
+          title.className = 'flex items-baseline gap-2 min-w-0';
+          const name = document.createElement('span');
+          name.className = 'truncate';
+          name.textContent = s.title || s.code;
+          const val = document.createElement('span');
+          val.className = 'shrink-0 font-mono text-[10px] text-[#9CA3AF]';
+          val.textContent = fmtPctOrNum(s.value, s.value_unit);
+          title.appendChild(name);
+          title.appendChild(val);
+          body.appendChild(title);
+          if (s.hint) {
+            const hintEl = document.createElement('div');
+            hintEl.className = 'text-[10px] text-[#6B7280]';
+            hintEl.textContent = s.hint;
+            body.appendChild(hintEl);
+          }
+          li.appendChild(body);
+          signalsList.appendChild(li);
+        }
+      }
+
+      clinicsList.innerHTML = '';
+      const clinics = Array.isArray(j.by_clinic_top) ? j.by_clinic_top : [];
+      if (!clinics.length) {
+        clinicsList.innerHTML = '<li class="text-[#6B7280]">Нет агрегатов по клиникам.</li>';
+      } else {
+        for (const c of clinics) {
+          const li = document.createElement('li');
+          const lvl2 = (c.health_level || 'green').toLowerCase();
+          li.className = 'hc-row hc-row-' + lvl2;
+          const bullet = document.createElement('span');
+          bullet.className = 'hc-bullet hc-bullet-' + lvl2;
+          li.appendChild(bullet);
+          const body = document.createElement('div');
+          body.className = 'min-w-0 flex-1';
+          const top = document.createElement('div');
+          top.className = 'flex items-baseline gap-2 min-w-0';
+          const name = document.createElement('span');
+          name.className = 'truncate';
+          name.textContent = c.clinic_name || ('JID ' + c.jid);
+          const er = document.createElement('span');
+          er.className = 'shrink-0 font-mono text-[10px] text-[#9CA3AF]';
+          er.textContent = (c.error_rate_24h != null ? Number(c.error_rate_24h).toFixed(1) + '%' : '—') + ' err';
+          top.appendChild(name);
+          top.appendChild(er);
+          body.appendChild(top);
+          const meta = document.createElement('div');
+          meta.className = 'text-[10px] text-[#6B7280]';
+          meta.textContent = '24ч: ' + fmtNum(c.facts_24h) + ' · queue: ' + fmtNum(c.pending_now) + ' · last ' + fmtIsoShort(c.last_seen_at);
+          body.appendChild(meta);
+          li.appendChild(body);
+          clinicsList.appendChild(li);
+        }
+      }
+
+      proxyList.innerHTML = '';
+      const p = j.proxy_db || {};
+      const items = [
+        { label: 'Staging всего', value: fmtNum(p.stg_outbound_total) },
+        { label: 'Без EGMID', value: fmtNum(p.stg_without_egmid) },
+        { label: 'Очередь > 24ч', value: fmtNum(p.pending_older_24h) },
+        { label: 'Очередь 1–24ч', value: fmtNum(p.pending_1_24h) },
+        { label: 'Staging max EGMID', value: fmtNum(p.staging_max_egmid) },
+        { label: 'Firebird max EGMID', value: fmtNum(p.fb_max_egmid) },
+        { label: 'EGMID lag', value: fmtNum(p.egmid_lag) },
+        { label: 'last_log_id', value: fmtNum(p.etl_last_log_id) },
+      ];
+      for (const it of items) {
+        const li = document.createElement('li');
+        li.className = 'flex items-baseline justify-between gap-1 min-w-0';
+        const lab = document.createElement('span');
+        lab.className = 'truncate text-[#9CA3AF] text-[10px]';
+        lab.textContent = it.label;
+        const v = document.createElement('span');
+        v.className = 'shrink-0 font-mono text-[10px] text-[#E5E7EB]';
+        v.textContent = it.value;
+        li.appendChild(lab);
+        li.appendChild(v);
+        proxyList.appendChild(li);
+      }
+    } catch (e) {
+      hint.textContent = 'Ошибка опроса /api/healthcheck: ' + e;
+      hint.classList.add('text-orange-300');
+    }
+  }
+
   document.querySelectorAll('.pg-snap-copy').forEach(function (btn) {
     btn.addEventListener('click', function () {
       const id = btn.getAttribute('data-copy');
@@ -666,17 +953,23 @@ PAGE = """
     pollSync();
     pollPgSnapshot();
   }, 1200);
+  setInterval(function () {
+    pollHealthcheck();
+  }, 30000);
   pollSync();
   pollPgSnapshot();
+  pollHealthcheck();
   refreshConnStatusStrip();
   window.addEventListener('pageshow', function () {
     pollSync();
     pollPgSnapshot();
+    pollHealthcheck();
   });
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'visible') {
       pollSync();
       pollPgSnapshot();
+      pollHealthcheck();
     }
   });
   </script>
@@ -840,6 +1133,79 @@ def create_app() -> Flask:
             return jsonify({"ok": True, **snap})
         except Exception as e:  # pragma: no cover
             return jsonify({"ok": False, "error": str(e)})
+
+    @app.get("/api/healthcheck")
+    def api_healthcheck():  # type: ignore[no-untyped-def]
+        """Снимок healthcheck: сигналы, top-N клиник, прокси-БД (для Config UI и для алёртов)."""
+        from datetime import datetime, timezone
+
+        p = config_path()
+        if not p.is_file():
+            return jsonify({"ok": False, "error": "Нет файла конфигурации на сервере."})
+        try:
+            cfg = load_corp_config(p)
+        except Exception as e:  # pragma: no cover
+            return jsonify({"ok": False, "error": f"Конфиг не читается: {e}"})
+
+        result: dict[str, Any] = {
+            "ok": True,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "signals": [],
+            "by_clinic_top": [],
+            "proxy_db": {},
+            "level_summary": {"red": 0, "yellow": 0, "green": 0},
+            "errors": [],
+        }
+        try:
+            con = connect_pg(cfg.postgres)
+        except Exception as e:  # pragma: no cover - сеть/PG
+            result["ok"] = False
+            result["errors"].append(f"PostgreSQL недоступен: {e}")
+            return jsonify(result)
+
+        try:
+            snap = fetch_healthcheck_snapshot(con)
+        except Exception as e:  # pragma: no cover
+            result["ok"] = False
+            result["errors"].append(str(e))
+            return jsonify(result)
+        finally:
+            con.close()
+
+        result.update(snap)
+        if snap.get("errors"):
+            result["ok"] = False
+
+        # Опрос Firebird — с wall-clock timeout, чтобы недоступный источник не блокировал /api/healthcheck.
+        # Используем явный shutdown(wait=False, cancel_futures=True), иначе `with` ждёт зависший TCP-connect.
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutureTimeout
+
+        fb_peaks: dict[str, Any] = {"max_egmid": None, "max_licenses_modifydate": None, "error": None}
+        ex = ThreadPoolExecutor(max_workers=1)
+        try:
+            fut = ex.submit(fetch_firebird_source_peaks, cfg.firebird)
+            try:
+                fb_peaks = fut.result(timeout=5.0)
+            except _FutureTimeout:
+                fb_peaks = {"max_egmid": None, "max_licenses_modifydate": None, "error": "timeout"}
+            except Exception as e:  # pragma: no cover
+                fb_peaks = {"max_egmid": None, "max_licenses_modifydate": None, "error": str(e)}
+        finally:
+            ex.shutdown(wait=False, cancel_futures=True)
+
+        proxy_db = result.get("proxy_db") or {}
+        if fb_peaks.get("max_egmid") is not None:
+            proxy_db["fb_max_egmid"] = fb_peaks["max_egmid"]
+            staging_max = proxy_db.get("staging_max_egmid")
+            if isinstance(staging_max, int) and isinstance(fb_peaks["max_egmid"], int):
+                proxy_db["egmid_lag"] = max(0, fb_peaks["max_egmid"] - staging_max)
+        if fb_peaks.get("max_licenses_modifydate"):
+            proxy_db["fb_max_licenses_modifydate"] = fb_peaks["max_licenses_modifydate"]
+        if fb_peaks.get("error"):
+            result.setdefault("errors", []).append(f"Firebird peaks: {fb_peaks['error']}")
+        result["proxy_db"] = proxy_db
+
+        return jsonify(result)
 
     from egisz_monitor_corp.sync_routes import register_sync_routes
 

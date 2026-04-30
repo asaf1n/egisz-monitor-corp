@@ -199,6 +199,14 @@ COMMENT ON FUNCTION egisz_friendly_errors_row IS 'Сводка по массив
 
 -- REPLACE VIEW нельзя использовать для смены имён/набора колонок в базовой витрине (ломаются зависимости и ETL).
 -- Человекочитаемые имена — в отдельных *_ui представлениях и в dim_column_display_labels.
+-- Сначала дропаем потенциальные зависимости от healthcheck-витрины (sql/005_healthcheck.sql),
+-- иначе DROP базовых v_rpt_* / v_egisz_* падает из-за foreign view dependencies.
+DROP VIEW IF EXISTS v_health_by_clinic_ui;
+DROP VIEW IF EXISTS v_health_signals_ui;
+DROP VIEW IF EXISTS v_health_proxy_db_ui;
+DROP VIEW IF EXISTS v_health_by_clinic;
+DROP VIEW IF EXISTS v_health_signals;
+DROP VIEW IF EXISTS v_health_proxy_db;
 DROP VIEW IF EXISTS v_rpt_documents_no_response_ui;
 DROP VIEW IF EXISTS v_egisz_transactions_enriched_ui;
 DROP VIEW IF EXISTS v_rpt_documents_no_response;
