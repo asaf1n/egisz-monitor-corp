@@ -250,6 +250,8 @@ def run_sync(
                 reply_to = _to_str(r.get("replyto"))
                 doc_id = _to_str(r.get("documentid"))
 
+                log_created = _sent_at_utc(r.get("log_created_at"))
+                msg_created = _sent_at_utc(r.get("msg_created_at"))
                 rec = parser.build_record(
                     logtext,
                     msg_text=msgtext,
@@ -259,6 +261,8 @@ def run_sync(
                     jid_by_mo_uid_from_egisz_licenses=mo_uid_to_jid_from_egisz_licenses,
                     reply_to=reply_to,
                     document_id=doc_id,
+                    msg_created_at=msg_created,
+                    log_created_at=log_created,
                     on_staging_error=on_stage,
                 )
                 if progress_detail_cb and (row_i % 200 == 0 or row_i == len(rows)):
@@ -415,6 +419,7 @@ def run_sync(
                             "gost_jid_token": host_part.get("gost_jid_token"),
                             "kind_code": kc,
                             "jid": _to_int(r.get("egisz_licenses_jid")),
+                            "egmid": _to_int(r.get("egmid")),
                         }
                     )
                 if progress_detail_cb and (oi % 200 == 0 or oi == outbound_n):

@@ -163,6 +163,48 @@ def test_parse_xml_success_with_registry() -> None:
     assert out["errors"] == []
 
 
+def test_parse_xml_prefers_registration_date_time_over_registration_date() -> None:
+    p = EgiszMonitorParser()
+    inner = """
+      <ns2:relatesToMessage>MSG-RDT</ns2:relatesToMessage>
+      <ns2:status>success</ns2:status>
+      <ns2:kind>62</ns2:kind>
+      <ns2:registryItem>
+        <ns2:registrationDate>2024-06-01T00:00:00Z</ns2:registrationDate>
+        <ns2:registrationDateTime>2024-06-02T12:00:00Z</ns2:registrationDateTime>
+      </ns2:registryItem>
+    """
+    xml = f"""<?xml version="1.0"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ns2="{NS}">
+  <soap:Body><ns2:registerDocumentResult>{inner}</ns2:registerDocumentResult></soap:Body></soap:Envelope>"""
+    out = p.parse_xml(xml)
+    assert out is not None
+    assert out["registration_date"] is not None
+    assert out["registration_date"].year == 2024
+    assert out["registration_date"].month == 6
+    assert out["registration_date"].day == 2
+
+
+def test_parse_xml_creation_date_time() -> None:
+    p = EgiszMonitorParser()
+    inner = """
+      <ns2:relatesToMessage>MSG-CRE</ns2:relatesToMessage>
+      <ns2:status>success</ns2:status>
+      <ns2:kind>62</ns2:kind>
+      <ns2:registryItem>
+        <ns2:creationDateTime>2024-03-10T08:30:00Z</ns2:creationDateTime>
+      </ns2:registryItem>
+    """
+    xml = f"""<?xml version="1.0"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ns2="{NS}">
+  <soap:Body><ns2:registerDocumentResult>{inner}</ns2:registerDocumentResult></soap:Body></soap:Envelope>"""
+    out = p.parse_xml(xml)
+    assert out is not None
+    assert out["semd_creation_at"] is not None
+    assert out["semd_creation_at"].month == 3
+    assert out["semd_creation_at"].day == 10
+
+
 def test_parse_xml_errors_array() -> None:
     p = EgiszMonitorParser()
     err = """

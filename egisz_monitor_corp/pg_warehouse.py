@@ -129,20 +129,49 @@ def refresh_outbound_documents_staging(con, rows: list[dict[str, Any]]) -> None:
                 r.get("gost_jid_token"),
                 r.get("kind_code"),
                 r.get("jid"),
+                r.get("egmid"),
             )
         )
-    template = "(%s, %s, %s, %s, %s, %s, NOW())"
+    template = "(%s, %s, %s, %s, %s, %s, %s, NOW())"
     with con.cursor() as cur:
         execute_values(
             cur,
             """
             INSERT INTO stg_egisz_outbound_documents (
-                document_id, sent_at, reply_to, gost_jid_token, kind_code, jid, synced_at
+                document_id, sent_at, reply_to, gost_jid_token, kind_code, jid, egmid, synced_at
             ) VALUES %s
             """,
             tuples,
             template=template,
         )
+
+
+def fetch_pg_sync_snapshot(con, pipeline: str) -> dict[str, Any]:  # type: ignore[no-untyped-def]
+    """Последняя активность витрины, курсор LOGID и MAX(EGMID) из staging исходящих."""
+    with con.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                (SELECT MAX(ts) FROM (
+                    SELECT MAX(processed_at) AS ts FROM fact_egisz_transactions
+                    UNION ALL
+                    SELECT MAX(synced_at) AS ts FROM stg_egisz_outbound_documents
+                    UNION ALL
+                    SELECT MAX(updated_at) AS ts FROM etl_state WHERE pipeline = %s
+                ) s) AS last_record_at,
+                (SELECT last_log_id FROM etl_state WHERE pipeline = %s) AS last_log_id,
+                (SELECT MAX(egmid) FROM stg_egisz_outbound_documents) AS max_egmid
+            """,
+            (pipeline, pipeline),
+        )
+        row = cur.fetchone()
+    last_at, lid_raw, eg_raw = row if row else (None, None, None)
+    out: dict[str, Any] = {
+        "sync_at": last_at.isoformat() if last_at else None,
+        "log_id": int(lid_raw) if lid_raw is not None else None,
+        "egmid": int(eg_raw) if eg_raw is not None else None,
+    }
+    return out
 
 
 def upsert_facts_batch(con, rows: list[dict[str, Any]]) -> None:  # type: ignore[no-untyped-def]
@@ -171,17 +200,18 @@ def upsert_facts_batch(con, rows: list[dict[str, Any]]) -> None:  # type: ignore
                 r["emdr_id"],
                 Json(err),
                 r["registration_date"],
+                r.get("semd_creation_at"),
                 r["processed_at"],
             )
         )
-    template = "(%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)"  # Json() → jsonb
+    template = "(%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s)"  # Json() → jsonb
     with con.cursor() as cur:
         execute_values(
             cur,
             """
             INSERT INTO fact_egisz_transactions (
                 relates_to_id, local_uid_semd, jid, gost_jid_token, org_oid, kind_code, status,
-                emdr_id, errors_json, registration_date, processed_at
+                emdr_id, errors_json, registration_date, semd_creation_at, processed_at
             ) VALUES %s
             ON CONFLICT (relates_to_id) DO UPDATE SET
                 local_uid_semd = EXCLUDED.local_uid_semd,
@@ -193,6 +223,7 @@ def upsert_facts_batch(con, rows: list[dict[str, Any]]) -> None:  # type: ignore
                 emdr_id = EXCLUDED.emdr_id,
                 errors_json = EXCLUDED.errors_json,
                 registration_date = EXCLUDED.registration_date,
+                semd_creation_at = EXCLUDED.semd_creation_at,
                 processed_at = EXCLUDED.processed_at
             """,
             tuples,

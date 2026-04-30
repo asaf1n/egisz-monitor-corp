@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS fact_egisz_transactions (
     emdr_id VARCHAR(256),
     errors_json JSONB NOT NULL DEFAULT '[]'::jsonb,
     registration_date TIMESTAMPTZ,
+    semd_creation_at TIMESTAMPTZ,
     processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT chk_fact_status CHECK (status IN ('success', 'error', 'unknown'))
 );
@@ -47,6 +48,12 @@ CREATE INDEX IF NOT EXISTS idx_fact_egisz_jid ON fact_egisz_transactions (jid);
 CREATE INDEX IF NOT EXISTS idx_fact_egisz_org_oid ON fact_egisz_transactions (org_oid);
 CREATE INDEX IF NOT EXISTS idx_fact_egisz_kind ON fact_egisz_transactions (kind_code);
 CREATE INDEX IF NOT EXISTS idx_fact_egisz_status ON fact_egisz_transactions (status);
+
+ALTER TABLE fact_egisz_transactions ADD COLUMN IF NOT EXISTS semd_creation_at TIMESTAMPTZ;
+
+COMMENT ON COLUMN fact_egisz_transactions.registration_date IS 'Дата/время регистрации в ЕГИСЗ РЭМД: тег registrationDateTime (предпочтительно) или registrationDate в XML из EXCHANGELOG.MSGTEXT';
+COMMENT ON COLUMN fact_egisz_transactions.semd_creation_at IS 'Дата/время создания СЭМД: тег creationDateTime в XML из EXCHANGELOG.MSGTEXT';
+COMMENT ON COLUMN fact_egisz_transactions.processed_at IS 'Обработано IPS: EGISZ_MESSAGES.CREATEDATE; при отсутствии джойна — CREATEDATE строки EXCHANGELOG; иначе время загрузки ETL';
 
 CREATE TABLE IF NOT EXISTS stg_parse_errors (
     id BIGSERIAL PRIMARY KEY,
@@ -215,6 +222,7 @@ SELECT
     f.errors_json,
     egisz_friendly_errors_row(f.errors_json) AS errors_friendly,
     f.registration_date,
+    f.semd_creation_at,
     f.processed_at,
     DATE(COALESCE(f.registration_date, f.processed_at)) AS chart_day,
     COALESCE(NULLIF(TRIM(dc.jname), ''), 'Клиника JID: ' || COALESCE(f.jid::varchar, 'неизвестен')) AS clinic_name,
@@ -232,10 +240,14 @@ CREATE TABLE IF NOT EXISTS stg_egisz_outbound_documents (
     gost_jid_token TEXT,
     kind_code VARCHAR(16),
     jid BIGINT,
+    egmid BIGINT,
     synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE stg_egisz_outbound_documents ADD COLUMN IF NOT EXISTS egmid BIGINT;
+
 COMMENT ON TABLE stg_egisz_outbound_documents IS 'EGISZ_MESSAGES с непустым DOCUMENTID за окно sync_window_days; для отчёта «Документы без ответа»';
+COMMENT ON COLUMN stg_egisz_outbound_documents.egmid IS 'EGMID строки EGISZ_MESSAGES при последнем снимке staging';
 COMMENT ON COLUMN stg_egisz_outbound_documents.sent_at IS 'Дата/время создания строки в EGISZ_MESSAGES (поле CREATEDATE в источнике Firebird; при другом имени колонки поправьте SQL в sql_util.outbound_documents_staging_select)';
 
 CREATE OR REPLACE VIEW v_rpt_documents_no_response AS
@@ -294,8 +306,13 @@ INSERT INTO dim_column_display_labels (source_object, source_column, display_lab
         'errors_friendly',
         'Сводка ошибок: одна строка; внутри одного сообщения Schematron блоки — «—», несколько item в JSON — «·»'
     ),
-    ('v_egisz_transactions_enriched', 'registration_date', 'Дата регистрации'),
-    ('v_egisz_transactions_enriched', 'processed_at', 'Обработано'),
+    (
+        'v_egisz_transactions_enriched',
+        'registration_date',
+        'Зарегистрирован в ЕГИСЗ РЭМД'
+    ),
+    ('v_egisz_transactions_enriched', 'semd_creation_at', 'Создание СЭМД'),
+    ('v_egisz_transactions_enriched', 'processed_at', 'Обработано IPS'),
     ('v_egisz_transactions_enriched', 'chart_day', 'День (тренд)'),
     ('v_egisz_transactions_enriched', 'clinic_name', 'Наименование клиники'),
     ('v_egisz_transactions_enriched', 'clinic_inn', 'ИНН клиники'),
@@ -322,8 +339,9 @@ SELECT
     emdr_id AS "Рег. номер РЭМД (emdrid)",
     errors_json AS "Ошибки JSON",
     errors_friendly AS "Сводка ошибок",
-    registration_date AS "Дата регистрации",
-    processed_at AS "Обработано",
+    registration_date AS "Зарегистрирован в ЕГИСЗ РЭМД",
+    semd_creation_at AS "Создание СЭМД",
+    processed_at AS "Обработано IPS",
     chart_day AS "День (тренд)",
     clinic_name AS "Наименование клиники",
     clinic_inn AS "ИНН клиники",

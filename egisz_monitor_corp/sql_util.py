@@ -28,6 +28,7 @@ SELECT
     e.CREATEDATE AS LOG_CREATED_AT,
     m.REPLYTO AS REPLYTO,
     m.DOCUMENTID AS DOCUMENTID,
+    m.CREATEDATE AS MSG_CREATED_AT,
     (
         SELECT FIRST 1 l2.MO_UID
         FROM EGISZ_LICENSES l2
@@ -96,6 +97,7 @@ def outbound_documents_staging_select(sync_window_days: int) -> str:
     return f"""
 SELECT
     TRIM(m.DOCUMENTID) AS DOCUMENTID,
+    m.EGMID AS EGMID,
     m.CREATEDATE AS MSG_SENT_AT,
     m.REPLYTO AS REPLYTO,
     (

@@ -1,5 +1,5 @@
 # Пример values для официального Helm chart Apache Airflow.
-# Целевой контур: namespace egisz-corp — тот же, что и Postgres из k8s/postgres/.
+# Целевой контур: namespace egisz-monitor — тот же, что и Postgres из k8s/postgres/.
 #
 # Перед установкой:
 #   1) Postgres + секрет postgres-credentials
@@ -11,7 +11,7 @@
 # Установка (актуализируйте версию chart):
 #   helm repo add apache-airflow https://airflow.apache.org/charts
 #   helm repo update
-#   helm upgrade --install airflow apache-airflow/airflow --namespace egisz-corp -f k8s/airflow/values-corp.example.yaml
+#   helm upgrade --install airflow apache-airflow/airflow --namespace egisz-monitor -f k8s/airflow/values-corp.example.yaml
 #
 useStandardNaming: true
 
@@ -39,7 +39,7 @@ createUserJob:
   defaultUser:
     role: Admin
     username: admin
-    email: admin@egisz-corp.local
+    email: admin@egisz-monitor.local
     firstName: Admin
     lastName: User
     password: CHANGEME_AIRFLOW_UI_PASSWORD
@@ -48,7 +48,7 @@ ingress:
   enabled: false
 
 # Доступ к UI без Ingress:
-#   kubectl -n egisz-corp port-forward svc/airflow-webserver 8080:8080
+#   kubectl -n egisz-monitor port-forward svc/airflow-webserver 8080:8080
 
 workers:
   celery:

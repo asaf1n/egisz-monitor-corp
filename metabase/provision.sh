@@ -122,7 +122,7 @@ if [ -x /app/setup-dashboards.sh ]; then
     PGPORT="5432" \
     /app/setup-dashboards.sh
   else
-    echo "[provision] Warning: Application database schema not fully initialized after wait (need fact + v_egisz_transactions_enriched + v_egisz_transactions_enriched_ui + etl_state). Skipping dashboard provisioning. Run egisz-corp apply-schema and restart Metabase."
+    echo "[provision] Warning: Application database schema not fully initialized after wait (need fact + v_egisz_transactions_enriched + v_egisz_transactions_enriched_ui + etl_state). Skipping dashboard provisioning. Run egisz-monitor apply-schema and restart Metabase."
   fi
 fi
 

@@ -1,6 +1,6 @@
 {
   "name": "01 Оперативный мониторинг",
-  "description": "Контроль текущего состояния. Период задаётся [field filter](https://www.metabase.com/docs/v0.60/questions/native-editor/field-filters) `dwh_date` по **«Обработано»**; при необходимости — фильтр по коду СЭМД и JID клиники (v0.60+). Slug фильтров `top_*_filter` совпадают с query string в URL (закладки и шаринг).",
+  "description": "Контроль текущего состояния. Период задаётся [field filter](https://www.metabase.com/docs/v0.60/questions/native-editor/field-filters) `dwh_date` по **«Обработано IPS»**; при необходимости — фильтр по коду СЭМД и JID клиники (v0.60+). Slug фильтров `top_*_filter` совпадают с query string в URL (закладки и шаринг).",
   "parameters": [
     {
       "id": "a1b2c3d4-e5f6-4789-a01b-01operational0",
@@ -27,11 +27,11 @@
   "cards": [
     {
       "name": "Последние операции",
-      "description": "До 50 последних строк в выбранном периоде (по дате обработки, новые сверху).",
+      "description": "До 50 последних строк в выбранном периоде; сортировка по «Обработано IPS» (новые сверху).",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT v.* FROM public.v_egisz_transactions_enriched_ui v WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(v.\"Код СЭМД\"), '') = {{top_semd}}]] [[AND v.\"JID клиники\"::text = {{top_clinic}}]] ORDER BY v.\"Обработано\" DESC NULLS LAST LIMIT 50",
+          "query": "SELECT v.* FROM public.v_egisz_transactions_enriched_ui v WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(v.\"Код СЭМД\"), '') = {{top_semd}}]] [[AND v.\"JID клиники\"::text = {{top_clinic}}]] ORDER BY v.\"Обработано IPS\" DESC NULLS LAST LIMIT 50",
           "template-tags": {
             "top_semd": {
               "widget-type": "string/=",
@@ -45,7 +45,7 @@
               "widget-type": "date/all-options",
               "id": "f1000005-0005-4005-8005-000000000001",
               "name": "dwh_date",
-              "display-name": "По дате «Обработано»",
+              "display-name": "По дате «Обработано IPS»",
               "type": "dimension"
             },
             "top_clinic": {
@@ -64,28 +64,29 @@
       "visualization_settings": {
         "table": {
           "columns": [
+            { "name": "JID клиники", "enabled": true },
+            { "name": "Наименование клиники", "enabled": true },
             { "name": "Статус", "enabled": true },
             { "name": "Код СЭМД", "enabled": true },
             { "name": "Наименование СЭМД", "enabled": true },
-            { "name": "JID клиники", "enabled": true },
             { "name": "Рег. номер РЭМД (emdrid)", "enabled": true },
             { "name": "Сводка ошибок", "enabled": true },
             { "name": "localUid СЭМД", "enabled": true },
             { "name": "Хост клиники (VPN ГОСТ)", "enabled": true },
             { "name": "OID организации", "enabled": true },
-            { "name": "Ошибки JSON", "enabled": false },
-            { "name": "Дата регистрации", "enabled": false },
-            { "name": "Обработано", "enabled": false },
+            { "name": "Зарегистрирован в ЕГИСЗ РЭМД", "enabled": false },
+            { "name": "Создание СЭМД", "enabled": false },
+            { "name": "Обработано IPS", "enabled": false },
             { "name": "День (тренд)", "enabled": false },
-            { "name": "Наименование клиники", "enabled": false },
+            { "name": "Ошибки JSON", "enabled": false },
             { "name": "ИНН клиники", "enabled": false },
             { "name": "OID клиники", "enabled": false },
             { "name": "Связанное сообщение", "enabled": false }
           ]
         },
         "column_settings": {
-          "[\"name\",\"Обработано\"]": {
-            "column_title": "Обработано"
+          "[\"name\",\"Обработано IPS\"]": {
+            "column_title": "Обработано IPS"
           },
           "[\"name\",\"localUid СЭМД\"]": {
             "column_title": "localUid СЭМД"
@@ -102,11 +103,14 @@
           "[\"name\",\"Хост клиники (VPN ГОСТ)\"]": {
             "column_title": "Хост клиники (VPN ГОСТ)"
           },
-          "[\"name\",\"Дата регистрации\"]": {
-            "column_title": "Дата регистрации"
+          "[\"name\",\"Зарегистрирован в ЕГИСЗ РЭМД\"]": {
+            "column_title": "Зарегистрирован в ЕГИСЗ РЭМД"
+          },
+          "[\"name\",\"Создание СЭМД\"]": {
+            "column_title": "Создание СЭМД"
           },
           "[\"name\",\"OID организации\"]": {
-            "column_title": "OID организации"
+            "column_title": "OID МО"
           },
           "[\"name\",\"Наименование СЭМД\"]": {
             "column_title": "Наименование СЭМД"
@@ -139,7 +143,7 @@
       "metabase-field-filters": {
         "dwh_date": {
           "table_ref": "v_egisz_transactions_enriched_ui",
-          "field_name": "Обработано"
+          "field_name": "Обработано IPS"
         }
       }
     },
@@ -259,7 +263,7 @@
       "metabase-field-filters": {
         "dwh_date": {
           "table_ref": "v_egisz_transactions_enriched_ui",
-          "field_name": "Обработано"
+          "field_name": "Обработано IPS"
         }
       }
     },
@@ -318,7 +322,7 @@
       "metabase-field-filters": {
         "dwh_date": {
           "table_ref": "v_egisz_transactions_enriched_ui",
-          "field_name": "Обработано"
+          "field_name": "Обработано IPS"
         }
       }
     },
@@ -400,7 +404,7 @@
       "metabase-field-filters": {
         "dwh_date": {
           "table_ref": "v_egisz_transactions_enriched_ui",
-          "field_name": "Обработано"
+          "field_name": "Обработано IPS"
         }
       }
     },
@@ -482,7 +486,7 @@
       "metabase-field-filters": {
         "dwh_date": {
           "table_ref": "v_egisz_transactions_enriched_ui",
-          "field_name": "Обработано"
+          "field_name": "Обработано IPS"
         }
       }
     },
@@ -541,7 +545,7 @@
       "metabase-field-filters": {
         "dwh_date": {
           "table_ref": "v_egisz_transactions_enriched_ui",
-          "field_name": "Обработано"
+          "field_name": "Обработано IPS"
         }
       }
     },
@@ -611,7 +615,7 @@
       "metabase-field-filters": {
         "dwh_date": {
           "table_ref": "v_egisz_transactions_enriched_ui",
-          "field_name": "Обработано"
+          "field_name": "Обработано IPS"
         }
       }
     },
@@ -670,7 +674,7 @@
       "metabase-field-filters": {
         "dwh_date": {
           "table_ref": "v_egisz_transactions_enriched_ui",
-          "field_name": "Обработано"
+          "field_name": "Обработано IPS"
         }
       }
     }

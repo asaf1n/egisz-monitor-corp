@@ -85,11 +85,11 @@
       "name": "03 · Отказы РЭМД (витрина, деталь)",
       "description": "Последние error-строки из витрины: коды РЭМД, исходные тексты, колонка «Сводка ошибок» с витрины (строка целиком: «·» между item, «—» внутри Schematron).",
       "table_ref": "v_egisz_transactions_enriched_ui",
-      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
+      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано IPS" } },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT \"localUid СЭМД\", \"JID клиники\", \"Хост клиники (VPN ГОСТ)\", \"OID организации\", \"Код СЭМД\", \"Наименование СЭМД\", \"Наименование клиники\", \"ИНН клиники\", \"OID клиники\", \"Рег. номер РЭМД (emdrid)\", \"Дата регистрации\", (SELECT LEFT(string_agg(NULLIF(TRIM(err->>'code'), ''), '; ' ORDER BY ord), 200) FROM jsonb_array_elements(\"Ошибки JSON\") WITH ORDINALITY AS e(err, ord) WHERE NULLIF(TRIM(err->>'code'), '') IS NOT NULL) AS \"Коды РЭМД\", (SELECT LEFT(string_agg(NULLIF(err->>'message', ''), '; ' ORDER BY ord), 500) FROM jsonb_array_elements(\"Ошибки JSON\") WITH ORDINALITY AS e(err, ord) WHERE NULLIF(err->>'message', '') IS NOT NULL) AS \"Текст ошибки\", \"Сводка ошибок\", \"Обработано\", \"Связанное сообщение\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] AND \"Статус\" = 'error' ORDER BY \"Обработано\" DESC NULLS LAST LIMIT 50",
+          "query": "SELECT \"localUid СЭМД\", \"JID клиники\", \"Хост клиники (VPN ГОСТ)\", \"OID организации\", \"Код СЭМД\", \"Наименование СЭМД\", \"Наименование клиники\", \"ИНН клиники\", \"OID клиники\", \"Рег. номер РЭМД (emdrid)\", \"Зарегистрирован в ЕГИСЗ РЭМД\", \"Создание СЭМД\", (SELECT LEFT(string_agg(NULLIF(TRIM(err->>'code'), ''), '; ' ORDER BY ord), 200) FROM jsonb_array_elements(\"Ошибки JSON\") WITH ORDINALITY AS e(err, ord) WHERE NULLIF(TRIM(err->>'code'), '') IS NOT NULL) AS \"Коды РЭМД\", (SELECT LEFT(string_agg(NULLIF(err->>'message', ''), '; ' ORDER BY ord), 500) FROM jsonb_array_elements(\"Ошибки JSON\") WITH ORDINALITY AS e(err, ord) WHERE NULLIF(err->>'message', '') IS NOT NULL) AS \"Текст ошибки\", \"Сводка ошибок\", \"Обработано IPS\", \"Связанное сообщение\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] AND \"Статус\" = 'error' ORDER BY \"Обработано IPS\" DESC NULLS LAST LIMIT 50",
           "template-tags": {
             "dwh_date": {
               "id": "f3000002-0002-4002-8002-000000000001",
@@ -146,8 +146,11 @@
           "[\"name\",\"Рег. номер РЭМД (emdrid)\"]": {
             "column_title": "Рег. номер РЭМД (emdrid)"
           },
-          "[\"name\",\"Дата регистрации\"]": {
-            "column_title": "Дата регистрации"
+          "[\"name\",\"Зарегистрирован в ЕГИСЗ РЭМД\"]": {
+            "column_title": "Зарегистрирован в ЕГИСЗ РЭМД"
+          },
+          "[\"name\",\"Создание СЭМД\"]": {
+            "column_title": "Создание СЭМД"
           },
           "[\"name\",\"Коды РЭМД\"]": {
             "column_title": "Коды РЭМД"
@@ -158,8 +161,8 @@
           "[\"name\",\"Сводка ошибок\"]": {
             "column_title": "Сводка ошибок"
           },
-          "[\"name\",\"Обработано\"]": {
-            "column_title": "Обработано"
+          "[\"name\",\"Обработано IPS\"]": {
+            "column_title": "Обработано IPS"
           }
         }
       },

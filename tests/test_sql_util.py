@@ -37,4 +37,5 @@ def test_default_select_contains_egisz_licenses_columns() -> None:
     assert "EGISZ_LICENSES_KIND" in s
     assert "EGISZ_LICENSES_JID" in s
     assert "EGISZ_LICENSES" in s
+    assert "MSG_CREATED_AT" in s
     assert "DATEADD(-7 DAY" in s

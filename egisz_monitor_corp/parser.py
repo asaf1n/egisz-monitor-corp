@@ -94,6 +94,7 @@ class NormalizedRecord:
     emdr_id: str | None
     errors_json: list[dict[str, str]]
     registration_date: datetime | None
+    semd_creation_at: datetime | None = None
     processed_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def as_fact_row(self) -> dict[str, Any]:
@@ -108,6 +109,7 @@ class NormalizedRecord:
             "emdr_id": self.emdr_id,
             "errors_json": self.errors_json,
             "registration_date": self.registration_date,
+            "semd_creation_at": self.semd_creation_at,
             "processed_at": self.processed_at,
         }
 
@@ -181,12 +183,14 @@ class EgiszMonitorParser:
         org_oid: str | None = None
         emdr_id: str | None = None
         reg_date: str | None = None
+        reg_date_time: str | None = None
+        cre_date: str | None = None
         errors: list[dict[str, str]] = []
 
         stack: list[str] = []
 
         def walk(el: ET.Element) -> None:
-            nonlocal relates, local_uid, status, kind, org_oid, emdr_id, reg_date, errors
+            nonlocal relates, local_uid, status, kind, org_oid, emdr_id, reg_date, reg_date_time, cre_date, errors
             stack.append(_local_tag(el.tag))
             path = stack
             text = _norm_ws(el.text)
@@ -204,8 +208,12 @@ class EgiszMonitorParser:
                 org_oid = text
             elif ln == "emdrId" and text:
                 emdr_id = text
+            elif ln == "registrationDateTime" and text:
+                reg_date_time = text
             elif ln == "registrationDate" and text:
                 reg_date = text
+            elif ln == "creationDateTime" and text:
+                cre_date = text
             elif ln == "item" and "errors" in path:
                 code = None
                 message = None
@@ -230,8 +238,10 @@ class EgiszMonitorParser:
             if m:
                 relates = _norm_ws(m.group(1))
 
-        reg_dt_raw = _norm_ws(reg_date)
+        reg_dt_raw = _norm_ws(reg_date_time) or _norm_ws(reg_date)
         reg_dt = _parse_iso_datetime(reg_dt_raw) if reg_dt_raw else None
+        cre_dt_raw = _norm_ws(cre_date)
+        cre_dt = _parse_iso_datetime(cre_dt_raw) if cre_dt_raw else None
 
         if not relates:
             return {
@@ -242,6 +252,7 @@ class EgiszMonitorParser:
                 "org_oid": org_oid,
                 "emdr_id": emdr_id,
                 "registration_date": reg_dt,
+                "semd_creation_at": cre_dt,
                 "errors": errors,
                 "_xml_ok": True,
             }
@@ -258,6 +269,7 @@ class EgiszMonitorParser:
             "org_oid": org_oid,
             "emdr_id": emdr_id,
             "registration_date": reg_dt,
+            "semd_creation_at": cre_dt,
             "errors": errors,
             "_xml_ok": True,
         }
@@ -299,6 +311,8 @@ class EgiszMonitorParser:
         jid_by_mo_uid_from_egisz_licenses: Mapping[str, int] | None = None,
         reply_to: str | None = None,
         document_id: str | None = None,
+        msg_created_at: datetime | None = None,
+        log_created_at: datetime | None = None,
         on_staging_error: Callable[[StagingParseError], None] | None = None,
     ) -> NormalizedRecord | None:
         """
@@ -324,6 +338,7 @@ class EgiszMonitorParser:
         org_oid: str | None = None
         emdr_id: str | None = None
         registration_date: datetime | None = None
+        semd_creation_at: datetime | None = None
         errors_json: list[dict[str, str]] = []
         local_uid_xml: str | None = None
 
@@ -334,8 +349,11 @@ class EgiszMonitorParser:
             org_oid = parsed.get("org_oid")
             emdr_id = parsed.get("emdr_id")
             registration_date = parsed.get("registration_date")
+            semd_creation_at = parsed.get("semd_creation_at")
             errors_json = list(parsed.get("errors") or [])
             local_uid_xml = parsed.get("local_uid")
+
+        processed_at = msg_created_at or log_created_at or datetime.now(timezone.utc)
 
         if not kind_code:
             kind_code = _norm_kind_code(
@@ -394,6 +412,8 @@ class EgiszMonitorParser:
             emdr_id=emdr_id,
             errors_json=errors_json,
             registration_date=registration_date,
+            semd_creation_at=semd_creation_at,
+            processed_at=processed_at,
         )
 
 

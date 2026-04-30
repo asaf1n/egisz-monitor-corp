@@ -16,7 +16,7 @@ from egisz_monitor_corp.config_loader import (
     save_corp_config,
 )
 from egisz_monitor_corp.fb_client import fetch_all
-from egisz_monitor_corp.pg_warehouse import test_pg_connection
+from egisz_monitor_corp.pg_warehouse import connect_pg, fetch_pg_sync_snapshot, test_pg_connection
 
 PAGE = """
 <!doctype html>
@@ -112,7 +112,7 @@ PAGE = """
         <div class="min-w-0 pt-4 border-t border-[#1B2940] lg:pt-0 lg:pl-6 lg:border-0">
           <div class="mb-2">
             <h2 class="text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">PostgreSQL Configuration</h2>
-            <p class="mt-0.5 text-[11px] sm:text-xs text-[#9CA3AF] leading-snug">Из пода витрины обычно <code class="text-white">postgres.egisz-corp.svc.cluster.local:5432</code></p>
+            <p class="mt-0.5 text-[11px] sm:text-xs text-[#9CA3AF] leading-snug">Из пода витрины обычно <code class="text-white">postgres.egisz-monitor.svc.cluster.local:5432</code></p>
           </div>
 
           <div class="grid gap-2.5 grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(5.5rem,6rem)] md:items-end">
@@ -164,31 +164,55 @@ PAGE = """
           </button>
         </div>
 
-        <!-- ETL + sync trigger: fields left, button right on large screens -->
-        <div class="pt-3 border-t border-[#1B2940] flex flex-col gap-4 lg:flex-row lg:items-stretch lg:gap-8">
-          <div class="min-w-0 flex-1 lg:min-w-0 lg:basis-[58%]">
+        <!-- ETL (узкая колонка) · снимок PG (flex-1) · синхронизация справа -->
+        <div class="pt-3 border-t border-[#1B2940] flex flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,15.5rem)_minmax(0,1fr)_minmax(0,19rem)] lg:gap-5 lg:items-stretch">
+          <div class="min-w-0 w-full max-w-md mx-auto lg:mx-0 lg:max-w-none">
             <div class="mb-2">
               <h2 class="text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">ETL Configuration</h2>
             </div>
-            <div class="grid gap-3 grid-cols-1 sm:grid-cols-2 xl:grid-cols-[minmax(0,7.5rem)_minmax(0,9.5rem)_minmax(0,1fr)] xl:items-end">
-              <label class="block w-full max-w-[8rem] sm:max-w-none">
+            <div class="grid gap-3 grid-cols-1 sm:grid-cols-2 sm:items-end lg:grid-cols-1">
+              <label class="block w-full max-w-[8rem] sm:max-w-none lg:max-w-none">
                 <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">batch_size</span>
                 <input name="etl_batch" type="number" value="{{ etl.batch_size }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
               </label>
-              <label class="block w-full max-w-[10rem] sm:max-w-none">
+              <label class="block w-full max-w-[10rem] sm:max-w-none lg:max-w-none">
                 <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">sync_window_days</span>
                 <input name="etl_sync_days" type="number" value="{{ etl.sync_window_days }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
               </label>
-              <label class="block flex flex-col justify-end pb-0.5 sm:col-span-2 xl:col-span-1">
-                <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563] mb-1.5">full_scan</span>
-                <div class="flex items-center min-h-[3.125rem] sm:min-h-0 sm:items-center sm:pb-1.5">
-                  <input type="checkbox" name="etl_full_scan" value="1" {{ 'checked' if etl.full_scan else '' }} class="h-4 w-4 rounded border-[#1B2940] bg-[#121826] text-[#509EE3] focus:ring-[#509EE3] focus:ring-offset-[#0F1522]"/>
-                  <span class="ml-2 text-xs text-[#9CA3AF]">Включить полный скан</span>
-                </div>
-              </label>
+            </div>
+            <div class="mt-3 flex items-center gap-2.5 w-full min-h-[2.75rem]">
+              <input type="checkbox" name="etl_full_scan" value="1" {{ 'checked' if etl.full_scan else '' }} class="h-4 w-4 shrink-0 rounded border-[#1B2940] bg-[#121826] text-[#509EE3] focus:ring-[#509EE3] focus:ring-offset-[#0F1522]"/>
+              <span class="text-xs text-[#9CA3AF]">Полный скан</span>
             </div>
           </div>
-          <div class="lg:flex-shrink-0 lg:basis-[38%] lg:max-w-md lg:border-l lg:border-[#1B2940] lg:pl-8 flex flex-col justify-start gap-2 min-w-0">
+          <div class="min-w-0 w-full rounded-lg border border-[#2D3F5E] bg-[#121826] px-3.5 py-3.5 flex flex-col gap-2 self-start lg:self-stretch">
+            <h2 class="text-[10px] uppercase tracking-[0.14em] text-[#509EE3] leading-tight">Последние значения в PostgreSQL</h2>
+            <p id="pgSnapshotHint" class="text-[11px] text-[#6B7280] leading-snug">Чтение по сохранённому YAML (как у фоновой синхронизации).</p>
+            <div class="space-y-2.5 text-sm leading-relaxed">
+              <div class="flex items-baseline gap-2 min-w-0 py-0.5">
+                <span class="text-[#9CA3AF] shrink-0 font-medium">Дата:</span>
+                <code id="pgSnapSyncAt" class="min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-sm" data-raw="" title="">—</code>
+                <button type="button" class="pg-snap-copy shrink-0 inline-flex items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-1 text-[#509EE3] hover:bg-[#1B2940]" data-copy="pgSnapSyncAt" title="Копировать" aria-label="Копировать">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
+                </button>
+              </div>
+              <div class="flex items-baseline gap-2 min-w-0 py-0.5">
+                <span class="text-[#9CA3AF] shrink-0 font-medium">LOGID:</span>
+                <code id="pgSnapLogId" class="min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-sm" data-raw="" title="">—</code>
+                <button type="button" class="pg-snap-copy shrink-0 inline-flex items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-1 text-[#509EE3] hover:bg-[#1B2940]" data-copy="pgSnapLogId" title="Копировать" aria-label="Копировать">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
+                </button>
+              </div>
+              <div class="flex items-baseline gap-2 min-w-0 py-0.5">
+                <span class="text-[#9CA3AF] shrink-0 font-medium">EGMID:</span>
+                <code id="pgSnapEgmid" class="min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-sm" data-raw="" title="">—</code>
+                <button type="button" class="pg-snap-copy shrink-0 inline-flex items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-1 text-[#509EE3] hover:bg-[#1B2940]" data-copy="pgSnapEgmid" title="Копировать" aria-label="Копировать">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="lg:flex-shrink-0 lg:w-[min(100%,20rem)] lg:border-l lg:border-[#1B2940] lg:pl-6 flex flex-col justify-start gap-2 min-w-0">
             <h2 class="text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">Синхронизация Firebird -&gt; PostgreSQL</h2>
             <p class="text-[11px] text-[#9CA3AF] leading-snug">Полный цикл ETL в фоне. Не закрывайте вкладку до завершения.</p>
             <button type="button" id="btnSync" class="inline-flex w-full sm:w-fit min-h-[2.875rem] min-w-[200px] items-center justify-center rounded-md border border-[#F59F36] bg-[#F59F36] px-3.5 py-2.5 font-mono text-sm text-[#121826] transition hover:bg-[#FFB95D]">
@@ -213,7 +237,12 @@ PAGE = """
             </div>
           </div>
           <div class="rounded-md bg-[#0B1120] px-3 py-2 text-sm text-[#93A1B6] border border-[#1B2940] min-h-0 min-w-0">
-            <div class="mb-1 text-[10px] uppercase tracking-[0.16em] text-[#509EE3]">system log</div>
+            <div class="mb-1 flex items-center justify-between gap-2 min-w-0">
+              <div class="text-[10px] uppercase tracking-[0.16em] text-[#509EE3]">system log</div>
+              <button type="button" class="pg-snap-copy shrink-0 inline-flex items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-1 text-[#509EE3] hover:bg-[#1B2940]" data-copy="syncStatus" title="Копировать лог" aria-label="Копировать лог">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
+              </button>
+            </div>
             <pre id="syncStatus" class="whitespace-pre-wrap font-mono text-[11px] text-[#D1D5DB] min-h-[2.25rem] max-h-28 lg:max-h-40 overflow-y-auto leading-relaxed"></pre>
           </div>
         </div>
@@ -409,6 +438,89 @@ PAGE = """
     frac.textContent = pct + '%';
     meta.textContent = lineA + String.fromCharCode(10) + lineB;
   }
+  const PG_SNAP_MONTHS_RU = [
+    'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+    'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
+  ];
+  function formatPgSyncAtRu(isoStr) {
+    if (!isoStr) return '—';
+    const d = new Date(isoStr);
+    if (Number.isNaN(d.getTime())) return isoStr;
+    const day = d.getUTCDate();
+    const mon = PG_SNAP_MONTHS_RU[d.getUTCMonth()];
+    const hh = String(d.getUTCHours()).padStart(2, '0');
+    const mm = String(d.getUTCMinutes()).padStart(2, '0');
+    return day + ' ' + mon + ' ' + hh + ':' + mm;
+  }
+  async function pollPgSnapshot() {
+    const hint = document.getElementById('pgSnapshotHint');
+    const syncEl = document.getElementById('pgSnapSyncAt');
+    const logEl = document.getElementById('pgSnapLogId');
+    const egEl = document.getElementById('pgSnapEgmid');
+    if (!hint || !syncEl || !logEl || !egEl) return;
+    try {
+      const r = await fetch('/api/pg/sync-snapshot');
+      const j = await r.json();
+      if (!j.ok) {
+        hint.textContent = j.error || 'Не удалось прочитать PostgreSQL';
+        hint.classList.add('text-orange-300');
+        syncEl.textContent = '—';
+        syncEl.setAttribute('data-raw', '');
+        syncEl.title = '';
+        logEl.textContent = '—';
+        logEl.setAttribute('data-raw', '');
+        logEl.title = '';
+        egEl.textContent = '—';
+        egEl.setAttribute('data-raw', '');
+        egEl.title = '';
+        return;
+      }
+      hint.textContent = 'Чтение по сохранённому YAML (как у фоновой синхронизации).';
+      hint.classList.remove('text-orange-300');
+      const ds = j.sync_at != null && String(j.sync_at).trim() !== '' ? String(j.sync_at) : null;
+      if (ds) {
+        syncEl.textContent = formatPgSyncAtRu(ds);
+        syncEl.setAttribute('data-raw', ds);
+        syncEl.title = ds;
+      } else {
+        syncEl.textContent = '—';
+        syncEl.setAttribute('data-raw', '');
+        syncEl.title = '';
+      }
+      const logStr = j.log_id != null ? String(j.log_id) : null;
+      logEl.textContent = logStr || '—';
+      logEl.setAttribute('data-raw', logStr || '');
+      logEl.title = logStr || '';
+      const egStr = j.egmid != null ? String(j.egmid) : null;
+      egEl.textContent = egStr || '—';
+      egEl.setAttribute('data-raw', egStr || '');
+      egEl.title = egStr || '';
+    } catch (e) {
+      hint.textContent = String(e);
+      hint.classList.add('text-orange-300');
+    }
+  }
+  document.querySelectorAll('.pg-snap-copy').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      const id = btn.getAttribute('data-copy');
+      const el = id ? document.getElementById(id) : null;
+      const rawAttr = el && el.getAttribute ? el.getAttribute('data-raw') : null;
+      const raw = (rawAttr != null && rawAttr !== '') ? rawAttr : (el && el.textContent ? el.textContent.trim() : '');
+      if (!raw || raw === '—') return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(raw).catch(function () {});
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = raw;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } catch (e2) {}
+        document.body.removeChild(ta);
+      }
+    });
+  });
   async function pollSync() {
     const el = document.getElementById('syncStatus');
     try {
@@ -477,14 +589,22 @@ PAGE = """
     el.textContent = j.message || JSON.stringify(j);
     await pollSync();
   };
-  setInterval(pollSync, 1200);
+  setInterval(function () {
+    pollSync();
+    pollPgSnapshot();
+  }, 1200);
   pollSync();
+  pollPgSnapshot();
   refreshConnStatusStrip();
   window.addEventListener('pageshow', function () {
     pollSync();
+    pollPgSnapshot();
   });
   document.addEventListener('visibilitychange', function () {
-    if (document.visibilityState === 'visible') pollSync();
+    if (document.visibilityState === 'visible') {
+      pollSync();
+      pollPgSnapshot();
+    }
   });
   </script>
 </body>
@@ -623,6 +743,22 @@ def create_app() -> Flask:
         except Exception as e:  # pragma: no cover
             return jsonify({"ok": False, "message": f"PostgreSQL: {e}"})
         return jsonify({"ok": True, "message": "PostgreSQL: OK"})
+
+    @app.get("/api/pg/sync-snapshot")
+    def api_pg_sync_snapshot():  # type: ignore[no-untyped-def]
+        p = config_path()
+        if not p.is_file():
+            return jsonify({"ok": False, "error": "Нет файла конфигурации на сервере."})
+        try:
+            cfg = load_corp_config(p)
+            con = connect_pg(cfg.postgres)
+            try:
+                snap = fetch_pg_sync_snapshot(con, cfg.etl.pipeline_name)
+            finally:
+                con.close()
+            return jsonify({"ok": True, **snap})
+        except Exception as e:  # pragma: no cover
+            return jsonify({"ok": False, "error": str(e)})
 
     from egisz_monitor_corp.sync_routes import register_sync_routes
 

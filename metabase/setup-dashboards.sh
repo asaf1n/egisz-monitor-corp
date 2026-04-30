@@ -290,14 +290,65 @@ create_card() {
   local template_tags
   template_tags="$(
     echo "$parsed_json" | jq -c --argjson meta "$meta_json" '
+      # Сопоставление поля фильтра: точное имя из JSON, затем колонка с «IPS» в имени (обход расхождений UTF-8 в shell/jq).
       def resolve_field_id($meta; $tr; $fn):
-        [
-          $meta.tables[]?
-          | select(.name == $tr or ((.schema // "public") + "." + .name) == $tr)
-          | .fields[]?
-          | select(.name == $fn or .display_name == $fn)
-          | .id
-        ] | first;
+        (
+          [
+            $meta.tables[]?
+            | select(.name == $tr or ((.schema // "public") + "." + .name) == $tr)
+            | .fields[]?
+            | select(.name == $fn or .display_name == $fn)
+            | .id
+          ] | first
+        ) // (
+          if ($fn | type) == "string" and ($fn | contains("IPS")) then
+            [
+              $meta.tables[]?
+              | select(.name == $tr or ((.schema // "public") + "." + .name) == $tr)
+              | .fields[]?
+              | select((.name | type) == "string" and (.name | contains("IPS")))
+              | .id
+            ] | first
+          else
+            null
+          end
+        ) // (
+          if $fn == "Обработано IPS" then
+            [
+              $meta.tables[]?
+              | select(.name == $tr or ((.schema // "public") + "." + .name) == $tr)
+              | .fields[]?
+              | select(.name == "Обработано" or .display_name == "Обработано")
+              | .id
+            ] | first
+          else
+            null
+          end
+        ) // (
+          if $tr == "v_rpt_documents_no_response_ui" then
+            [
+              $meta.tables[]?
+              | select(.name == $tr or ((.schema // "public") + "." + .name) == $tr)
+              | .fields[]?
+              | select(.base_type == "type/DateTimeWithLocalTZ")
+              | .id
+            ] | first
+          else
+            null
+          end
+        ) // (
+          if $tr == "v_egisz_transactions_enriched_ui" then
+            ([
+              $meta.tables[]?
+              | select(.name == $tr or ((.schema // "public") + "." + .name) == $tr)
+              | .fields[]?
+              | select(.base_type == "type/Date")
+              | .id
+            ] | unique | if length == 1 then .[0] else null end)
+          else
+            null
+          end
+        );
       (.dataset_query.native["template-tags"] // {}) as $tags
       | (.["metabase-field-filters"] // {}) as $ff
       | if ($ff | length) == 0 then
@@ -521,24 +572,23 @@ delete_legacy_corp_cards
 authenticate
 APP_DB_ID="$(ensure_app_database)"
 
-# Metabase 0.60+ sync может отставать: без полей витрины create_card (field filters) падает с «metabase-field-filters: field not found».
-log_info "Waiting for DWH view field metadata (field filters on «Обработано»)…"
+# После смены DDL в Postgres Metabase не подхватывает поля до sync (раньше sync вызывался только при POST /api/database).
+log_info "Metabase: sync_schema for application database id=${APP_DB_ID}…"
+api_request POST "/api/database/${APP_DB_ID}/sync_schema" "{}" >/dev/null || true
+
+# Готовность витрины: таблица есть и поля просканированы (не полагаемся на кириллицу в jq внутри контейнера).
+log_info "Waiting for DWH view field metadata (v_egisz_transactions_enriched_ui)…"
 for _i in $(seq 1 90); do
   APP_DB_METADATA_JSON="" # сбрасываем кэш get_database_metadata; иначе застреваем на первом (неполном) снимке
   _nf="$(get_database_metadata | jq '
-    [ .tables[]? | select(.name == "v_egisz_transactions_enriched_ui")
-        | .fields[]?
-        | select(
-            .name == "processed_at" or .name == "Обработано" or .display_name == "Обработано"
-          ) ]
-    | length
+    ([.tables[]? | select(.name == "v_egisz_transactions_enriched_ui")] | first | .fields // []) | length
   ')"
-  if [ "${_nf:-0}" -ge 1 ] 2>/dev/null; then
+  if [ "${_nf:-0}" -ge 15 ] 2>/dev/null; then
     log_info "DWH view fields in metadata (count=${_nf}) — OK"
     break
   fi
   if [ "$_i" -eq 90 ]; then
-    echo "[dashboards] ERROR: v_egisz_transactions_enriched_ui (Обработано) not in metadata after 180s — field filters will fail" >&2
+    echo "[dashboards] ERROR: v_egisz_transactions_enriched_ui: недостаточно полей в metadata за 180s (получено ${_nf:-0}, нужно ≥15). Примените sql/001_schema.sql к egisz_reports; в Metabase: Admin → Databases → Sync database schema." >&2
     exit 1
   fi
   sleep 2

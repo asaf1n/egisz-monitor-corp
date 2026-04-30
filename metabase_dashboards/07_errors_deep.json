@@ -16,7 +16,7 @@
       "name": "07 · Топ причин отказов ЕГИСЗ",
       "description": "Самые частые смысловые сводки по первому элементу «Ошибки JSON» на транзакцию (egisz_friendly_error_item; один документ = один учёт).",
       "table_ref": "v_egisz_transactions_enriched_ui",
-      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
+      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано IPS" } },
       "dataset_query": {
         "type": "native",
         "native": {
@@ -62,7 +62,7 @@
       "name": "07 · Ошибки по клиникам и СЭМД",
       "description": "Частые смысловые сводки в разрезе клиник и типов СЭМД: по первому элементу «Ошибки JSON» на транзакцию (один документ = один учёт).",
       "table_ref": "v_egisz_transactions_enriched_ui",
-      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
+      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано IPS" } },
       "dataset_query": {
         "type": "native",
         "native": {

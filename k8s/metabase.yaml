@@ -1,11 +1,11 @@
 # Metabase OSS + провижининг (metabase/provision.sh, setup-dashboards.sh).
-# Перед первым запуском: схема витрины (egisz-corp Job или apply-schema) и секрет postgres.
+# Перед первым запуском: схема витрины (egisz-monitor Job или apply-schema) и секрет postgres.
 # Первый администратор UI: email/password из Secret metabase-admin (репозиторий: admin@egisz.local / egisz, см. metabase-admin-secret.example.yaml).
 apiVersion: v1
 kind: Service
 metadata:
   name: metabase
-  namespace: egisz-corp
+  namespace: egisz-monitor
   labels:
     app.kubernetes.io/name: metabase
 spec:
@@ -23,7 +23,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: metabase-lb
-  namespace: egisz-corp
+  namespace: egisz-monitor
   labels:
     app.kubernetes.io/name: metabase
 spec:
@@ -39,7 +39,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: metabase
-  namespace: egisz-corp
+  namespace: egisz-monitor
   labels:
     app.kubernetes.io/name: metabase
 spec:
@@ -57,10 +57,10 @@ spec:
     spec:
       containers:
         - name: metabase
-          # Сборка: docker build -f metabase/Dockerfile -t egisz-corp-metabase:latest . && docker tag egisz-corp-metabase:latest egisz-corp-metabase:local
+          # Сборка: docker build -f metabase/Dockerfile -t egisz-monitor-metabase:latest . && docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:local
           # IfNotPresent: Docker Desktop подставляет образ из локального Docker Engine (см. docs.docker.com/desktop/kubernetes).
           # Тег :k8s-v9 (не :local): bump при изменении Dockerfile/скриптов/дашбордов — иначе kubelet Docker Desktop держит старый digest для имени тега.
-          image: egisz-corp-metabase:k8s-v9
+          image: egisz-monitor-metabase:k8s-v9
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000
@@ -80,7 +80,7 @@ spec:
             - name: MB_PASSWORD_LENGTH
               value: "4"
             - name: PGHOST
-              value: "postgres.egisz-corp.svc.cluster.local"
+              value: "postgres.egisz-monitor.svc.cluster.local"
             - name: METABASE_ADMIN_EMAIL
               valueFrom:
                 secretKeyRef:
@@ -117,7 +117,7 @@ spec:
             - name: MB_DB_TYPE
               value: "postgres"
             - name: MB_DB_HOST
-              value: "postgres.egisz-corp.svc.cluster.local"
+              value: "postgres.egisz-monitor.svc.cluster.local"
             - name: MB_DB_PORT
               value: "5432"
             - name: MB_DB_DBNAME

@@ -4,7 +4,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: egisz-metabase-app-db-reset
-  namespace: egisz-corp
+  namespace: egisz-monitor
 spec:
   backoffLimit: 2
   ttlSecondsAfterFinished: 600

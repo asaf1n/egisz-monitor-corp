@@ -17,7 +17,7 @@
       "description": "Процент успешных отправок по клиникам с JID для различения одинаковых наименований.",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": {
-        "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" }
+        "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано IPS" }
       },
       "dataset_query": {
         "type": "native",
@@ -74,7 +74,7 @@
       "description": "Процент успешных отправок по типам документов.",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": {
-        "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" }
+        "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано IPS" }
       },
       "dataset_query": {
         "type": "native",
@@ -131,7 +131,7 @@
       "description": "Счётчики строк без JID и с расхождением OID в факте (OID организации) и в справочнике (OID клиники), оба заданы.",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": {
-        "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" }
+        "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано IPS" }
       },
       "dataset_query": {
         "type": "native",
@@ -174,12 +174,12 @@
       "description": "Сводные счётчики по fact/UI: пустой localUid, пустой код СЭМД, успешные ответы без даты регистрации. При появлении в DWH явных правил обязательных атрибутов СЭМД их можно добавить отдельными карточками.",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": {
-        "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" }
+        "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано IPS" }
       },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT COUNT(*) FILTER (WHERE NULLIF(BTRIM(\"localUid СЭМД\"::text), '') IS NULL)::bigint AS \"Без localUid\", COUNT(*) FILTER (WHERE NULLIF(BTRIM(\"Код СЭМД\"::text), '') IS NULL)::bigint AS \"Без кода СЭМД\", COUNT(*) FILTER (WHERE \"Статус\" = 'success' AND \"Дата регистрации\" IS NULL)::bigint AS \"Успех без даты регистрации\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]]",
+          "query": "SELECT COUNT(*) FILTER (WHERE NULLIF(BTRIM(\"localUid СЭМД\"::text), '') IS NULL)::bigint AS \"Без localUid\", COUNT(*) FILTER (WHERE NULLIF(BTRIM(\"Код СЭМД\"::text), '') IS NULL)::bigint AS \"Без кода СЭМД\", COUNT(*) FILTER (WHERE \"Статус\" = 'success' AND \"Зарегистрирован в ЕГИСЗ РЭМД\" IS NULL)::bigint AS \"Успех без даты регистрации\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]]",
           "template-tags": {
             "dwh_date": {
               "id": "f6000004-0004-4004-8004-000000000001",

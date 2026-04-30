@@ -22,7 +22,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH last_day AS ( SELECT date_trunc('day', COALESCE((SELECT MAX(\"Обработано\") FROM public.v_egisz_transactions_enriched_ui), NOW())) AS d ) SELECT (SELECT COUNT(*)::bigint FROM public.v_egisz_transactions_enriched_ui t CROSS JOIN last_day WHERE t.\"Обработано\" >= last_day.d AND t.\"Обработано\" < last_day.d + INTERVAL '1 day') AS \"Обработано за последний день в данных\", (SELECT ROUND(100.0 * SUM(CASE WHEN t2.\"Статус\" = 'error' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) FROM public.v_egisz_transactions_enriched_ui t2 CROSS JOIN last_day WHERE t2.\"Обработано\" >= last_day.d AND t2.\"Обработано\" < last_day.d + INTERVAL '1 day') AS \"% ошибок за этот день\", (SELECT COUNT(*)::bigint FROM public.v_rpt_documents_no_response_ui p WHERE 1=1 [[AND {{dwh_date}}]]) AS \"Документов в очереди\"",
+          "query": "WITH last_day AS ( SELECT date_trunc('day', COALESCE((SELECT MAX(\"Обработано IPS\") FROM public.v_egisz_transactions_enriched_ui), NOW())) AS d ) SELECT (SELECT COUNT(*)::bigint FROM public.v_egisz_transactions_enriched_ui t CROSS JOIN last_day WHERE t.\"Обработано IPS\" >= last_day.d AND t.\"Обработано IPS\" < last_day.d + INTERVAL '1 day') AS \"Обработано за последний день в данных\", (SELECT ROUND(100.0 * SUM(CASE WHEN t2.\"Статус\" = 'error' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) FROM public.v_egisz_transactions_enriched_ui t2 CROSS JOIN last_day WHERE t2.\"Обработано IPS\" >= last_day.d AND t2.\"Обработано IPS\" < last_day.d + INTERVAL '1 day') AS \"% ошибок за этот день\", (SELECT COUNT(*)::bigint FROM public.v_rpt_documents_no_response_ui p WHERE 1=1 [[AND {{dwh_date}}]]) AS \"Документов в очереди\"",
           "template-tags": {
             "dwh_date": {
               "id": "f9000001-0001-4001-8001-000000000001",
@@ -53,7 +53,7 @@
       "name": "09 · Статусы за период (доля)",
       "description": "Круговая диаграмма: успех / ошибка / неизвестно по дате «Обработано».",
       "table_ref": "v_egisz_transactions_enriched_ui",
-      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
+      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано IPS" } },
       "dataset_query": {
         "type": "native",
         "native": {
@@ -89,7 +89,7 @@
       "name": "09 · Топ причин ошибок (ЕГИСЗ, доля)",
       "description": "До 8 наиболее частых текстов по первому элементу «Ошибки JSON»; хвост — «Прочие типы ошибок». «Итого» = все error за период.",
       "table_ref": "v_egisz_transactions_enriched_ui",
-      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
+      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано IPS" } },
       "dataset_query": {
         "type": "native",
         "native": {
@@ -125,7 +125,7 @@
       "name": "09 · Ошибки по СЭМД (доля)",
       "description": "Круговая диаграмма по коду СЭМД для error (топ 10 + «Остальные»; «Итого» = все error).",
       "table_ref": "v_egisz_transactions_enriched_ui",
-      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
+      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано IPS" } },
       "dataset_query": {
         "type": "native",
         "native": {
@@ -161,7 +161,7 @@
       "name": "09 · Объём по СЭМД и клиникам",
       "description": "Объём транзакций с разрезом по типу СЭМД и клинике. Фильтр — по дате «Обработано».",
       "table_ref": "v_egisz_transactions_enriched_ui",
-      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
+      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано IPS" } },
       "dataset_query": {
         "type": "native",
         "native": {
@@ -197,7 +197,7 @@
       "name": "09 · Успешных транзакций",
       "description": "Количество успешных транзакций в выбранном периоде (дата обработки).",
       "table_ref": "v_egisz_transactions_enriched_ui",
-      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
+      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано IPS" } },
       "dataset_query": {
         "type": "native",
         "native": {
@@ -228,7 +228,7 @@
       "name": "09 · Доля ошибок по срезам (таблица)",
       "description": "Доля ошибок в разрезе СЭМД, клиники, типа ошибки. Фильтр по «Обработано».",
       "table_ref": "v_egisz_transactions_enriched_ui",
-      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
+      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано IPS" } },
       "dataset_query": {
         "type": "native",
         "native": {
@@ -298,7 +298,7 @@
       "name": "09 · Рейтинг формулировок ошибок ЕГИСЗ",
       "description": "По первому элементу «Ошибки JSON» на транзакцию (`egisz_friendly_error_item`). Фильтр по дате «Обработано».",
       "table_ref": "v_egisz_transactions_enriched_ui",
-      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
+      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано IPS" } },
       "dataset_query": {
         "type": "native",
         "native": {
@@ -332,7 +332,7 @@
       "name": "09 · Рейтинг ошибок по коду СЭМД",
       "description": "Разрез по коду СЭМД при статусе error. Фильтр по «Обработано».",
       "table_ref": "v_egisz_transactions_enriched_ui",
-      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
+      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано IPS" } },
       "dataset_query": {
         "type": "native",
         "native": {
@@ -366,7 +366,7 @@
       "name": "09 · Рейтинг клиник по ошибкам",
       "description": "Топ клиник по числу error за период. Фильтр по «Обработано».",
       "table_ref": "v_egisz_transactions_enriched_ui",
-      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано" } },
+      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано IPS" } },
       "dataset_query": {
         "type": "native",
         "native": {

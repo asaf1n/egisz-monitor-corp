@@ -33,7 +33,7 @@
       "metabase-field-filters": {
         "dwh_date": {
           "table_ref": "v_egisz_transactions_enriched_ui",
-          "field_name": "Обработано"
+          "field_name": "Обработано IPS"
         }
       },
       "dataset_query": {
@@ -103,7 +103,7 @@
       "metabase-field-filters": {
         "dwh_date": {
           "table_ref": "v_egisz_transactions_enriched_ui",
-          "field_name": "Обработано"
+          "field_name": "Обработано IPS"
         }
       },
       "dataset_query": {

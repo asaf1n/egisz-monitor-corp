@@ -1,5 +1,5 @@
 # Конфиг для деплоя в Kubernetes на Windows (локальный Firebird на хосте).
-# start.ps1 подставляет этот файл в Secret egisz-corp-conf-ui-config.
+# start.ps1 подставляет этот файл в Secret egisz-monitor-conf-ui-config.
 #
 # Firebird: из пода на Windows — host.docker.internal.
 
@@ -15,7 +15,7 @@ firebird:
   page_size: 4096
 
 postgres:
-  host: "postgres.egisz-corp.svc.cluster.local"
+  host: "postgres.egisz-monitor.svc.cluster.local"
   port: 5432
   database: "egisz_reports"
   user: "egisz"

@@ -13,7 +13,7 @@ from egisz_monitor_corp.pg_warehouse import apply_sql_files, connect_pg, ensure_
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="egisz-corp")
+    p = argparse.ArgumentParser(prog="egisz-monitor")
     p.add_argument("--config", type=str, default=None, help="Path to egisz_corp.yaml (or EGISZ_CORP_CONFIG)")
     sub = p.add_subparsers(dest="cmd", required=True)
 

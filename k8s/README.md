@@ -1,18 +1,18 @@
 # Kubernetes (`k8s/`)
 
-Каталог содержит манифесты для namespace **`egisz-corp`**: PostgreSQL (витрина), Metabase (аналитика + провижининг дашбордов), Config UI, Job’ы схемы SQL. **Отдельный Postgres в Docker Compose из репозитория убран** — витрина только в кластере; образы `egisz-conf-ui` и `egisz-corp-metabase` по-прежнему собираются **docker build** на хосте и подгружаются в kind / используются Docker Desktop K8s. Типовой сценарий: **`.\start.ps1 -Action deploy`** или **`reset-deploy`** (полный сброс: удаление старого compose-тома при наличии, `--no-cache` сборка образов, пересоздание namespace). Подробности: [`docs/METABASE.md`](../docs/METABASE.md).
+Каталог содержит манифесты для namespace **`egisz-monitor`**: PostgreSQL (витрина), Metabase (аналитика + провижининг дашбордов), Config UI, Job’ы схемы SQL. **Отдельный Postgres в Docker Compose из репозитория убран** — витрина только в кластере; образы `egisz-conf-ui` и `egisz-monitor-metabase` собираются **docker build** на хосте и подгружаются в kind / используются Docker Desktop K8s. Типовой сценарий: **`.\start.ps1 -Action deploy`** или **`reset-deploy`** (полный сброс: удаление старого compose-тома при наличии, `--no-cache` сборка образов, пересоздание namespace). Подробности: [`docs/METABASE.md`](../docs/METABASE.md).
 
 | Путь / объект | Назначение |
 | :--- | :--- |
-| `namespace.yaml` | Namespace `egisz-corp` |
+| `namespace.yaml` | Namespace `egisz-monitor` |
 | `postgres/*` | StatefulSet Postgres, сервисы, Job `egisz-reports-schema-init` (`sql/001_schema.sql`, `002_etl_state.sql`) |
-| `metabase.yaml` | Deployment Metabase (`egisz-corp-metabase:k8s-v9`, см. ниже), Service (NodePort 30300, `metabase-lb`), `hostPort` 3000 для `http://127.0.0.1:3000/` |
+| `metabase.yaml` | Deployment Metabase (`egisz-monitor-metabase:k8s-v9`, см. ниже), Service (NodePort 30300, `metabase-lb`), `hostPort` 3000 для `http://127.0.0.1:3000/` |
 | `metabase-admin-secret*.yaml` | Учётка администратора API/UI Metabase (шаблон `*.example`) |
 | `conf-ui.yaml` | Config UI (ETL-конфиг) |
 | `local/egisz_corp.yaml` | Пример конфигурации для секрета `egisz-corp-conf-ui-config` (локальная отладка) |
 | `airflow/` | Отдельно: Helm/Airflow (см. `k8s/airflow/README.md`) |
 
-**Образ Metabase в кластере:** `egisz-corp-metabase:k8s-v9` (версионируемый тег в манифесте; bump при изменении `metabase_dashboards/` или скриптов), `imagePullPolicy: IfNotPresent` — образ собирается локально (`metabase/Dockerfile`, `.\start.ps1 -Action build` также создаёт `:local` для `metabase/provision-local.ps1`). Если в поде **нет** `/app/verify-corp-stack.sh`: `.\metabase\force-k8s-mb-image.ps1` или `build` + `apply`/`deploy`.
+**Образ Metabase в кластере:** `egisz-monitor-metabase:k8s-v9` (версионируемый тег в манифесте; bump при изменении `metabase_dashboards/` или скриптов), `imagePullPolicy: IfNotPresent` — образ собирается локально (`metabase/Dockerfile`, `.\start.ps1 -Action build` также создаёт `:local` для `metabase/provision-local.ps1`). Если в поде **нет** `/app/verify-corp-stack.sh`: `.\metabase\force-k8s-mb-image.ps1` или `build` + `apply`/`deploy`.
 
 ---
 
@@ -59,6 +59,7 @@
 | **07 Глубокий анализ ошибок** | Тексты `errors_json`; период «Обработано». |
 | **08 Агрегация ожидающих** | Очередь по клиникам, возрасту, СЭМД; период «Отправлено». |
 | **09 Управленческий дашборд** | KPI, % ошибок, очередь, срезы по периоду. |
+| **10 Топы ошибок** | Сводки и рейтинги по отказам РЭМД (`egisz_friendly_*`), СЭМД, клиникам. |
 
 ### Конфигурация (примеры)
 * `config/egisz_corp.yaml` или переменные окружения.
@@ -68,7 +69,7 @@
 
 | Сервис | В кластере | Примечание |
 | :--- | :--- | :--- |
-| **PostgreSQL** | `postgres.egisz-corp.svc.cluster.local:5432` | Витрина `egisz_reports` |
+| **PostgreSQL** | `postgres.egisz-monitor.svc.cluster.local:5432` | Витрина `egisz_reports` |
 | **Metabase** | `metabase:3000` | С хоста: LB / `hostPort` 3000 / port-forward, см. `docs/METABASE.md` |
 | **Config UI** | `conf-ui:8080` | Конфигурация ETL |
 | **Airflow** | согласно `k8s/airflow/` | DAG ETL, опционально |

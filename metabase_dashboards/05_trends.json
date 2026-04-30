@@ -20,7 +20,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT DATE(COALESCE(\"Дата регистрации\", \"Обработано\")) AS \"Дата\", \"Статус\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] GROUP BY 1, 2 ORDER BY 1 ASC",
+          "query": "SELECT DATE(COALESCE(\"Зарегистрирован в ЕГИСЗ РЭМД\", \"Обработано IPS\")) AS \"Дата\", \"Статус\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] GROUP BY 1, 2 ORDER BY 1 ASC",
           "template-tags": {
             "dwh_date": {
               "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
@@ -174,7 +174,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH vit_ref AS ( SELECT COALESCE((SELECT MAX(\"Обработано\") FROM public.v_egisz_transactions_enriched_ui), NOW()) AS ref_ts ) SELECT date_trunc('hour', \"Обработано\") AS \"Час\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui CROSS JOIN vit_ref WHERE \"Обработано\" >= vit_ref.ref_ts - INTERVAL '72 hours' GROUP BY 1 ORDER BY 1 ASC",
+          "query": "WITH vit_ref AS ( SELECT COALESCE((SELECT MAX(\"Обработано IPS\") FROM public.v_egisz_transactions_enriched_ui), NOW()) AS ref_ts ) SELECT date_trunc('hour', \"Обработано IPS\") AS \"Час\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui CROSS JOIN vit_ref WHERE \"Обработано IPS\" >= vit_ref.ref_ts - INTERVAL '72 hours' GROUP BY 1 ORDER BY 1 ASC",
           "template-tags": {}
         },
         "database": 1

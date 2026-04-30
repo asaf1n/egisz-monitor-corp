@@ -13,7 +13,14 @@ APP_USER="${APP_DATABASE_USER:-egisz}"
 APP_PW="${APP_DATABASE_PASSWORD:-egisz}"
 
 mb_list() {
-  jq -c 'if type == "array" then . elif (.data | type == "array") then .data else [] end'
+  # Metabase 0.49+ обычно { "data": [...] }; реже обёртки — не даём ложный ND=0.
+  jq -c '
+    if type == "array" then .
+    elif (.data | type == "array") then .data
+    elif (.items | type == "array") then .items
+    elif (.data | type == "object") and (.data.items | type == "array") then .data.items
+    else [] end
+  '
 }
 
 log() {
@@ -61,8 +68,16 @@ if [ -z "${ROOT_ID}" ] || [ "${ROOT_ID}" = "null" ]; then
 fi
 
 ITEMS="$(curl -sS "${MB_URL}/api/collection/${ROOT_ID}/items" -H "X-Metabase-Session: ${TOKEN}")"
-ND="$(echo "${ITEMS}" | mb_list | jq -r '[.[] | select(.model == "dashboard")] | length')"
+ND="$(echo "${ITEMS}" | mb_list | jq -r '[.[] | select(((.model // "") | ascii_downcase) == "dashboard")] | length')"
 ND="${ND:-0}"
+
+# Fallback: в части сборок список «items» не содержит model=dashboard, хотя дашборды уже в коллекции.
+if [ "${ND:-0}" -lt 1 ]; then
+  ND="$(curl -sS "${MB_URL}/api/dashboard" -H "X-Metabase-Session: ${TOKEN}" | mb_list | jq -r --arg rid "${ROOT_ID}" '
+    [.[] | select(.collection_id != null and ((.collection_id | tostring) == ($rid | tostring)))] | length
+  ')"
+  ND="${ND:-0}"
+fi
 
 EXPECTED=0
 if [ -d /app/metabase_dashboards ]; then
@@ -92,7 +107,13 @@ EXEC_JSON="/app/metabase_dashboards/09_executive.json"
 if [ -f "${EXEC_JSON}" ]; then
   EXP_CARDS="$(jq '.cards | length' "${EXEC_JSON}")"
   EXEC_NAME="$(jq -r '.name' "${EXEC_JSON}")"
-  EXEC_DID="$(echo "${ITEMS}" | mb_list | jq -r --arg n "${EXEC_NAME}" '.[] | select(.model == "dashboard" and .name == $n) | .id' | head -n1)"
+  EXEC_DID="$(echo "${ITEMS}" | mb_list | jq -r --arg n "${EXEC_NAME}" '.[] | select(((.model // "") | ascii_downcase) == "dashboard" and .name == $n) | .id' | head -n1)"
+  if [ -z "${EXEC_DID}" ] || [ "${EXEC_DID}" = "null" ]; then
+    EXEC_DID="$(curl -sS "${MB_URL}/api/dashboard" -H "X-Metabase-Session: ${TOKEN}" | mb_list | jq -r --arg n "${EXEC_NAME}" --arg rid "${ROOT_ID}" '
+      [.[] | select(.name == $n and (.collection_id != null) and ((.collection_id | tostring) == ($rid | tostring)))]
+      | sort_by(.id) | last | .id // empty
+    ')"
+  fi
   if [ -z "${EXEC_DID}" ] || [ "${EXEC_DID}" = "null" ]; then
     log "FAIL: dashboard \"${EXEC_NAME}\" not in personal collection (provisioning may have failed)"
     exit 1

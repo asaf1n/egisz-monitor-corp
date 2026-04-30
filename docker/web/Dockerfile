@@ -16,6 +16,7 @@ RUN apt-get update \
 
 ENV FB_CLIENT_LIBRARY=/usr/local/lib/libfbclient.so
 
+# UI/HTML в egisz_monitor_corp/config_app.py устанавливается через pip install; после правок пересоберите образ: .\start.ps1 -Action apply (или build).
 COPY pyproject.toml README.md ./
 COPY egisz_monitor_corp ./egisz_monitor_corp
 COPY sql ./sql

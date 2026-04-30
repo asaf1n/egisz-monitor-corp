@@ -6,13 +6,15 @@
 #
 # Примеры:
 #   .\metabase\provision-local.ps1
-#   .\metabase\provision-local.ps1 -MetabaseUrl "http://127.0.0.1:3000" -AdminEmail "admin@egisz.local" -AdminPassword "egisz"
+#   .\metabase\provision-local.ps1 -MetabaseUrl "http://127.0.0.1:3000" -AdminEmail "admin@egisz.local" -AdminPassword (Read-Host -AsSecureString)
+#   # PS 7+: пароль из строки только для локальной отладки — ConvertTo-SecureString "egisz" -AsPlainText -Force
 # Учётка по умолчанию (и в k8s Secret metabase-admin / start.ps1): admin@egisz.local / egisz
 
 param(
     [string]$MetabaseUrl = "http://127.0.0.1:3000",
+    # Пустые строки — намеренно: ниже подставляются METABASE_ADMIN_* / ADMIN_* из окружения, иначе как в k8s (стр. 10).
     [string]$AdminEmail = "",
-    [string]$AdminPassword = ""
+    [SecureString]$AdminPassword = $null
 )
 
 $ErrorActionPreference = "Stop"
@@ -27,11 +29,15 @@ $email = $AdminEmail
 if (-not $email) { $email = $env:METABASE_ADMIN_EMAIL; if (-not $email) { $email = $env:ADMIN_EMAIL } }
 if (-not $email) { $email = "admin@egisz.local" }
 
-$pass = $AdminPassword
+$pass = $null
+if ($null -ne $AdminPassword) {
+    $cred = New-Object System.Management.Automation.PSCredential("_", $AdminPassword)
+    $pass = $cred.GetNetworkCredential().Password
+}
 if (-not $pass) { $pass = $env:METABASE_ADMIN_PASSWORD; if (-not $pass) { $pass = $env:ADMIN_PASSWORD } }
 if (-not $pass) { $pass = "egisz" }
 
-$image = "egisz-corp-metabase:local"
+$image = "egisz-monitor-metabase:local"
 Write-Host "[provision-local] Building $image from $RepoRoot ..." -ForegroundColor Cyan
 docker build -f (Join-Path $RepoRoot "metabase\Dockerfile") -t $image $RepoRoot
 if ($LASTEXITCODE -ne 0) { exit 1 }

@@ -7,7 +7,7 @@ dist/
 build/
 .venv/
 .env
-.egisz-corp-port-forward.pids
+.egisz-monitor-port-forward.pids
 
 # K8s secrets (created from *.example.yaml locally)
 k8s/postgres/postgres-secret.yaml
