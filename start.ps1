@@ -27,7 +27,7 @@ Set-Location $Root
 
 $script:KindClusterName = "egisz-local"
 
-function Warn-IfNestedUnderSiblingMonitor {
+function Write-NestedSiblingMonitorWarning {
     $leaf = Split-Path $Root -Leaf
     $parent = Split-Path $Root -Parent
     if (-not $parent) { return }
@@ -106,7 +106,7 @@ Edit k8s\local\egisz_corp.yaml for your Firebird alias and credentials on Window
 
 function Invoke-DockerBuild {
     param([switch]$DockerNoCache)
-    Warn-IfNestedUnderSiblingMonitor
+    Write-NestedSiblingMonitorWarning
     $nc = @()
     if ($DockerNoCache) {
         $nc = @("--no-cache")
@@ -135,7 +135,7 @@ function Test-KubectlResponds {
     return ($LASTEXITCODE -eq 0)
 }
 
-function Ensure-LocalKubernetesCluster {
+function Initialize-LocalKubernetesCluster {
     if (Test-KubectlResponds) {
         Write-Host "[kubectl] Cluster API is reachable." -ForegroundColor Green
         return
@@ -282,7 +282,7 @@ function Invoke-ResetMetabaseApplicationDatabase {
     )
     $ns = "egisz-corp"
     if (-not $AsDeployStep) {
-        Warn-IfNestedUnderSiblingMonitor
+        Write-NestedSiblingMonitorWarning
         Write-Banner "reset-metabase (application DB only)" Cyan
     } else {
         Write-Host "[kubectl] Сброс БД приложения Metabase (DROP/CREATE metabase в Postgres)..." -ForegroundColor Cyan
@@ -461,7 +461,7 @@ function Invoke-KubectlApply {
         [switch]$ResetMetabaseAppDb
     )
 
-    Ensure-LocalKubernetesCluster
+    Initialize-LocalKubernetesCluster
     if (-not (Test-KubectlResponds)) {
         Write-Host "ERROR: kubectl cluster-info failed." -ForegroundColor Red
         exit 1
@@ -878,9 +878,9 @@ function Show-DeployInfo {
 
 switch ($Action) {
     "help" { Show-Help }
-    "build" { Warn-IfNestedUnderSiblingMonitor; Invoke-DockerBuild -DockerNoCache:$DockerNoCache }
+    "build" { Write-NestedSiblingMonitorWarning; Invoke-DockerBuild -DockerNoCache:$DockerNoCache }
     "metabase-provision-local" {
-        Warn-IfNestedUnderSiblingMonitor
+        Write-NestedSiblingMonitorWarning
         $prov = Join-Path $Root "metabase\provision-local.ps1"
         if (-not (Test-Path $prov)) {
             Write-Host "ERROR: Missing $prov" -ForegroundColor Red
@@ -891,12 +891,12 @@ switch ($Action) {
     }
     "test" { Invoke-PythonTests }
     "verify" {
-        Warn-IfNestedUnderSiblingMonitor
+        Write-NestedSiblingMonitorWarning
         Invoke-K8sCorpStackVerify
     }
     "apply" {
-        Warn-IfNestedUnderSiblingMonitor
-        Ensure-LocalKubernetesCluster
+        Write-NestedSiblingMonitorWarning
+        Initialize-LocalKubernetesCluster
         Invoke-KindLoadImagesIfNeeded
         Invoke-KubectlApply
         Show-DeployInfo
@@ -911,21 +911,21 @@ switch ($Action) {
         Show-K8sNetworkLegend
     }
     "web" {
-        Warn-IfNestedUnderSiblingMonitor
+        Write-NestedSiblingMonitorWarning
         Invoke-CorpWebPortForward
     }
     "forward" {
-        Warn-IfNestedUnderSiblingMonitor
+        Write-NestedSiblingMonitorWarning
         Invoke-CorpWebPortForward
     }
     "stop-forward" {
-        Warn-IfNestedUnderSiblingMonitor
+        Write-NestedSiblingMonitorWarning
         Invoke-CorpStopPortForward
     }
     "deploy" {
-        Warn-IfNestedUnderSiblingMonitor
+        Write-NestedSiblingMonitorWarning
         Write-Banner 'egisz-monitor-corp K8s deploy (local)'
-        Ensure-LocalKubernetesCluster
+        Initialize-LocalKubernetesCluster
         Invoke-DockerBuild
         Invoke-KindLoadImagesIfNeeded
         Invoke-KubectlApply -ResetMetabaseAppDb
@@ -937,10 +937,10 @@ switch ($Action) {
         }
     }
     "reset-deploy" {
-        Warn-IfNestedUnderSiblingMonitor
+        Write-NestedSiblingMonitorWarning
         Write-Banner 'egisz-monitor-corp K8s reset-deploy (clean namespace)'
         Invoke-RemoveLegacyComposePostgresVolume
-        Ensure-LocalKubernetesCluster
+        Initialize-LocalKubernetesCluster
         Invoke-DockerBuild -DockerNoCache
         Invoke-KindLoadImagesIfNeeded
         Invoke-KubectlApply -ResetNamespace -ResetMetabaseAppDb

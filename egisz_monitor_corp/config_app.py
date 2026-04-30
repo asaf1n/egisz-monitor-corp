@@ -234,7 +234,7 @@ PAGE = """
     wrap.className = STRIP_BASE;
     textEl.className = 'leading-snug break-words max-w-[min(100%,64rem)]';
     if (j.running) {
-      wrap.classList.add('border-[#509EE3]/55', 'bg-[#509EE3]/18', 'text-[#BFDBFE]');
+      wrap.classList.add('border-blue-800/80', 'bg-blue-900/25', 'text-blue-400');
       textEl.textContent = 'Синхронизация';
       return;
     }
