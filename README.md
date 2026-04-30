@@ -1,111 +1,177 @@
 ## EGISZ Monitor Corp
 
-**EGISZ Monitor Corp** — корпоративный ETL-сервис для централизованного мониторинга и анализа процесса обмена данными между Медицинскими Информационными Системами (МИС) и федеральными сервисами ЕГИЗС (РЭМД). Система обеспечивает сквозную прослеживаемость документов через сбор данных из Firebird, парсинг SOAP-ответов и формирование аналитических витрин в PostgreSQL.
+**EGISZ Monitor Corp** — сервис для мониторинга обмена между медицинскими информационными системами и федеральным контуром ЕГИЗС / РЭМД. Он читает журнал Firebird, разбирает SOAP-ответы, сохраняет результат в PostgreSQL и отдаёт готовые витрины в Metabase.
 
-### Как устроен этот документ
+Основной поток данных:
 
-Разделы ниже следуют **текущему каркасу**: стек → синхронизация → выборка (сэмплинг) → кэш справочников → логика ETL и идентификация → таблица маппинга полей → отчёты Metabase → примеры конфигурации → схема сервисов в K8s. **По отдельности** каждый блок описывает один слой (источник, ETL, витрина, BI или окружение). **Вместе** они задают цепочку **Firebird (`EXCHANGELOG`) → парсинг `MSGTEXT` → PostgreSQL → Metabase**. Сопутствующие материалы: **`AGENTS.md`** — дерево модулей и путей для разработки; **`.cursorrules`** — домен интеграции, статусы, сигналы тревоги и интерпретация дашбордов; **`docs/METABASE.md`** — развёртывание и провижининг Metabase; **`docs/SYNC_DIAGNOSTICS.md`** — сверка объёмов и курсора ETL.
+```text
+Firebird EXCHANGELOG / EGISZ_MESSAGES
+  → парсинг MSGTEXT и транспортных полей
+  → PostgreSQL: fact_egisz_transactions, справочники, отчёты
+  → Metabase: преднастроенные дашборды
+```
 
-| Раздел README | Что даёт читателю |
+Смежные документы:
+
+- **`AGENTS.md`** — структура проекта и подсказки для разработки.
+- **`.cursorrules`** — доменная логика: СЭМД, статусы, сигналы тревоги, интерпретация отчётов.
+- **`docs/INTEGRATION_AUDIT.md`** — аудит сервиса (3 фокуса: техника/масштабируемость, бизнес-применение, healthcheck).
+- **`docs/METABASE.md`** — провижининг Metabase, фильтры дат, обновление дашбордов.
+- **`docs/KUBERNETES_LOCAL.md`** — локальный Kubernetes и сценарии `start.ps1`.
+- **`docs/SYNC_DIAGNOSTICS.md`** — сверка объёмов Firebird и PostgreSQL, проверка курсора синхронизации.
+
+### Стек
+
+| Слой | Используется |
 | :--- | :--- |
-| Стек, синхронизация, сэмплинг, кэш | Как устроен перенос данных и ограничения окна / батча |
-| Логика обработки, маппинг | Поля факта и правила `JID` / документа |
-| Описание отчётов Metabase | Соответствие бизнес-вопросов SQL и JSON дашбордов |
-| Конфигурация, инфраструктура | Подключения и роли сервисов (в т.ч. локальный K8s через `start.ps1`) |
+| Язык | Python 3.10 и новее |
+| Источник данных | Firebird, пакет `firebird-driver`, нативный клиент `fbclient` / переменная `FB_CLIENT_LIBRARY` |
+| Хранилище витрины | PostgreSQL, пакет `psycopg2-binary` |
+| Конфигурация | YAML через `PyYAML`; файл `config/egisz_corp.yaml` или путь из `EGISZ_CORP_CONFIG` |
+| Веб-интерфейс | Flask Config UI, ручной запуск синхронизации через `sync_routes.py` |
+| Планировщик | Apache Airflow, DAG `egisz_corp_firebird_to_postgres` |
+| Аналитика | Metabase поверх PostgreSQL, дашборды хранятся в `metabase_dashboards/*.json` |
 
-### Стек технологий
+Команды пакета зарегистрированы в `pyproject.toml`: **`egisz-corp`** и **`egisz-monitor`** ведут в один CLI-модуль `egisz_monitor_corp.cli`.
 
-| Слой | Технологии |
+### Синхронизация Firebird → PostgreSQL
+
+Главная процедура — **`run_sync`** в `egisz_monitor_corp.etl`. Она читает Firebird только `SELECT`-запросами и обновляет витрину в PostgreSQL.
+
+Инкремент строится по полю **`EXCHANGELOG.LOGID`**. Последний обработанный идентификатор хранится в `etl_state.last_log_id` для пайплайна из конфигурации, по умолчанию `firebird_exchangelog`. Если включить `full_scan: true`, курсор начинается с нуля, но выборка всё равно ограничивается настроенным окном `sync_window_days`.
+
+Один прогон выполняет следующие шаги:
+
+1. Загружает справочники `EGISZ_LICENSES` и `JPERSONS` в память процесса.
+2. Считает количество строк `EXCHANGELOG` после курсора для прогресса в интерфейсе. Ошибка этого подсчёта не останавливает синхронизацию.
+3. Читает журнал страницами: `SELECT FIRST {batch_size}` с условием `e.LOGID > {last_id}` и сортировкой по `LOGID`.
+4. Разбирает `MSGTEXT` как источник SOAP/XML и использует `LOGTEXT` / `REPLYTO` как транспортные поля для поиска клиники.
+5. Записывает факты и измерения через UPSERT. Ошибки разбора попадают в `stg_parse_errors`.
+6. После страницы двигает `etl_state.last_log_id` до максимального обработанного `LOGID`.
+7. Отдельно обновляет `stg_egisz_outbound_documents` для отчёта «Документы без ответа».
+
+Запустить тот же код можно несколькими способами:
+
+| Способ | Что происходит |
 | :--- | :--- |
-| Язык | Python 3.10+ |
-| Источник данных | **Firebird** через пакет **firebird-driver** (нужен нативный клиент **fbclient** / **FB_CLIENT_LIBRARY**) |
-| Хранилище (DWH) | **PostgreSQL** через **psycopg2-binary** |
-| Конфигурация | **PyYAML**, YAML (`config/egisz_corp.yaml`; путь задаётся переменной **EGISZ_CORP_CONFIG**) |
-| Веб | **Flask** (в т.ч. ручной запуск синхронизации из UI — `sync_routes.py`) |
-| Оркестрация | **Apache Airflow** — DAG `egisz_corp_firebird_to_postgres` вызывает `run_sync` |
-| Аналитика | **Metabase** поверх PostgreSQL (преднастроенные дашборды в репозитории) |
+| `egisz-corp sync` | CLI-запуск синхронизации; конфиг берётся из `--config` или `EGISZ_CORP_CONFIG`. |
+| Config UI | Flask запускает `run_sync` в фоновом потоке. Повторный старт во время активной синхронизации отклоняется. |
+| Apache Airflow | DAG сначала проверяет соединения, затем вызывает `run_sync`. |
+| `kubectl exec deploy/conf-ui -- egisz-monitor sync` | Ручной запуск внутри Kubernetes-пода `conf-ui`. |
 
-Точка входа CLI: **`egisz-corp`** или **`egisz-monitor`** (в `pyproject.toml` зарегистрированы оба) → `egisz_monitor_corp.cli`.
+`start.ps1` поднимает инфраструктуру и применяет схему, но полный прогон ETL не встроен в `deploy` / `apply` по умолчанию.
 
-### Синхронизация
+### Выборка и кэш справочников
 
-Центральная процедура — **`run_sync`** в модуле `egisz_monitor_corp.etl`: перенос данных **Firebird → PostgreSQL**; источник читается **SELECT**-запросами через **firebird-driver**, витрина обновляется в PostgreSQL.
+Окно журнала ограничивается по **`LOGDATE`**: в типовом SQL используется `DATEADD(-sync_window_days DAY TO CURRENT_TIMESTAMP)`. Пакетная обработка идёт по страницам размера `batch_size`, курсор сдвигается после каждой страницы.
 
-**Инкремент и курсор:** водяной знак — поле **`LOGID`** в `EXCHANGELOG`. В PostgreSQL в таблице **`etl_state`** хранится **`last_log_id`** для имени пайплайна из конфигурации (по умолчанию `firebird_exchangelog`). При **`full_scan: true`** курсор сбрасывается и выполняется полный проход в рамках настроенного окна. В обычном режиме читаются строки с **`LOGID` больше сохранённого курсора**.
+Перед основным циклом сервис загружает строки `EGISZ_LICENSES` и `JPERSONS` с непустым `JID`. В памяти строятся словари и списки для быстрого поиска `MO_UID → JID`, названия клиники, ИНН и `FIR_OID`. Поэтому каждая транзакция не делает отдельные запросы к Firebird за справочными данными.
 
-**Порядок шага синхронизации:** (1) из Firebird подгружаются справочники **`EGISZ_LICENSES`** и **`JPERSONS`** (два запроса) для обогащения и маппинга в памяти процесса; (2) выполняется **COUNT** строк журнала после курсора для прогресса в UI (best-effort: при сбое COUNT синхронизация продолжается, см. лог); (3) **`EXCHANGELOG`** выбирается **постранично** (`batch_size`, обёртка `SELECT FIRST …` с сортировкой по `LOGID` в `sql_util.paginated_exchangelog_sql`); (4) для каждой строки парсер разбирает **`MSGTEXT`** / **`LOGTEXT`**, ошибки парсинга пишутся в **`stg_parse_errors`** в PG; (5) факты и измерения **UPSERT** в витрину, после обработки пакета курсор **`last_log_id`** обновляется до максимального **`LOGID`** на странице; (6) отдельным запросом к Firebird обновляется staging **исходящих документов** (`stg_egisz_outbound_documents` / отчёт «без ответа»).
+### Разбор сообщения и идентификация
 
-**Запуск:** по расписанию — DAG **Apache Airflow** `egisz_corp_firebird_to_postgres` (задача вызывает `run_sync` с путём конфига из переменных Airflow); вручную — **Flask** Config UI через **`sync_routes`** (фоновый поток, single-flight: повторный запуск, пока идёт синк, отклоняется). Проверка соединений с источником и DWH может выполняться отдельной задачей DAG до синхронизации.
+Факт строится только тогда, когда из SOAP-ответа можно получить связь с исходящим запросом:
 
-**Диагностика полноты данных:** сверка `sync_window_days`, `full_scan`, `batch_size` с актуальным конфигом и сравнение COUNT во Firebird и PostgreSQL — см. **[`docs/SYNC_DIAGNOSTICS.md`](docs/SYNC_DIAGNOSTICS.md)** и SQL-шаблоны [`sql/003_diagnostic_counts_firebird.sql`](sql/003_diagnostic_counts_firebird.sql), [`sql/004_diagnostic_counts_postgres.sql`](sql/004_diagnostic_counts_postgres.sql).
+- **`relates_to_id`** берётся из `<relatesToMessage>` в XML из `EXCHANGELOG.MSGTEXT`. Если связи нет, строка не попадает в факт и фиксируется в `stg_parse_errors`.
+- **`local_uid_semd`** сначала берётся из `<localUid>` в XML. Если его нет, используется `EGISZ_MESSAGES.DOCUMENTID`.
+- **`status`** нормализуется в `success`, `error` или `unknown`.
+- **`errors_json`** сохраняет массив `<errors>` из ответа РЭМД без подмены исходного текста.
 
-### Выборка данных (Sampling)
-Извлечение данных из Firebird реализовано по принципу инкрементальной дозагрузки:
-* **Курсор (watermark) по LOGID:** в **`etl_state`** хранится последний обработанный **`LOGID`**; после каждого пакета значение сдвигается вперёд до максимума **`LOGID`** на обработанной странице.
-* **Ограничение выборки (окно по дате):** в типовом SQL журнала строки ограничиваются по **`LOGDATE`** (в коде: `DATEADD(-sync_window_days DAY TO CURRENT_TIMESTAMP)` во Firebird, эквивалент «последние N дней»).
-* **Пакетная обработка:** страница журнала — внешний `SELECT FIRST {batch_size}` подзапроса с `… AND e.LOGID > {last_id} ORDER BY e.LOGID` (`paginated_exchangelog_sql`).
+Порядок определения клиники:
 
-### Кэширование и оптимизация
-Для минимизации нагрузки на источник данных сервис использует механизм предварительной загрузки справочников:
-* **Объекты кэширования:** При старте задачи синхронизации из Firebird выбираются строки **`EGISZ_LICENSES`** с непустым **`JID`** и строки **`JPERSONS`** с непустым **`JID`** (см. `enrichment_*_sql` в `sql_util.py`).
-* **Место и тип памяти:** Справочники (маппинги OID к JID, ИНН и наименования клиник) сохраняются непосредственно в **оперативной памяти (RAM)** процесса выполнения в виде Python-структур: словарей (`dict`) для быстрого поиска $O(1)$ и списков (`list`). Это исключает необходимость повторных запросов к Firebird или PostgreSQL в основном цикле обработки каждой транзакции.
+1. Токен `gost-<jid>.infoclinica.lan` ищется в `MSGTEXT`, затем в `LOGTEXT`, затем в `EGISZ_MESSAGES.REPLYTO`.
+2. Если токен не дал числовой `JID`, используется `JID` из строки `EGISZ_LICENSES`, найденной SQL-запросом по `REPLYTO ↔ MO_DOMEN`.
+3. Если `JID` всё ещё не найден, `<organization>` из XML или `MO_UID` строки лицензии сопоставляется с предзагруженной картой `MO_UID → JID`.
+4. Наименование, ИНН и `FIR_OID` клиники дополняются из `JPERSONS` и `EGISZ_LICENSES`.
 
-### Логика обработки и идентификации (ETL логика)
-Процесс разбора сообщений направлен на установление точной связи между асинхронным ответом ЕГИЗС и медицинским объектом в МИС.
+### Основные поля витрины
 
-**Определение документа и связи с запросом:**
-* Асинхронная связь ответа с исходным сообщением задаётся тегом **`<relatesToMessage>`** в XML из **`EXCHANGELOG.MSGTEXT`** → поле витрины **`relates_to_id`**. События, для которых нельзя построить факт (парсинг, отсутствие связи), фиксируются в **`stg_parse_errors`**.
-* Идентификатор документа в витрине **`local_uid_semd`**: сначала **`<localUid>`** из того же XML, иначе подставляется **`EGISZ_MESSAGES.DOCUMENTID`** из джойна к журналу.
-
-**Определение ЮЛ / `JID` клиники (порядок в `resolve_clinic`):**
-1. **По URL / REPLYTO:** токен **`gost-<jid>.infoclinica.lan`** ищется регулярным выражением в **`EXCHANGELOG.MSGTEXT`** (разбор текста сообщения), затем в **`EXCHANGELOG.LOGTEXT`**, затем в **`EGISZ_MESSAGES.REPLYTO`**.
-2. **По строке лицензии в выборке:** **`JID`** из подзапроса **`EGISZ_LICENSES`** (сопоставление **`REPLYTO`** с **`MO_DOMEN`** уже в SQL журнала).
-3. **По OID:** текст тега **`<organization>`** в XML (или **`MO_UID`** из той же строки лицензии) сопоставляется с картой **`MO_UID` → `JID`** из предзагруженного **`EGISZ_LICENSES`**.
-4. **Наименование и реквизиты** из **`JPERSONS`** подставляются в измерения по уже разрешённому **`JID`**.
-
-### Интерпретация данных и сопоставления (Mappings)
-
-| Поле в DWH | Источник (FB / XML) | Описание и бизнес-логика |
+| Поле | Источник | Смысл |
 | :--- | :--- | :--- |
-| **`relates_to_id`** | `<relatesToMessage>` (MSGTEXT) | **Ключ связи.** Технический ID, связывающий асинхронный ответ ЕГИЗС с исходным запросом МИС. |
-| **`local_uid_semd`** | `<localUid>` (MSGTEXT) / `DOCUMENTID` | Идентификатор документа. Значение из XML-ответа приоритетнее данных из таблицы `EGISZ_MESSAGES`. |
-| **`jid`** | `gost-` в MSGTEXT / LOGTEXT / REPLYTO; `JID` и `MO_UID` из строки `EGISZ_LICENSES` (SQL по `REPLYTO`↔`MO_DOMEN`) | **ID клиники.** Порядок разрешения: URL-токен из текста сообщения и транспортных полей (MSGTEXT → LOGTEXT → REPLYTO) → `JID` из лицензии строки журнала → `MO_UID`/`<organization>` → `JID` по предзагруженной карте. |
-| **`status`** | `<status>` (MSGTEXT) | Результат обработки: `success` (успех), `error` (ошибка) или `unknown`. |
-| **`errors_json`** | `<errors>` (MSGTEXT) | Массив кодов и текстов ошибок РЭМД для технического анализа причин отказа в регистрации. В представлении `*_ui` колонка **«Сводка ошибок»** — SQL-агрегат по этому массиву; в факте хранится исходный JSON. |
+| `relates_to_id` | `<relatesToMessage>` из `MSGTEXT` | Ключ факта и связь асинхронного ответа с исходящим запросом. |
+| `local_uid_semd` | `<localUid>` из `MSGTEXT`, иначе `EGISZ_MESSAGES.DOCUMENTID` | Идентификатор экземпляра СЭМД. Используется для поиска документов без ответа. |
+| `jid` | `gost-` в `MSGTEXT` / `LOGTEXT` / `REPLYTO`, затем `EGISZ_LICENSES`, затем `MO_UID` | Внутренний идентификатор клиники. |
+| `kind_code` | `<kind>` из XML, иначе `EGISZ_LICENSES.KIND` | Код типа СЭМД. В `*_ui` приведён к тексту, чтобы Metabase не суммировал его как число. |
+| `status` | `<status>` из XML | Результат регистрации: `success`, `error` или `unknown`. |
+| `errors_json` | `<errors>` из XML | Сырые коды и тексты отказов РЭМД. |
+| `errors_friendly` / «Сводка ошибок» | SQL-функции `egisz_friendly_error_item` и `egisz_friendly_errors_row` | Человекочитаемая строка для отчётов. Исходный `errors_json` сохраняется отдельно. |
 
-### Описание отчётов Metabase
+Полное описание схемы, представлений и комментариев находится в `sql/001_schema.sql`.
 
-| Дашборд / Отчёт | Описание логики и бизнес-применения | SQL-логика (основной запрос) |
+### Metabase
+
+Дашборды задаются JSON-файлами в `metabase_dashboards/`. При старте пода Metabase скрипт `metabase/provision.sh` вызывает `setup-dashboards.sh` и создаёт дашборды в личной коллекции администратора.
+
+| Файл | Дашборд | Основной вопрос |
 | :--- | :--- | :--- |
-| **01 Оперативный мониторинг** | **Контроль текущего состояния.** Визуализирует распределение статусов (успех/ошибка), топы по типам СЭМД и клиникам. Позволяет мгновенно оценить работоспособность интеграции в моменте. | `SELECT "Статус", COUNT(*)::bigint AS "Количество" FROM public.v_egisz_transactions_enriched_ui GROUP BY 1` |
-| **02 Сервис интеграции** | **Анализ структуры потока.** Разбивка транзакций по конкретным типам СЭМД и медицинским организациям для понимания распределения нагрузки. | `SELECT "Наименование клиники", COUNT(*) FROM public.v_egisz_transactions_enriched_ui GROUP BY 1` |
-| **03 Ошибки и разбор** | **Технический аудит.** Вывод реестра ошибок парсинга и регистрации. Предназначен для сотрудников техподдержки для анализа причин отказов (битый XML, ошибки SOAP). | `SELECT error_code, LEFT(message, 200) FROM public.stg_parse_errors ORDER BY id DESC LIMIT 100` |
-| **04 Документы без ответа** | **Поиск «зависших» транзакций.** Анализ документов, отправленных из МИС, по которым не поступил подтверждающий callback. Помогает выявлять сбои на стороне федерального шлюза. | `SELECT * FROM public.v_rpt_documents_no_response_ui ORDER BY "Отправлено" DESC LIMIT 100` |
-| **05 Тренды и динамика** | **Анализ производительности.** Показывает изменение объема и качества (Success Rate) передаваемых данных во времени. Позволяет выявлять аномальные скачки ошибок. | `SELECT DATE_TRUNC('day', "Обработано"), COUNT(*) FROM public.v_egisz_transactions_enriched_ui GROUP BY 1` |
-| **06 Качество данных** | **Контроль полноты.** Проверка корректности маппинга справочников (JID/OID) и качества заполнения обязательных атрибутов документов в разрезе клиник. | `SELECT "Наименование клиники", "Статус", COUNT(*) FROM public.v_egisz_transactions_enriched_ui GROUP BY 1, 2` |
-| **07 Глубокий анализ ошибок** | **Классификация инцидентов РЭМД.** Топы и срезы по смысловой сводке отказа: для каждой транзакции со статусом `error` берётся **первый** значимый элемент массива «Ошибки JSON», к нему применяется `public.egisz_friendly_error_item(code, message)` (как в колонке «Сводка ошибок» витрины). | `SELECT … FROM public.v_egisz_transactions_enriched_ui env WHERE env."Статус" = 'error' … GROUP BY 1` — фактические запросы в [`metabase_dashboards/07_errors_deep.json`](metabase_dashboards/07_errors_deep.json) |
-| **08 Агрегация ожидающих** | **Мониторинг очереди «без ответа».** Документы из исходящих сообщений (`v_rpt_documents_no_response_ui`), по которым в факте ещё нет callback с тем же `localUid`; агрегаты по клиникам и корзины возраста ожидания (опорное «сейчас» — `MAX("Отправлено")` в снимке очереди). | `SELECT "Наименование клиники", COUNT(*)::bigint … FROM public.v_rpt_documents_no_response_ui … GROUP BY 1` — см. [`metabase_dashboards/08_pending_agg.json`](metabase_dashboards/08_pending_agg.json) |
-| **09 Управленческий дашборд** | **Executive Summary.** Агрегированные KPI за сегодня: общее кол-во транзакций, % ошибок и размер текущей очереди. Предназначен для быстрого контроля ситуации руководством. | `SELECT ROUND(SUM(CASE WHEN "Статус"='error' THEN 1 ELSE 0 END)*100.0 / NULLIF(COUNT(*), 0), 2) FROM public.v_egisz_transactions_enriched_ui WHERE DATE("Обработано") = CURRENT_DATE` |
-| **10 Топы ошибок** | **Аналитика отказов регистрации.** Сводные pie/таблицы по формулировкам ошибок (через `egisz_friendly_error_item`), кодам СЭМД и клиникам в срезе `"Статус" = 'error'` на `v_egisz_transactions_enriched_ui`. Ошибки **разбора журнала** (битый XML, нет `relates_to_id`) — в дашборде **03** и таблице `stg_parse_errors`. | См. [`metabase_dashboards/10_errors_top.json`](metabase_dashboards/10_errors_top.json); для парсинга ETL: `SELECT LEFT(message, 100), COUNT(*) FROM public.stg_parse_errors GROUP BY 1 ORDER BY 2 DESC` |
+| `01_operational.json` | `01 Оперативный мониторинг` | Последние операции, статусы, СЭМД и клиники. |
+| `02_service.json` | `02 Сервис интеграции` | Структура потока по типам СЭМД и медицинским организациям. |
+| `03_errors.json` | `03 Ошибки и разбор` | Ошибки парсинга из `stg_parse_errors` и детали отказов РЭМД. |
+| `04_documents_no_response.json` | `04 Документы без ответа` | Исходящие документы без callback с тем же `localUid`. |
+| `05_trends.json` | `05 Тренды и динамика` | Объём и доля ошибок по дням, типам СЭМД и часам. |
+| `06_quality.json` | `06 Качество данных` | Полнота маппинга и обязательных атрибутов. |
+| `07_errors_deep.json` | `07 Глубокий анализ ошибок` | Классификация отказов РЭМД через `egisz_friendly_error_item`. |
+| `08_pending_agg.json` | `08 Агрегация ожидающих` | Очередь «без ответа» по клиникам, СЭМД и возрасту ожидания. |
+| `09_executive.json` | `09 Управленческий дашборд` | Руководительские показатели: объём, доля ошибок, очередь, рейтинги. |
+| `10_errors_top.json` | `10 Топы ошибок` | Топы формулировок отказов, кодов СЭМД и клиник по статусу `error`. |
+| `11_healthcheck.json` | `11 Healthcheck интеграции` | Сигналы (`v_health_signals`), тепловая карта клиники × дни (доля ошибок), age-buckets очереди, тренд parse-errors, сводка прокси-БД. |
 
-В UI Metabase имена дашбордов: **«01 Оперативный мониторинг»** … **«09 Управленческий дашборд»**, **«10 Топы ошибок»** (в JSON-файлах дашборд 10 назван «Топы ошибок»). Действия **`.\start.ps1 -Action deploy`** и **`reset-deploy`** пересоздают приложенческую БД Metabase (`metabase` в Postgres) и провижинят дашборды. Витрина **`egisz_reports`** обновляется схемой и ETL (Job **`egisz-reports-schema-init`**, **`egisz-corp apply-schema`**, **`egisz-corp sync`**). Для обновления дашбордов: `.\start.ps1 -Action build` при смене JSON, затем `.\start.ps1 -Action reset-metabase`. **`apply`** применяет манифесты и перезапускает сервисы; существующая БД приложения Metabase на кластере сохраняется.
+Большинство карточек читают `v_egisz_transactions_enriched_ui` и `v_rpt_documents_no_response_ui`, где колонки уже имеют русские подписи. Для анализа отказов дашборды `07`, `09` и `10` используют первый значимый элемент массива «Ошибки JSON» на транзакцию, чтобы один документ не попадал в рейтинг причин несколько раз. Healthcheck-витрина (`11`) читает `v_health_*_ui` поверх `sql/005_healthcheck.sql`.
 
-### Конфигурация и доступы (Примеры)
-Параметры соединений управляются через файл `config/egisz_corp.yaml` или переменные окружения.
+Обновление дашбордов:
 
-**Примеры из конфигураций проекта:**
-* **Firebird (Источник):** `SYSDBA` / `masterkey` (алиас/путь на сервере FB — типично `proxy_egisz`, см. `aliases.conf`; с подов K8s на Windows: `host.docker.internal:3050`, см. `k8s/local/egisz_corp.yaml`).
-* **PostgreSQL (DWH):** в примере локального/корпоративного K8s (namespace **`egisz-monitor`**, см. `k8s/postgres/`) — `postgres.egisz-monitor.svc.cluster.local:5432`, БД `egisz_reports`, пользователь `egisz` / `egisz`.
-* **Metabase (Setup):** `admin@egisz.local` / `egisz`.
+- `.\start.ps1 -Action deploy` и `reset-deploy` пересоздают базу приложения Metabase `metabase` и заново провижинят дашборды.
+- `.\start.ps1 -Action apply` применяет манифесты и перезапускает сервисы, но сохраняет существующую базу приложения Metabase.
+- После изменения JSON дашбордов нужен новый образ Metabase: `.\start.ps1 -Action build`, затем перезапуск Metabase или `reset-metabase` (тег `:k8s-v12` уже зашит в `start.ps1` и `k8s/metabase.yaml`; **bump** при следующем изменении JSON или скриптов).
+- Обновление только схемы витрины или данных ETL не требует пересборки образа Metabase.
 
-Краткий порядок **сбора данных → витрина → Metabase** (схема Postgres, ETL, образ Metabase с JSON): [`docs/METABASE.md`](docs/METABASE.md) § «Сбор данных в витрину и использование Metabase».
+### Healthcheck сервиса интеграции
 
-### Инфраструктура
-Манифесты в репозитории ориентированы на namespace **`egisz-monitor`** (см. `k8s/postgres/namespace.yaml`); поднятие стека с хоста: **`.\start.ps1`** (обзор сценариев — `AGENTS.md`, детали — `k8s/README.md`).
+Сервис мониторит «здоровье» интеграции **массово по клиникам и по прокси-БД** через три источника, синхронизированные между собой:
 
-| Сервис | Адрес в K8s | Назначение |
+1. **SQL-витрина** `sql/005_healthcheck.sql` — три представления (`v_health_by_clinic`, `v_health_signals`, `v_health_proxy_db`) и UI-обёртки `*_ui`. Применяется в Job `egisz-reports-schema-init` и в каждом запуске `run_sync` (идемпотентно).
+2. **Эндпоинт** `GET /api/healthcheck` в Config UI — JSON-снимок с массивами `signals`, `by_clinic_top`, объектом `proxy_db` и сводкой по уровням `level_summary`. Запрос ограничен `statement_timeout = 10s`, при недоступной PG возвращается `{"ok": false, "errors": [...]}` со статусом 200 (graceful).
+3. **Дашборд** `11_healthcheck.json` в Metabase — карточки сигналов, тепловая карта клиники × дни (доля ошибок), age-buckets очереди, тренд `stg_parse_errors`, сводка прокси-БД.
+4. **Config UI**: правая панель содержит две вкладки — **Snapshot** (текущие `EGMID/LOGID/MODIFYDATE` Firebird и курсор PG) и **Healthcheck** (сигналы, top-3 проблемные клиники, сводка прокси-БД). Healthcheck-вкладка опрашивает `/api/healthcheck` каждые 30 секунд.
+
+Сигналы и пороги (по умолчанию):
+
+| Сигнал | Условие | Уровень |
 | :--- | :--- | :--- |
-| **PostgreSQL** | `postgres:5432` (в namespace `egisz-monitor`) | Основное хранилище витрин данных. |
-| **Metabase** | `metabase:3000` | Аналитическая платформа и дашборды. |
-| **Config UI** | `conf-ui:8080` | Веб-интерфейс конфигурации (Flask); синхронизация вызывает **`run_sync`** в том же процессе, что и UI (HTTP API `sync_routes`), по смыслу совпадает с **`egisz-corp sync`**. |
-| **Airflow** | сервис вроде `airflow-webserver` (зависит от Helm chart) | Планировщик ETL (опционально, см. `k8s/airflow/`). |
+| `error_rate_high` | error-rate за 24ч > 10% при объёме ≥ 50 | red |
+| `unknown_high` | unknown за 24ч > 5% при объёме ≥ 20 | yellow |
+| `parse_errors_burst` | parse_errors за 1ч > 10 | red |
+| `queue_red_24h` | в очереди > 24ч больше 50 документов | red |
+| `cursor_stale` | `etl_state.updated_at` старше 6 ч | red |
+
+Подробное обоснование порогов и сценарии триажа — в `docs/INTEGRATION_AUDIT.md` §3.
+
+### Конфигурация и доступы
+
+Параметры соединений хранятся в `config/egisz_corp.yaml`, в Kubernetes-примере — в `k8s/local/egisz_corp.yaml`.
+
+Примеры из репозитория:
+
+| Компонент | Значения по умолчанию |
+| :--- | :--- |
+| Firebird | `host.docker.internal:3050` из пода Kubernetes на Windows; база или алиас `proxy_egisz`; пользователь `SYSDBA`; пароль `masterkey`; кодировка `WIN1251`. |
+| PostgreSQL | `postgres.egisz-monitor.svc.cluster.local:5432`; база `egisz_reports`; пользователь `egisz`; пароль `egisz`; схема `public`. |
+| Metabase | Администратор `admin@egisz.local`; пароль `egisz`; локальный адрес обычно `http://127.0.0.1:3000` или `http://localhost:3000` в зависимости от способа доступа. |
+
+### Локальная инфраструктура
+
+Манифесты Kubernetes рассчитаны на namespace **`egisz-monitor`**. Основной сценарий запуска с Windows-хоста:
+
+```powershell
+.\start.ps1 -Action deploy
+```
+
+Ключевые сервисы:
+
+| Сервис | Адрес внутри namespace | Назначение |
+| :--- | :--- | :--- |
+| PostgreSQL | `postgres:5432` | Хранилище витрины `egisz_reports` и база приложения Metabase. |
+| Metabase | `metabase:3000` | Аналитический интерфейс и дашборды. |
+| Config UI | `conf-ui:8080` | Flask-интерфейс конфигурации и ручного запуска `run_sync`. |
+| Airflow | зависит от Helm chart | Опциональный планировщик ETL, см. `k8s/airflow/`. |
+
+Краткая справка по действиям `start.ps1` есть в `docs/KUBERNETES_LOCAL.md`, полный список — `.\start.ps1 -Action help`.
