@@ -78,6 +78,10 @@ class EtlConfig:
     source_query: str | None = None
     # None / не задано — без лимита. UTF-8 размер MSGTEXT; при превышении строка журнала пропускается (staging MSGTEXT_TOO_LARGE).
     max_msgtext_bytes: int | None = None
+    # Таймаут каждого SELECT к Firebird в ETL (ThreadPoolExecutor). COUNT по большой EGISZ_MESSAGES часто > 300 с.
+    firebird_query_timeout_sec: int = 900
+    # Не выполнять COUNT(*) для прогресс-бара (журнал/сообщения) — мгновенно, без процента в UI.
+    skip_firebird_progress_count: bool = False
 
 
 @dataclass
@@ -173,6 +177,9 @@ def parse_corp_config_dict(
         pg_password = _env_nonempty("EGISZ_MONITOR_POSTGRES_PASSWORD") or _str(pg.get("password"))
         pg_schema = _env_nonempty("EGISZ_MONITOR_POSTGRES_SCHEMA") or _str(pg.get("schema"), "public")
 
+    _fb_to = _int(etl.get("firebird_query_timeout_sec"), 900)
+    _fb_to = max(30, min(_fb_to, 7200))
+
     return CorpAppConfig(
         firebird=FirebirdConfig(
             host=_str(fb.get("host")),
@@ -198,6 +205,8 @@ def parse_corp_config_dict(
             full_scan=_bool(etl.get("full_scan"), False),
             source_query=_str(etl.get("source_query"), "") or None,
             max_msgtext_bytes=max_msgtext_bytes,
+            firebird_query_timeout_sec=_fb_to,
+            skip_firebird_progress_count=_bool(etl.get("skip_firebird_progress_count"), False),
         ),
         metabase=dict(mb) if isinstance(mb, dict) else {},
     )
