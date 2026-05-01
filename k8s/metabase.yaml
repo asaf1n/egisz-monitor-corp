@@ -1,28 +1,11 @@
 # Metabase OSS + провижининг (metabase/provision.sh, setup-dashboards.sh).
 # Перед первым запуском: схема витрины (egisz-monitor Job или apply-schema) и секрет postgres.
 # Первый администратор UI: email/password из Secret metabase-admin (репозиторий: admin@egisz.local / egisz, см. metabase-admin-secret.example.yaml).
+# Docker Desktop: LoadBalancer maps to localhost:3000 automatically (no kubectl port-forward needed)
 apiVersion: v1
 kind: Service
 metadata:
   name: metabase
-  namespace: egisz-monitor
-  labels:
-    app.kubernetes.io/name: metabase
-spec:
-  type: NodePort
-  ports:
-    - port: 3000
-      targetPort: 3000
-      nodePort: 30300
-      name: http
-  selector:
-    app.kubernetes.io/name: metabase
----
-# Docker Desktop / k8s: внешний порт 3000 на 127.0.0.1 (бес kubectl port-forward). Если 3000 занят на хосте — порт-форвард: sm. docs/METABASE.md
-apiVersion: v1
-kind: Service
-metadata:
-  name: metabase-lb
   namespace: egisz-monitor
   labels:
     app.kubernetes.io/name: metabase
@@ -69,18 +52,18 @@ spec:
         - name: metabase
           # Сборка: docker build -f metabase/Dockerfile -t egisz-monitor-metabase:latest . && docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:local
           # IfNotPresent: Docker Desktop подставляет образ из локального Docker Engine (см. docs.docker.com/desktop/kubernetes).
-          # Тег :k8s-v15 (не :local): bump при изменении Dockerfile/скриптов/дашбордов — иначе kubelet Docker Desktop держит старый digest для имени тега.
+          # Тег :k8s-v16 (не :local): bump при изменении Dockerfile/скриптов/дашбордов — иначе kubelet Docker Desktop держит старый digest для имени тега.
+          # v16: verify по умолчанию без smoke-metabase-ui (быстрее до port-forward); VERIFY_FULL_UI_SMOKE=1 — опциональный UI-smoke.
           # v15: provision.sh идемпотентен (METABASE_FORCE_PROVISION=auto/true/false) — dashboards id не меняются при rollout restart;
           #      Dockerfile с --virtual + USER metabase + HEALTHCHECK; livenessProbe + JAVA_TOOL_OPTIONS для G1GC и MaxRAMPercentage.
-          # v14: фикс verify-corp-stack.sh + smoke-metabase-ui.sh — теперь учитывают namespaced is_personal collection.
-          image: egisz-monitor-metabase:k8s-v15
+          image: egisz-monitor-metabase:k8s-v16
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000
               name: http
               # Без hostPort: иначе на однонодовом кластере под часто зависает в Pending (порт 3000 занят
-              # прошлым подом / процессом на хосте). Доступ: Service metabase-lb (Docker Desktop → :3000),
-              # NodePort 30300, либо port-forward из start.ps1.
+              # прошлым подом / процессом на хосте). Доступ: Service metabase (LoadBalancer → :3000 на Docker Desktop),
+              # либо port-forward из start.ps1.
           env:
             - name: LANG
               value: "C.UTF-8"
@@ -89,6 +72,9 @@ spec:
             # provision.sh в том же поде ходит на API Metabase
             - name: MB_URL
               value: "http://localhost:3000"
+            # 0 (default): verify-corp-stack.sh не вызывает smoke-metabase-ui (быстрее deploy/apply). 1 — доп. 7 HTTP-проверок UI/API.
+            - name: VERIFY_FULL_UI_SMOKE
+              value: "0"
             - name: MB_PASSWORD_COMPLEXITY
               value: "weak"
             - name: MB_PASSWORD_LENGTH

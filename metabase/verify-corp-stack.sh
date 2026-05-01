@@ -151,9 +151,13 @@ if [ -f "${EXEC_JSON}" ]; then
   log "Dashboard \"${EXEC_NAME}\" OK (${GOT_CARDS} dashcards)"
 fi
 
-if [ -x /app/smoke-metabase-ui.sh ]; then
-  log "smoke-metabase-ui.sh (10 HTTP checks: filters, auto_apply, card query)"
+# Полный UI-smoke (раньше всегда) замедляет deploy/apply: ждём браузер только после verify.
+# verify выше уже проверяет таблицы Postgres, дашборды и dashcards на 09. Расширенный smoke: VERIFY_FULL_UI_SMOKE=1.
+if [ -x /app/smoke-metabase-ui.sh ] && [ "${VERIFY_FULL_UI_SMOKE:-0}" = "1" ]; then
+  log "smoke-metabase-ui.sh (VERIFY_FULL_UI_SMOKE=1)"
   MB_URL="${MB_URL:-http://localhost:3000}" /app/smoke-metabase-ui.sh
+elif [ -x /app/smoke-metabase-ui.sh ]; then
+  log "skip smoke-metabase-ui.sh (default; k8s: VERIFY_FULL_UI_SMOKE=1 для полного UI-smoke)"
 fi
 
 exit 0

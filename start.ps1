@@ -129,7 +129,7 @@ Parameters:
   -SkipMetabaseRolloutRestart   only with -Action apply or apply-rebuild: skip rollout restart Metabase (faster when only conf-ui changed)
   (deploy/apply/apply-rebuild/reset-deploy: forwards 8080+3000 only; full stack incl. Postgres: .\start.ps1 -Action web. Foreground kubectl windows: -BackgroundPortForward:$false)
 
-K8s from your PC (Docker Desktop / kind): after deploy/apply, start.ps1 runs port-forward so http://127.0.0.1:8080 and :3000 work. Alternatively use NodePorts 30808 / 30300 without port-forward (see deploy summary).
+K8s from your PC (Docker Desktop / kind): after deploy/apply, start.ps1 can port-forward to http://127.0.0.1:8080 and :3000. On Docker Desktop, conf-ui and metabase Services are LoadBalancer and usually work on those ports without port-forward. If LoadBalancer stays Pending (e.g. kind), use .\start.ps1 -Action web or kubectl port-forward (see deploy summary).
 
 Generated each deploy/apply (under k8s\):
   Postgres: database egisz_reports, user egisz, password egisz
@@ -165,8 +165,8 @@ function Invoke-DockerBuild {
     }
     Invoke-Native docker build @nc -f metabase/Dockerfile -t egisz-monitor-metabase:latest $Root
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    # :k8s-v15 + :local = тот же digest, что :latest. В k8s/metabase.yaml образ — :k8s-v15 (bump v16… при смене скриптов/дашбордов), иначе kubelet Docker Desktop держит старый digest для имени тега.
-    Invoke-Native docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:k8s-v15
+    # :k8s-v16 + :local = тот же digest, что :latest. В k8s/metabase.yaml образ — :k8s-v16 (bump при смене скриптов/дашбордов), иначе kubelet Docker Desktop держит старый digest для имени тега.
+    Invoke-Native docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:k8s-v16
     if ($LASTEXITCODE -ne 0) { exit 1 }
     Invoke-Native docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:local
     if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -229,7 +229,7 @@ function Invoke-KindLoadImagesIfNeeded {
     if ($LASTEXITCODE -ne 0) { exit 1 }
     kind load docker-image egisz-monitor-metabase:latest --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    kind load docker-image egisz-monitor-metabase:k8s-v15 --name $name
+    kind load docker-image egisz-monitor-metabase:k8s-v16 --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }
     kind load docker-image egisz-monitor-metabase:local --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -272,12 +272,20 @@ function Wait-KubectlJobSucceeded {
     param(
         [Parameter(Mandatory)][string]$Namespace,
         [Parameter(Mandatory)][string]$JobName,
-        [int]$TimeoutSec = 300
+        [int]$TimeoutSec = 300,
+        # Периодический вывод статуса: без этого после «job/… created» скрипт молчит до минут — кажется зависанием.
+        [int]$ProgressEverySec = 12
     )
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSec)
+    $lastProgress = [DateTime]::UtcNow
+    Write-Host ("[kubectl] Waiting for job/{0} in {1} (timeout {2}s, SQL apply can take 1–3 min)..." -f $JobName, $Namespace, $TimeoutSec) -ForegroundColor DarkGray
     while ([DateTime]::UtcNow -lt $deadline) {
         $json = kubectl -n $Namespace get job $JobName -o json 2>$null
         if ($LASTEXITCODE -ne 0) {
+            if (([DateTime]::UtcNow - $lastProgress).TotalSeconds -ge $ProgressEverySec) {
+                Write-Host ("[kubectl] job/{0}: API not ready yet (retry)..." -f $JobName) -ForegroundColor DarkGray
+                $lastProgress = [DateTime]::UtcNow
+            }
             Start-Sleep -Seconds 2
             continue
         }
@@ -294,6 +302,16 @@ function Wait-KubectlJobSucceeded {
                 kubectl -n $Namespace logs "job/$JobName" --tail=120 2>$null
                 return $false
             }
+        }
+        if (([DateTime]::UtcNow - $lastProgress).TotalSeconds -ge $ProgressEverySec) {
+            $active = $job.status.active
+            if ($null -eq $active) { $active = 0 }
+            $failed = $job.status.failed
+            if ($null -eq $failed) { $failed = 0 }
+            $podLine = kubectl -n $Namespace get pods -l "batch.kubernetes.io/job-name=$JobName" --no-headers 2>$null | Select-Object -First 1
+            if (-not $podLine) { $podLine = "(no pod yet)" }
+            Write-Host ("[kubectl] job/{0}: active={1} failed={2}  {3}" -f $JobName, $active, $failed, $podLine.Trim()) -ForegroundColor DarkGray
+            $lastProgress = [DateTime]::UtcNow
         }
         Start-Sleep -Seconds 2
     }
@@ -793,7 +811,7 @@ function Invoke-K8sCorpStackVerify {
 }
 
 function Invoke-K8sSmokeTests {
-    # NodePort на 127.0.0.1 из IDE/агента часто недоступен; проверяем сервисы по DNS внутри кластера (тот же kube API).
+    # Проверка по in-cluster DNS (curl из временного пода), без зависимости от LoadBalancer/localhost с хоста.
     Write-Banner "Smoke tests (in-cluster HTTP)"
     $ns = "egisz-monitor"
     $targets = @(
@@ -817,25 +835,24 @@ function Invoke-K8sSmokeTests {
 function Show-K8sNetworkLegend {
     Write-Host ""
     Write-Host "==================================================================" -ForegroundColor Yellow
-    Write-Host " Docker Desktop (Windows): NodePort on 127.0.0.1 often does NOT work." -ForegroundColor Yellow
-    Write-Host " Standard ports 8080 / 3000: already started after deploy/apply (or run web / forward)." -ForegroundColor Yellow
-    Write-Host "   .\start.ps1 -Action web    (alias: forward; background kubectl + Postgres 5432)" -ForegroundColor White
+    Write-Host " conf-ui + Metabase: type LoadBalancer in k8s/conf-ui.yaml and k8s/metabase.yaml." -ForegroundColor Yellow
+    Write-Host " Docker Desktop usually maps them to http://127.0.0.1:8080/ and http://127.0.0.1:3000/ (no port-forward)." -ForegroundColor Yellow
+    Write-Host " Standard ports 8080 / 3000: also started after deploy/apply unless -SkipPortForwardAfterDeploy (or run web / forward)." -ForegroundColor Yellow
+    Write-Host "   .\start.ps1 -Action web    (alias: forward; kubectl port-forward + optional Postgres 5432)" -ForegroundColor White
     Write-Host "   .\start.ps1 -Action web -BackgroundPortForward:`$false   (visible PS windows instead)" -ForegroundColor DarkGray
     Write-Host "==================================================================" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "------------------------------------------------------------------" -ForegroundColor DarkGray
-    Write-Host "Ports: why 30300 / 30808 and not 3000 / 8080 in the browser" -ForegroundColor Cyan
-    Write-Host "  In the pod: Metabase listens on 3000, Config UI on 8080 (container ports)." -ForegroundColor Gray
-    Write-Host "  Kubernetes Service maps those to ClusterIP:3000 and ClusterIP:8080 for in-cluster traffic." -ForegroundColor Gray
-    Write-Host "  NodePort publishes a host-facing port in range 30000-32767 (here 30300, 30808) so you can" -ForegroundColor Gray
-    Write-Host "  open the stack from Windows without port-forward. Use the NodePort URLs below on the host." -ForegroundColor Gray
+    Write-Host "Ports: pods listen on 8080 / 3000; Services expose ClusterIP and LoadBalancer (see manifests)." -ForegroundColor Cyan
+    Write-Host "  In-cluster: conf-ui and metabase via DNS names below. From Windows (Docker Desktop LB): same host ports 8080 and 3000." -ForegroundColor Gray
+    Write-Host "  Postgres stays NodePort 30432 for optional host access to 5432 (psql/DBeaver)." -ForegroundColor Gray
     Write-Host "------------------------------------------------------------------" -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "Endpoints (ClusterIP is the virtual IP of the Service inside the cluster):" -ForegroundColor Cyan
     $rows = @(
-        @{ Name = "conf-ui"; Dns = "conf-ui.egisz-monitor.svc.cluster.local"; SvcPort = 8080; NodePort = 30808; Url = "http://127.0.0.1:30808/" },
-        @{ Name = "metabase"; Dns = "metabase.egisz-monitor.svc.cluster.local"; SvcPort = 3000; NodePort = 30300; Url = "http://127.0.0.1:30300/" },
-        @{ Name = "postgres"; Dns = "postgres.egisz-monitor.svc.cluster.local"; SvcPort = 5432; NodePort = 30432; Url = "127.0.0.1:30432 (TCP, psql/DBeaver)" }
+        @{ Name = "conf-ui"; Dns = "conf-ui.egisz-monitor.svc.cluster.local"; SvcPort = 8080; FromHost = "http://127.0.0.1:8080/ (LoadBalancer on Docker Desktop)" },
+        @{ Name = "metabase"; Dns = "metabase.egisz-monitor.svc.cluster.local"; SvcPort = 3000; FromHost = "http://127.0.0.1:3000/ (LoadBalancer on Docker Desktop)" },
+        @{ Name = "postgres"; Dns = "postgres.egisz-monitor.svc.cluster.local"; SvcPort = 5432; FromHost = "127.0.0.1:30432 TCP (NodePort 30432 -> 5432)" }
     )
     foreach ($r in $rows) {
         $ip = (cmd /c ('kubectl -n egisz-monitor get svc ' + $r.Name + ' -o jsonpath={.spec.clusterIP} 2>nul'))
@@ -843,10 +860,10 @@ function Show-K8sNetworkLegend {
         $ip = $ip.Trim()
         if (-not $ip) { $ip = "(no Service or namespace missing)" }
         Write-Host ("  {0,-10}  Cluster-IP: {1,-15}  in-cluster: {2}:{3}" -f $r.Name, $ip, $r.Dns, $r.SvcPort) -ForegroundColor White
-        Write-Host ("  {0,-10}  from this PC:  {1}  (NodePort {2} -> pod port {3})" -f "", $r.Url, $r.NodePort, $r.SvcPort) -ForegroundColor DarkCyan
+        Write-Host ("  {0,-10}  from this PC:  {1}" -f "", $r.FromHost) -ForegroundColor DarkCyan
         Write-Host ""
     }
-    Write-Host "If NodePort URLs do not load, use port-forward (then browser uses 8080 / 3000 on localhost):" -ForegroundColor Yellow
+    Write-Host "If LoadBalancer is Pending or ports do not listen, use port-forward:" -ForegroundColor Yellow
     Write-Host "  kubectl -n egisz-monitor port-forward svc/conf-ui 8080:8080    -> http://127.0.0.1:8080/" -ForegroundColor Gray
     Write-Host "  kubectl -n egisz-monitor port-forward svc/metabase 3000:3000   -> http://127.0.0.1:3000/" -ForegroundColor Gray
     Write-Host "  (if 3000 is busy on the host, use e.g. 3001:3000 and open http://127.0.0.1:3001/ )" -ForegroundColor DarkGray

@@ -33,7 +33,7 @@
 ## Сеть и имена (сохранять)
 
 - Сервис Postgres в кластере: **`postgres.egisz-monitor.svc.cluster.local:5432`**.
-- NodePort: conf-ui **30808**, Metabase **30300**; дополнительно Service `metabase-lb` LoadBalancer на Docker Desktop → часто **`http://127.0.0.1:3000`**.
+- LoadBalancer: **conf-ui** → **`http://127.0.0.1:8080/`**, **metabase** → **`http://127.0.0.1:3000/`** на Docker Desktop; Postgres остаётся **NodePort 30432** (`k8s/postgres/postgres-service.yaml`).
 - Образы: **`egisz-conf-ui:corp-web`**, **`egisz-monitor-metabase:k8s-v*`** (актуальный суффикс см. `k8s/metabase.yaml`).
 
 ## Проблема UI «TypeError: Failed to fetch»
@@ -71,7 +71,7 @@
 
 ## Ограничения для ответов Gordon
 
-- Не ломай стабильные имена сервисов, NodePort’ов и образов перечисленные выше.
+- Не ломай стабильные имена сервисов, портов сервисов (8080 / 3000 / 5432), NodePort Postgres (**30432**) и образов перечисленные выше.
 - Не переименовывай **`EGISZ_MONITOR_*`** env без миграции в коде и манифестах.
 - Без автоматических `git commit`: можно unified diff и команды `docker build`, `kubectl apply`, `kind load docker-image`.
 
@@ -89,7 +89,7 @@
 ## Короткий чек-лист smoke (после правок)
 
 - `kubectl rollout status deployment/conf-ui -n egisz-monitor`
-- `curl -fsS http://127.0.0.1:8080/healthz` (или NodePort 30808)
+- `curl -fsS http://127.0.0.1:8080/healthz` (LoadBalancer conf-ui на Docker Desktop или port-forward)
 - `kubectl logs deploy/conf-ui -n egisz-monitor --tail=50`
 - `kubectl get cronjob -n egisz-monitor`
 - `kubectl rollout status deployment/metabase -n egisz-monitor`

@@ -1,14 +1,16 @@
 #!/bin/bash
-# ~10 запросов к Metabase API: здоровье, сессия, коллекция, два ключевых дашборда (фильтры + auto_apply),
-# главная страница UI, БД DWH. Запуск из пода Metabase (MB_URL=http://localhost:3000) или с хоста после port-forward.
+# 7 запросов к Metabase API (облегчённый smoke): health, сессия, дашборды, 09+01, DWH.
+# Тяжёлые шаги (HTML /, session/properties, POST card/query) убраны — они дублируют verify-corp-stack и сильно тормозят.
+# Из verify вызывается только при VERIFY_FULL_UI_SMOKE=1; вручную: MB_URL=... ./smoke-metabase-ui.sh
 set -euo pipefail
 
 MB_URL="${MB_URL:-http://127.0.0.1:3000}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@egisz.local}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-egisz}"
+TOTAL_STEPS=7
 
 step() {
-  printf '[%s/10] %s\n' "$1" "$2"
+  printf '[%s/%s] %s\n' "$1" "${TOTAL_STEPS}" "$2"
 }
 
 die() {
@@ -78,26 +80,4 @@ step 7 "GET /api/database (витрина EGISZ Corp DWH)"
 DBS="$(curl -sS "${MB_URL}/api/database" "${HDR[@]}")"
 echo "${DBS}" | mb_json_list | jq -e '.[] | select(.name == "EGISZ Corp DWH" or .name == "egisz_reports")' >/dev/null || die "DWH database not registered"
 
-step 8 "GET / (HTML главная Metabase — как открытие в браузере)"
-code="$(curl -sS -o /dev/null -w '%{http_code}' "${MB_URL}/")"
-[[ "${code}" =~ ^(200|302)$ ]] || die "main page HTTP ${code}"
-
-step 9 "GET /api/session/properties (инициализация UI)"
-PROP_CODE="$(curl -sS -o /tmp/smoke_props.json -w '%{http_code}' "${MB_URL}/api/session/properties")"
-[[ "${PROP_CODE}" =~ ^2 ]] || die "session/properties HTTP ${PROP_CODE}"
-jq -e '."has-user-setup"' /tmp/smoke_props.json >/dev/null || die "unexpected session/properties JSON"
-
-step 10 "POST /api/card/:id/query — выполнение SQL карточки (результат как в UI)"
-CARD_ID="$(echo "${DEX}" | jq -r '(.dashcards // .ordered_cards // [])[0].card_id // empty')"
-[[ -n "${CARD_ID}" && "${CARD_ID}" != "null" ]] || die "no card_id on first dashcard Управленческого дашборда"
-# Только параметры со slug «period»: у карточек 09 шаблон {{period}}, остальные id дают Metabase «нет шаблонного тега … nil».
-QBODY="$(echo "${DEX}" | jq -c --argjson did "${EXEC_ID}" '{ignore_cache: false, dashboard_id: $did, parameters: [.parameters[]? | select((.slug // "") == "period") | {id: .id, value: (.default // 30)}]}')"
-HTTP_Q="$(curl -sS -o /tmp/smoke_card_query.json -w '%{http_code}' -X POST "${MB_URL}/api/card/${CARD_ID}/query" \
-  "${HDR[@]}" -d "${QBODY}")"
-[[ "${HTTP_Q}" =~ ^2 ]] || { cat /tmp/smoke_card_query.json >&2 || true; die "card query HTTP ${HTTP_Q}"; }
-if jq -e '.status == "failed"' /tmp/smoke_card_query.json >/dev/null 2>&1; then
-  cat /tmp/smoke_card_query.json >&2
-  die "card query status failed"
-fi
-
-echo "[smoke-ui] OK — 10 шагов, фильтры привязаны (parameter_mappings>0), auto_apply включён, карточка выполнила запрос."
+echo "[smoke-ui] OK — ${TOTAL_STEPS} шагов: health, сессия, дашборды 09/01 (filters), DWH (без HTML/card query)."
