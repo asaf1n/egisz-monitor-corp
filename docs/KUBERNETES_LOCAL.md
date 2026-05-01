@@ -15,7 +15,8 @@ Namespace по умолчанию: **`egisz-monitor`**. Контекст: **Dock
 
 | Задача | Команда из корня репозитория |
 |--------|------------------------------|
-| Полный первый подъём стека + сброс БД приложения Metabase | `.\start.ps1 -Action deploy` |
+| После перезапуска Docker Desktop / обычный старт без удаления данных Metabase | `.\start.ps1` (по умолчанию как **`apply`**) |
+| Полный первый подъём или принудительный сброс БД приложения Metabase + оба образа | `.\start.ps1 -Action deploy` |
 | Чистый namespace + образы без кэша (**PVC Postgres и витрина удаляются**) | `.\start.ps1 -Action reset-deploy` |
 | Только пересобрать образы | `.\start.ps1 -Action build` |
 | Правки **Config UI (Flask)** → образ + apply манифестов + **перезапуск обоих** web-служб | `.\start.ps1 -Action apply` |
@@ -34,7 +35,7 @@ Namespace по умолчанию: **`egisz-monitor`**. Контекст: **Dock
 
 ## Цепочки: что делает скрипт
 
-### `deploy` (по умолчанию)
+### `deploy` (`-Action deploy`)
 
 1. Проверка / создание кластера (**kind** или уже включённый Docker Desktop K8s).  
 2. **`build`**: образы **`egisz-conf-ui`** и **`egisz-monitor-metabase`**.  
@@ -43,9 +44,9 @@ Namespace по умолчанию: **`egisz-monitor`**. Контекст: **Dock
 5. **DROP/CREATE** базы приложения **`metabase`** в Postgres (чистый Metabase + провижининг дашбордов из образа при старте пода).  
 6. **`rollout restart`** Metabase и conf-ui.  
 7. Ожидание **Ready**, smoke, **verify** (при сбое — recovery restart по логике `start.ps1`).  
-8. Port-forward **8080** и **3000** (если не указан `-SkipPortForwardAfterDeploy`).
+8. Port-forward **8080** и **3000** (если не указан `-SkipPortForwardAfterDeploy`). Опционально Postgres на **5432**: `-IncludePostgresPortForward`.
 
-### `apply`
+### `apply` (по умолчанию при **`.\start.ps1`** без параметров; то же **`-Action start`**)
 
 1. Только сборка **conf-ui** (Metabase **не** пересобирается).  
 2. `kubectl apply` полного стека (как в deploy, **без** DROP/CREATE `metabase`).  

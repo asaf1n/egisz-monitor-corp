@@ -9,7 +9,7 @@
 | Путь | Назначение |
 |------|------------|
 | `pyproject.toml` | Пакет `egisz-monitor-corp`, зависимости; CLI: **`egisz-corp`** и **`egisz-monitor`** (оба → `egisz_monitor_corp.cli`) |
-| `start.ps1` | Локальный стек в K8s (**namespace `egisz-monitor`**): `deploy`, `reset-deploy`, `build`, `apply` (`-SkipMetabaseRolloutRestart`), `restart-metabase`, `restart-conf-ui`, `restart-web`, `reset-metabase`, `verify`, `web`, `forward`, `metabase-provision-local`, `test` — см. **`docs/KUBERNETES_LOCAL.md`** |
+| `start.ps1` | Локальный стек в K8s (**namespace `egisz-monitor`**): по умолчанию **`apply`** / **`start`** (без сброса БД Metabase); **`deploy`** — полная пересборка образов + DROP/CREATE БД Metabase; также `reset-deploy`, `build`, `apply-rebuild`, `restart-*`, `reset-metabase`, `verify`, `web`, `forward`, `metabase-provision-local`, `test` — см. **`docs/KUBERNETES_LOCAL.md`** |
 | `README.md` | Обзор продукта, ETL, маппинг полей, таблица дашбордов Metabase |
 | `.cursorrules` | Парсинг SOAP/XML, витрина, отчёты, критичные статусы и сигналы для мониторинга интеграции |
 | `AGENTS.md` | Этот файл |

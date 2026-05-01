@@ -181,11 +181,13 @@ JSON лежат в [`metabase_dashboards/`](metabase_dashboards/); при ста
 
 ## Локальная инфраструктура
 
-Namespace: **`egisz-monitor`**. Быстрый старт с хоста Windows:
+Namespace: **`egisz-monitor`**. Быстрый старт с хоста Windows (по умолчанию применяются текущие манифесты и конфиг **без** сброса БД Metabase):
 
 ```powershell
-.\start.ps1 -Action deploy
+.\start.ps1
 ```
+
+Первичная установка с пересборкой обоих образов и **DROP/CREATE** БД приложения Metabase в Postgres: **`.\start.ps1 -Action deploy`** (см. [`docs/KUBERNETES_LOCAL.md`](docs/KUBERNETES_LOCAL.md)).
 
 | Сервис | Доступ | Назначение |
 |--------|--------|------------|
