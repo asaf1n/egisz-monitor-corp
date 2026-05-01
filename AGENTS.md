@@ -19,10 +19,10 @@
 | Модуль | Роль |
 |--------|------|
 | `cli.py` | CLI: `sync`, `apply-schema`, проверки БД |
-| `etl.py` | **`run_sync`**: полная выгрузка `EGISZ_LICENSES`+JPERSONS из FB, окно `MODIFYDATE` в Python; оценка журнала по `LOGID`; выгрузка `EGISZ_MESSAGES` по `EGMID`+`CREATEDATE` в SQL (`source_max_egmid` сразу; `last_egmid` после успешного прогона); парсинг `EXCHANGELOG` + MSGID; UPSERT; outbound |
+| `etl.py` | **`run_sync`**: полная выгрузка `EGISZ_LICENSES`+JPERSONS из FB → `stg_egisz_licenses_import`, merge в `dim_clinics`, кэш ETL из PG; журнал `EXCHANGELOG` только по `LOGID` (без кастомного `source_query`); `EGISZ_MESSAGES` постранично по `EGMID` выше курсора; без COUNT в Firebird для прогресса; парсинг + UPSERT; outbound по `EGMID` |
 | `parser.py` | **`EgiszMonitorParser`**: разбор MSGTEXT (SOAP/XML), `relates_to_id`, `status`, `errors_json`, `localUid`, `resolve_clinic` |
-| `sql_util.py` | SQL к Firebird: журнал `EXCHANGELOG`, пагинация, инкремент `EGISZ_MESSAGES` по EGMID+CREATEDATE; полная выборка `EGISZ_LICENSES`+JPERSONS (фильтр MODIFYDATE в ETL); outbound |
-| `pg_warehouse.py` | Подключение PG, применение `sql/*.sql`, `etl_state`, UPSERT факта/измерений |
+| `sql_util.py` | SQL к Firebird: `EXCHANGELOG` и пагинация по `LOGID`; инкремент `EGISZ_MESSAGES` только по `EGMID`; полная выборка `EGISZ_LICENSES`+JPERSONS без фильтра на стороне FB; outbound по минимальному `EGMID` |
+| `pg_warehouse.py` | Подключение PG, применение `sql/*.sql`, `etl_state`, staging лицензий, UPSERT факта/измерений |
 | `fb_client.py` | Клиент Firebird |
 | `config_loader.py` | Загрузка YAML (`EGISZ_MONITOR_CONFIG`, по умолчанию `config/egisz_monitor.yaml`) |
 | `config_app.py` | Flask-приложение конфиг-UI (если используется) |
@@ -33,7 +33,7 @@
 
 | Файл | Содержимое |
 |------|------------|
-| `001_schema.sql` | Таблицы факта/измерений, представления `v_*`, функции `egisz_friendly_*`, `dim_column_display_labels` |
+| `001_schema.sql` | Таблицы факта/измерений, `stg_egisz_licenses_import`, `stg_egisz_outbound_documents`, представления `v_*`, функции `egisz_friendly_*`, `dim_column_display_labels` |
 | `002_etl_state.sql` | Таблица `etl_state`: курсоры `last_log_id` (EXCHANGELOG.LOGID), `last_egmid` (EGISZ_MESSAGES.EGMID), пики FB |
 | `003_diagnostic_counts_firebird.sql` | Шаблоны диагностики FB |
 | `004_diagnostic_counts_postgres.sql` | Шаблоны диагностики PG |
@@ -44,7 +44,7 @@
 
 ## Тесты (`tests/`)
 
-`pytest`: `test_parser.py`, `test_sql_util.py`, `test_config_loader.py`, `test_fb_client.py`, `test_pg_warehouse.py` (мок healthcheck-снапшота PG), `test_config_app.py` (Flask test client для `/api/healthcheck`), `test_etl_helpers.py` (расщепление `run_sync`: `_export_egisz_licenses_full`, `_count_exchangelog_total`, advisory lock в Postgres). После изменений парсера, SQL или эндпоинтов — прогон тестов из корня (`start.ps1 -Action test` или `pytest`).
+`pytest`: `test_parser.py`, `test_sql_util.py`, `test_config_loader.py`, `test_fb_client.py`, `test_pg_warehouse.py` (мок healthcheck-снапшота PG), `test_config_app.py` (Flask test client для `/api/healthcheck`), `test_etl_helpers.py` (хелперы `run_sync`, advisory lock в Postgres). После изменений парсера, SQL или эндпоинтов — прогон тестов из корня (`start.ps1 -Action test` или `pytest`).
 
 ## Metabase
 
@@ -97,13 +97,13 @@
 
 `etl.run_sync` расщеплён на чистые функции (см. `etl.py`):
 
-- `_export_egisz_licenses_full` — полная выгрузка `EGISZ_LICENSES` + `LEFT JOIN JPERSONS` из Firebird; отбор по `MODIFYDATE` в окне `sync_window_days` — в Python.
-- `_count_exchangelog_total` — COUNT для UI-прогресса; падение FB не ломает sync.
-- `_export_egisz_messages_by_egmid` — выгрузка EGISZ_MESSAGES по курсору `EGMID` (до парсинга журнала); после выгрузки в PG пишется `etl_state.last_egmid`.
-- `_process_exchangelog_pages` — по страницам: `exchangelog_export` (SELECT из FB по LOGID) → `exchangelog_parse` (склейка MSGID с выгруженными сообщениями, парсинг, UPSERT; также `parsing` / `page_done`).
-- `_refresh_outbound_documents` — снимок `stg_egisz_outbound_documents` в одну транзакцию.
+- `_export_egisz_licenses_full` — полная выгрузка `EGISZ_LICENSES` + `LEFT JOIN JPERSONS` из Firebird; сырой снимок в `stg_egisz_licenses_import`, merge в `dim_clinics`, строки для кэша ETL — выборка из PostgreSQL (строки без JID отсекаются в PG; при `dry_run` — тот же отбор в Python).
+- `_count_exchangelog_total` — заглушка: COUNT в Firebird для прогресса не выполняется.
+- `_export_egisz_messages_by_egmid` — постраничная выгрузка `EGISZ_MESSAGES` только по `EGMID` выше курсора; пик `source_max_egmid` в PG при необходимости; `last_egmid` — после успешного прогона.
+- `_process_exchangelog_pages` — по страницам: `exchangelog_export` (SELECT из FB по `LOGID`) → `exchangelog_parse` (склейка MSGID, парсинг, UPSERT; также `parsing` / `page_done`).
+- `_refresh_outbound_documents` — снимок `stg_egisz_outbound_documents` из Firebird по `EGMID` выше курсора на начало прогона.
 
-**Single-flight на уровне БД**: в начале `run_sync` берём `pg_try_advisory_lock(hash(pipeline_name))`. Помеченный CronJob `egisz-monitor-sync` (по расписанию `*/15 * * * *`) и UI-кнопка «Синхронизировать сейчас» защищены от гонки — второй процесс выйдет с `PipelineLockBusyError` (CLI exit 75, UI показывает «параллельный sync уже идёт»). Lock — session-level: автоматически освобождается при разрыве соединения, без ручного reset после крэша воркера.
+**Single-flight на уровне БД**: в начале `run_sync` берём `pg_try_advisory_lock(hash(pipeline_name))`. Помеченный CronJob `egisz-monitor-sync` (по расписанию `*/15 * * * *`) и UI-кнопка «Синхронизировать сейчас» защищены от гонки — второй процесс выйдет с `PipelineLockBusyError` (CLI exit 75, UI показывает «параллельный sync уже идёт»). Lock — session-level: автоматически освобождается при разрыве соединения, без ручного reset после крэша воркера. Обновления `progress_detail_cb` при неизменной фазе троттлятся (~220 ms), при смене фазы — без задержки, чтобы UI не тормозил выборку и парсинг.
 
 ## Типичные задачи агента
 

@@ -106,7 +106,7 @@ def fetch_all(
         except FutureTimeoutError as e:
             raise RuntimeError(
                 f"Firebird query timeout after {timeout_sec}s (SQL length {len(sql)} chars). "
-                "For ETL: raise etl.firebird_query_timeout_sec in YAML; check indexes and sync_window_days."
+                "For ETL: raise etl.firebird_query_timeout_sec in YAML; check indexes and EGMID/LOGID cursors."
             ) from e
 
 

@@ -240,7 +240,26 @@ FROM fact_egisz_transactions f
 LEFT JOIN dim_semd_types dt ON dt.kind_code = f.kind_code
 LEFT JOIN dim_clinics dc ON dc.jid = f.jid;
 
--- Снимок исходящих сообщений с DOCUMENTID (окно как у ETL). Заполняется пайплайном после загрузки fact.
+-- Сырой снимок EGISZ_LICENSES + JPERSONS за один прогон ETL (полная выгрузка с Firebird).
+-- Фильтрация пустых / без JID и upsert в dim_clinics выполняются в PostgreSQL после загрузки staging.
+CREATE TABLE IF NOT EXISTS stg_egisz_licenses_import (
+    fb_id BIGINT,
+    jid BIGINT,
+    mo_uid VARCHAR(256),
+    mo_domen VARCHAR(512),
+    modifydate TIMESTAMPTZ,
+    egisz_licenses_kind TEXT,
+    jname VARCHAR(512),
+    jinn VARCHAR(12),
+    fir_oid VARCHAR(255),
+    loaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE stg_egisz_licenses_import IS 'Полная выгрузка лицензий с прокси Firebird; очистка (JID и т.д.) при чтении в ETL и при merge в dim_clinics';
+
+CREATE INDEX IF NOT EXISTS idx_stg_lic_import_jid ON stg_egisz_licenses_import (jid);
+
+-- Снимок исходящих сообщений с DOCUMENTID (инкремент по EGMID как у ETL). Заполняется пайплайном после загрузки fact.
 CREATE TABLE IF NOT EXISTS stg_egisz_outbound_documents (
     document_id VARCHAR(256) PRIMARY KEY,
     sent_at TIMESTAMPTZ,
@@ -254,7 +273,7 @@ CREATE TABLE IF NOT EXISTS stg_egisz_outbound_documents (
 
 ALTER TABLE stg_egisz_outbound_documents ADD COLUMN IF NOT EXISTS egmid BIGINT;
 
-COMMENT ON TABLE stg_egisz_outbound_documents IS 'EGISZ_MESSAGES с непустым DOCUMENTID за окно sync_window_days; для отчёта «Документы без ответа»';
+COMMENT ON TABLE stg_egisz_outbound_documents IS 'EGISZ_MESSAGES с непустым DOCUMENTID (EGMID выше курсора ETL); для отчёта «Документы без ответа»';
 COMMENT ON COLUMN stg_egisz_outbound_documents.egmid IS 'EGMID строки EGISZ_MESSAGES при последнем снимке staging';
 COMMENT ON COLUMN stg_egisz_outbound_documents.sent_at IS 'Дата/время создания строки в EGISZ_MESSAGES (поле CREATEDATE в источнике Firebird; при другом имени колонки поправьте SQL в sql_util.outbound_documents_staging_select)';
 

@@ -74,8 +74,8 @@
 
 Факты в витрину попадают через **`run_sync`** (`egisz_monitor_corp.etl`): только **SELECT** из Firebird (**firebird-driver**, на воркере нужен **fbclient** / **`FB_CLIENT_LIBRARY`**) и запись в PostgreSQL (**psycopg2**).
 
-- **Курсор:** в таблице **`etl_state`** хранится **`last_log_id`** по имени пайплайна из YAML (по умолчанию `firebird_exchangelog`). Инкремент идёт по **`LOGID`** в **`EXCHANGELOG`**, не по `MODIFYDATE`. Режим **`full_scan: true`** сбрасывает курсор и перечитывает журнал в рамках окна **`sync_window_days`** (типовое ограничение по **`LOGDATE`** — `DATEADD` во Firebird, см. `sql_util.default_exchangelog_select`).
-- **Порядок в одном прогоне:** полный SELECT **`EGISZ_LICENSES`** + **`LEFT JOIN JPERSONS`**, фильтр **`MODIFYDATE`** по **`sync_window_days`** в Python; **COUNT** журнала по **`LOGID`**; **COUNT** и постраничная выгрузка **`EGISZ_MESSAGES`** по **`EGMID`** и **`CREATEDATE`** (пик **`source_max_egmid`** в **`etl_state`**); **`EXCHANGELOG`**, парсинг, **`stg_parse_errors`**, UPSERT, **`last_log_id`**, **`stg_egisz_outbound_documents`**.
+- **Курсор:** в таблице **`etl_state`** хранятся **`last_log_id`** (журнал **`EXCHANGELOG`**) и **`last_egmid`** (**`EGISZ_MESSAGES`**) по имени пайплайна из YAML (по умолчанию `firebird_exchangelog`). Режим **`full_scan: true`** сбрасывает оба курсора в 0 и перечитывает данные с начала (осторожно на больших базах).
+- **Порядок в одном прогоне:** полный SELECT **`EGISZ_LICENSES`** + **`LEFT JOIN JPERSONS`** → **`stg_egisz_licenses_import`** → merge в **`dim_clinics`** → кэш ETL из PostgreSQL; постраничная выгрузка **`EGISZ_MESSAGES`** по **`EGMID`** выше курсора (пик **`source_max_egmid`** в **`etl_state`** при необходимости); **`EXCHANGELOG`** по **`LOGID`**, парсинг, **`stg_parse_errors`**, UPSERT, обновление **`last_log_id`**; исходящие → **`stg_egisz_outbound_documents`** по **`EGMID`** выше курсора на начало прогона. COUNT в Firebird для прогресса не выполняется.
 
 **Как запустить тот же ETL:**
 
@@ -86,7 +86,7 @@
 | **Apache Airflow** | DAG **`egisz_monitor_firebird_to_postgres`** (`airflow/dags/egisz_monitor_etl_dag.py`): задача **`test_connections`**, затем **`monitor_sync`**; путь к конфигу — переменные **`egisz_monitor_project_root`** / **`egisz_monitor_config_path`** (см. раздел «Переменные Airflow» ниже). |
 | **`start.ps1`** | При **`deploy`** / **`apply`** поднимается стек и схема витрины, но **полный прогон ETL не вшит** в скрипт по умолчанию; после деплоя данные загружают из **Config UI**, **`kubectl … exec deploy/conf-ui -- egisz-monitor sync`** (см. вывод `start.ps1` после деплоя) или **Airflow**. |
 
-Подробнее по стеку и шагам см. **`README.md`** (разделы «Стек технологий», «Синхронизация», «Выборка данных»). Сверка объёмов с источником и интерпретация **`sync_window_days`**: **`docs/SYNC_DIAGNOSTICS.md`**.
+Подробнее по стеку и шагам см. **`README.md`** (разделы «Стек технологий», «Синхронизация», «Выборка данных») и **`AGENTS.md`**. Диагностика объёмов: **`docs/SYNC_DIAGNOSTICS.md`** (часть формулировок про окно по датам может не совпадать с текущим SQL ETL — ориентир **`egisz_monitor_corp/sql_util.py`**).
 
 Порядок, в котором появляются **факты** и обновляются **дашборды** (колонка **«Сводка ошибок»** и карточки, вызывающие `egisz_friendly_*`, требуют актуального `001_schema.sql` в Postgres).
 

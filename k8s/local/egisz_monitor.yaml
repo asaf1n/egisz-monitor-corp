@@ -28,7 +28,7 @@ etl:
   sync_window_days: 30
   full_scan: false
   source_query: null
-  # Таймаут SELECT к Firebird (сек.); COUNT EGISZ_MESSAGES при необходимости увеличьте (см. config/egisz_monitor.example.yaml).
+  # Таймаут SELECT к Firebird (сек.); в Config UI не редактируется — только YAML/Secret (см. config/egisz_monitor.example.yaml).
   firebird_query_timeout_sec: 900
 
 metabase:

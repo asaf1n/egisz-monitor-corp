@@ -6,7 +6,7 @@ JPERSONS (JNAME, JINN VARCHAR(12), FIR_OID VARCHAR(255) — как MO UID для
 KIND exists only in EGISZ_LICENSES — not on EGISZ_MESSAGES. Строка EGISZ_LICENSES: REPLYTO matches MO_DOMEN.
 localUid в SOAP ↔ DOCUMENTID; клиника: gost- сначала в MSGTEXT (разбор текста сообщения), затем LOGTEXT, иначе REPLYTO → MO_DOMEN → JID → JPERSONS.
 
-Инкремент журнала по EXCHANGELOG.LOGID; сообщения EGISZ_MESSAGES — постраничная выгрузка по EGMID и окну CREATEDATE (sync_window_days) в SQL; лицензии — полная выгрузка EGISZ_LICENSES с LEFT JOIN JPERSONS, окно по MODIFYDATE применяется в Python; сопоставление с журналом по MSGID и REPLYTO→лицензия после выгрузки.
+Инкремент журнала по EXCHANGELOG.LOGID; сообщения EGISZ_MESSAGES — постранично по EGMID выше курсора; лицензии — полная выгрузка EGISZ_LICENSES с LEFT JOIN JPERSONS без отбора на стороне Firebird, очистка и merge в dim_clinics в PostgreSQL; сопоставление с журналом по MSGID и REPLYTO→лицензия после выгрузки.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ WHERE 1=1
 
 
 def enrichment_egisz_licenses_sql() -> str:
-    """Все строки EGISZ_LICENSES с JID; LEFT JOIN JPERSONS для JNAME/ИНН/OID МО. Фильтр по sync_window_days — в ETL (Python), не в SQL."""
+    """Полная выгрузка EGISZ_LICENSES с LEFT JOIN JPERSONS; фильтрация пустых строк — в PostgreSQL после staging."""
     return """
 SELECT
     l.ID AS ID,
@@ -49,13 +49,12 @@ SELECT
     jp.FIR_OID AS FIR_OID
 FROM EGISZ_LICENSES l
 LEFT JOIN JPERSONS jp ON jp.JID = l.JID
-WHERE l.JID IS NOT NULL
 """.strip()
 
 
-def outbound_documents_staging_select(sync_window_days: int) -> str:
-    """Исходящие с DOCUMENTID; KIND/JID для staging задаются в Python по REPLYTO."""
-    sd = int(sync_window_days)
+def outbound_documents_staging_select(*, min_egmid: int) -> str:
+    """Исходящие с DOCUMENTID; только строки с EGMID выше курсора на начало прогона (как инкрементальная выгрузка сообщений)."""
+    floor = int(min_egmid)
     return f"""
 SELECT
     TRIM(m.DOCUMENTID) AS DOCUMENTID,
@@ -65,18 +64,15 @@ SELECT
 FROM EGISZ_MESSAGES m
 WHERE m.DOCUMENTID IS NOT NULL
   AND TRIM(m.DOCUMENTID) <> ''
-  AND m.CREATEDATE >= DATEADD(-{sd} DAY TO CURRENT_TIMESTAMP)
+  AND m.EGMID > {floor}
 ORDER BY m.EGMID DESC
 """.strip()
 
 
-def egisz_messages_incremental_sql(
-    *, last_egmid: int, limit: int, sync_window_days: int
-) -> str:
-    """Страница EGISZ_MESSAGES: EGMID выше курсора и CREATEDATE в окне sync_window_days (как outbound)."""
+def egisz_messages_incremental_sql(*, last_egmid: int, limit: int) -> str:
+    """Страница EGISZ_MESSAGES: только EGMID выше курсора (инкремент без окна по дате)."""
     last = int(last_egmid)
     lim = max(1, min(int(limit), 50_000))
-    sd = max(0, int(sync_window_days))
     return f"""
 SELECT FIRST {lim}
     m.EGMID AS EGMID,
@@ -86,20 +82,7 @@ SELECT FIRST {lim}
     m.CREATEDATE AS MSG_CREATED_AT
 FROM EGISZ_MESSAGES m
 WHERE m.EGMID > {last}
-  AND m.CREATEDATE >= DATEADD(-{sd} DAY TO CURRENT_TIMESTAMP)
 ORDER BY m.EGMID
-""".strip()
-
-
-def egisz_messages_count_sql(*, last_egmid: int, sync_window_days: int) -> str:
-    """COUNT строк EGISZ_MESSAGES под те же условия, что egisz_messages_incremental_sql (для прогресса UI)."""
-    last = int(last_egmid)
-    sd = max(0, int(sync_window_days))
-    return f"""
-SELECT COUNT(*) AS cnt
-FROM EGISZ_MESSAGES m
-WHERE m.EGMID > {last}
-  AND m.CREATEDATE >= DATEADD(-{sd} DAY TO CURRENT_TIMESTAMP)
 """.strip()
 
 

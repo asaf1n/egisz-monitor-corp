@@ -241,7 +241,7 @@ PAGE = """
                 <h2 class="text-sm font-medium uppercase tracking-[0.12em] text-[#9CA3AF] lg:text-[11px] lg:font-normal lg:tracking-[0.16em] lg:text-[#4B5563]">ETL Configuration</h2>
               </div>
               <p class="mb-3 max-w-2xl text-sm leading-relaxed text-[#9CA3AF] lg:text-[11px] lg:leading-snug">Полный цикл Firebird → PostgreSQL в фоне. Не закрывайте вкладку до завершения.</p>
-              <div class="grid max-w-lg grid-cols-1 gap-3 sm:grid-cols-2 sm:items-end lg:grid-cols-3">
+              <div class="grid max-w-lg grid-cols-1 gap-3 sm:grid-cols-2 sm:items-end lg:grid-cols-2">
                 <label class="block w-full max-w-none sm:max-w-[8rem]">
                   <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px] lg:tracking-[0.16em] lg:text-[#4B5563]">batch_size</span>
                   <input name="etl_batch" type="number" value="{{ etl.batch_size }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
@@ -250,16 +250,10 @@ PAGE = """
                   <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px] lg:tracking-[0.16em] lg:text-[#4B5563]">sync_window_days</span>
                   <input name="etl_sync_days" type="number" value="{{ etl.sync_window_days }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
                 </label>
-                <label class="block w-full max-w-none sm:max-w-[10rem]">
-                  <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px] lg:tracking-[0.16em] lg:text-[#4B5563]">firebird_query_timeout_sec</span>
-                  <input name="etl_fb_timeout" type="number" value="{{ etl.firebird_query_timeout_sec }}" min="30" max="7200" title="Таймаут каждого SELECT к Firebird в ETL (COUNT и выгрузки)" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
-                </label>
               </div>
               <div class="mt-3 flex min-h-[2.75rem] w-full flex-wrap items-center gap-3">
                 <input type="checkbox" name="etl_full_scan" value="1" {{ 'checked' if etl.full_scan else '' }} class="h-5 w-5 shrink-0 rounded border-[#1B2940] bg-[#121826] text-[#509EE3] focus:ring-[#509EE3] focus:ring-offset-[#0F1522]"/>
                 <span class="text-sm text-[#9CA3AF] lg:text-xs">Полный скан</span>
-                <input type="checkbox" name="etl_skip_fb_count" value="1" {{ 'checked' if etl.skip_firebird_progress_count else '' }} class="h-5 w-5 shrink-0 rounded border-[#1B2940] bg-[#121826] text-[#509EE3] focus:ring-[#509EE3] focus:ring-offset-[#0F1522]"/>
-                <span class="text-sm text-[#9CA3AF] lg:text-xs">Без COUNT в Firebird (прогресс без %)</span>
               </div>
             </div>
           </div>
@@ -471,16 +465,16 @@ PAGE = """
   const PHASE_RU = {
     enrichment_firebird: 'Справочники: EGISZ_LICENSES (JOIN JPERSONS) из Firebird…',
     messages_incremental: 'Выгрузка EGISZ_MESSAGES из Firebird по курсору EGMID…',
-    messages_counting: 'Подсчёт строк EGISZ_MESSAGES в Firebird (для прогресса)…',
-    counting: 'Подсчёт строк журнала EXCHANGELOG в Firebird (для прогресса)…',
+    messages_counting: 'Подготовка к выгрузке сообщений…',
+    counting: 'Подготовка к журналу EXCHANGELOG…',
     exchangelog_ready: 'К журналу EXCHANGELOG: подготовка пагинации',
-    exchangelog_export: 'Выгрузка страницы EXCHANGELOG из Firebird (LOGID)…',
-    exchangelog_parse: 'Парсинг SOAP/MSGTEXT и сопоставление с EGISZ_MESSAGES по MSGID…',
+    exchangelog_export: 'Страница журнала EXCHANGELOG (LOGID): выгрузка из Firebird…',
+    exchangelog_parse: 'Страница журнала EXCHANGELOG: выгрузка из Firebird и разбор SOAP/MSGTEXT…',
     parsing: 'Парсинг SOAP/MSGTEXT и обогащение журнала…',
     page_done: 'UPSERT фактов и измерений в PostgreSQL — страница сохранена',
     exchangelog_done: 'Журнал обработан, курсор LOGID обновлён',
     outbound_firebird: 'Исходящие EGISZ_MESSAGES: чтение из Firebird…',
-    outbound_fetch: 'Исходящие сообщения (EGISZ_MESSAGES): выборка по окну sync_window_days…',
+    outbound_fetch: 'Исходящие сообщения (EGISZ_MESSAGES): выборка по EGMID выше курсора…',
     outbound_parse: 'Разбор исходящих: дедуп DOCUMENTID, фильтр тестовых клиник…',
     outbound_postgres: 'Исходящие: запись stg_egisz_outbound_documents в PostgreSQL…',
     outbound_done: 'Исходящие: snapshot staging обновлён',
@@ -689,8 +683,8 @@ PAGE = """
       meta.className = SYNC_META_BASE + 'text-[#9CA3AF]';
       const waitLine =
         phase === 'counting'
-          ? 'Firebird считает EXCHANGELOG (COUNT). На большой базе это долго; процент здесь недоступен.'
-          : 'Firebird считает EGISZ_MESSAGES в окне sync_window_days (COUNT). На большой базе это долго; процент здесь недоступен.';
+          ? 'COUNT в Firebird для журнала не выполняется (прогресс без общего числа строк).'
+          : 'COUNT в Firebird не используется.';
       meta.textContent = phaseTitle + String.fromCharCode(10) + waitLine;
       return;
     }
@@ -703,7 +697,7 @@ PAGE = """
       pctEl.textContent = '…';
       const tr = totalRowsState(p);
       const jlo = Number(p.loaded_rows) || 0;
-      let lineA = 'Чтение EGISZ_MESSAGES из Firebird (окно sync_window_days). Пока идёт запрос, факты журнала уже в витрине.';
+      let lineA = 'Чтение EGISZ_MESSAGES из Firebird (инкремент по EGMID). Пока идёт запрос, факты журнала уже в витрине.';
       let lineB = 'Фактов в fact_egisz_transactions: ' + journalFacts(p) + ' · staging ошибок (журнал): ' + (Number(p.staging_errors) || 0);
       if (tr.kind === 'positive') lineB += ' · журнал: ' + jlo + ' / ' + tr.n + ' строк';
       else if (tr.kind === 'zero') lineB += ' · журнал: новых строк не было';
@@ -1345,10 +1339,7 @@ def _merged_yaml_dict_from_form(p: Path, form: Mapping[str, Any]) -> dict[str, A
 
     old["etl"]["batch_size"] = int(form.get("etl_batch") or 500)
     old["etl"]["sync_window_days"] = int(form.get("etl_sync_days") or 30)
-    _t = int(form.get("etl_fb_timeout") or 900)
-    old["etl"]["firebird_query_timeout_sec"] = max(30, min(_t, 7200))
     old["etl"]["full_scan"] = bool(form.get("etl_full_scan"))
-    old["etl"]["skip_firebird_progress_count"] = bool(form.get("etl_skip_fb_count"))
     return old
 
 

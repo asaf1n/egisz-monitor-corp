@@ -236,6 +236,92 @@ def upsert_dim_clinic(
         )
 
 
+def refresh_licenses_import_staging(con, rows: list[dict[str, Any]]) -> None:  # type: ignore[no-untyped-def]
+    """Полная перезапись сырого снимка лицензий; дальше merge в dim_clinics и выборка для ETL — в PostgreSQL."""
+    with con.cursor() as cur:
+        cur.execute("TRUNCATE stg_egisz_licenses_import")
+    if not rows:
+        return
+    tuples: list[tuple[Any, ...]] = []
+    for r in rows:
+        tuples.append(
+            (
+                r.get("id"),
+                r.get("jid"),
+                (str(r.get("mo_uid")).strip() if r.get("mo_uid") is not None else None) or None,
+                (str(r.get("mo_domen")).strip() if r.get("mo_domen") is not None else None) or None,
+                r.get("modifydate"),
+                r.get("egisz_licenses_kind"),
+                r.get("jname"),
+                r.get("jinn"),
+                r.get("fir_oid"),
+            )
+        )
+    with con.cursor() as cur:
+        execute_values(
+            cur,
+            """
+            INSERT INTO stg_egisz_licenses_import (
+                fb_id, jid, mo_uid, mo_domen, modifydate, egisz_licenses_kind, jname, jinn, fir_oid
+            ) VALUES %s
+            """,
+            tuples,
+        )
+
+
+def merge_dim_clinics_from_license_staging(con) -> None:  # type: ignore[no-untyped-def]
+    """UPSERT dim_clinics из staging: только строки с JID; приоритет свежей MODIFYDATE (как в однострочном upsert_dim_clinic)."""
+    with con.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO dim_clinics (jid, jname, mo_uid, jinn, fir_oid, updated_at)
+            SELECT DISTINCT ON (s.jid)
+                s.jid::bigint,
+                NULLIF(BTRIM(s.jname::text), ''),
+                COALESCE(NULLIF(BTRIM(s.mo_uid::text), ''), ''),
+                COALESCE(NULLIF(BTRIM(s.jinn::text), ''), ''),
+                COALESCE(NULLIF(BTRIM(s.fir_oid::text), ''), ''),
+                NOW()
+            FROM stg_egisz_licenses_import s
+            WHERE s.jid IS NOT NULL
+            ORDER BY s.jid, s.modifydate DESC NULLS LAST, s.fb_id DESC NULLS LAST
+            ON CONFLICT (jid) DO UPDATE SET
+                jname = COALESCE(EXCLUDED.jname, dim_clinics.jname),
+                mo_uid = CASE WHEN EXCLUDED.mo_uid <> '' THEN EXCLUDED.mo_uid ELSE dim_clinics.mo_uid END,
+                jinn = CASE WHEN EXCLUDED.jinn <> '' THEN EXCLUDED.jinn ELSE dim_clinics.jinn END,
+                fir_oid = CASE WHEN EXCLUDED.fir_oid <> '' THEN EXCLUDED.fir_oid ELSE dim_clinics.fir_oid END,
+                updated_at = NOW();
+            """
+        )
+
+
+def fetch_license_rows_for_enrichment(con) -> list[dict[str, Any]]:  # type: ignore[no-untyped-def]
+    """Строки для кэша ETL после очистки на стороне PostgreSQL (только с непустым JID)."""
+    with con.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                fb_id AS id,
+                jid,
+                mo_uid,
+                mo_domen,
+                modifydate,
+                egisz_licenses_kind,
+                jname,
+                jinn,
+                fir_oid
+            FROM stg_egisz_licenses_import
+            WHERE jid IS NOT NULL
+            ORDER BY jid, modifydate DESC NULLS LAST, fb_id DESC NULLS LAST
+            """
+        )
+        cols = [d[0] for d in cur.description]
+        out: list[dict[str, Any]] = []
+        for row in cur.fetchall():
+            out.append(dict(zip(cols, row)))
+    return out
+
+
 def refresh_outbound_documents_staging(con, rows: list[dict[str, Any]]) -> None:  # type: ignore[no-untyped-def]
     """Полная перезапись stg_egisz_outbound_documents снимком (порядок строк как во входном iterable — типично EGMID DESC)."""
     with con.cursor() as cur:

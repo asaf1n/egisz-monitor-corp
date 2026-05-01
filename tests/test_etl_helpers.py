@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pytest
 
@@ -29,7 +29,6 @@ from egisz_monitor_corp.etl import (
     _export_egisz_licenses_full,
     _export_egisz_messages_by_egmid,
     _is_test_clinic,
-    _license_modifydate_in_window,
     _process_exchangelog_pages,
     _to_int,
 )
@@ -92,30 +91,8 @@ def test_export_egisz_licenses_full_builds_mo_uid_and_jname_maps() -> None:
     assert any(c[0] == 7 for c in cache.clinics)
 
 
-def test_count_exchangelog_total_returns_int_or_zero_on_failure() -> None:
-    def ok_fetch(_cfg: Any, sql: str, *_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
-        assert "COUNT(*)" in sql
-        return [{"cnt": 1234}]
-
-    with patch("egisz_monitor_corp.etl.fetch_all", side_effect=ok_fetch):
-        assert _count_exchangelog_total(
-            _cfg(), "SELECT 1 FROM x", has_custom_query=False, last_id=0, log=lambda _m: None
-        ) == 1234
-
-    def bad_fetch(_cfg: Any, _sql: str, *_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
-        raise RuntimeError("FB down")
-
-    captured: list[str] = []
-    with patch("egisz_monitor_corp.etl.fetch_all", side_effect=bad_fetch):
-        n = _count_exchangelog_total(
-            _cfg(),
-            "SELECT * FROM EXCHANGELOG WHERE 1=1",
-            has_custom_query=True,
-            last_id=42,
-            log=captured.append,
-        )
-    assert n == 0
-    assert any("COUNT" in m for m in captured)
+def test_count_exchangelog_total_is_zero_without_firebird() -> None:
+    assert _count_exchangelog_total() == 0
 
 
 def test_is_test_clinic_matches_ru_and_en() -> None:
@@ -202,13 +179,6 @@ def test_to_int_rejects_zero_but_egmid_sql_int_keeps_zero_for_cursor() -> None:
     assert _egmid_sql_int(0) == 0
 
 
-def test_license_modifydate_in_window() -> None:
-    assert _license_modifydate_in_window(None, 30) is True
-    assert _license_modifydate_in_window(None, 0) is True
-    assert _license_modifydate_in_window(datetime.now(timezone.utc) - timedelta(days=2), 10) is True
-    assert _license_modifydate_in_window(datetime.now(timezone.utc) - timedelta(days=20), 10) is False
-
-
 def test_process_exchangelog_pages_msgtext_too_large_staging_only() -> None:
     """Строка с MSGTEXT больше max_msgtext_bytes не вызывает parse_xml; staging MSGTEXT_TOO_LARGE."""
     huge = "ы" * 500  # UTF-8: 1000 байт
@@ -258,15 +228,13 @@ def test_process_exchangelog_pages_msgtext_too_large_staging_only() -> None:
 
     def fake_fetch(_cfg: Any, sql: str, *_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
         calls["n"] += 1
-        if "COUNT(*)" in sql.upper():
-            return [{"cnt": 999}]
-        if calls["n"] > 3:
+        if calls["n"] > 2:
             raise AssertionError("fetch_all called too many times (infinite loop)")
         return [{"msgid": f"k{i}", "egmid": None, "replyto": None, "documentid": None, "msg_created_at": None} for i in range(500)]
 
     with patch("egisz_monitor_corp.etl.fetch_all", side_effect=fake_fetch):
         msg, cur = _export_egisz_messages_by_egmid(_cfg(), 0, log=lambda _m: None, detail=None)
 
-    assert calls["n"] == 2
+    assert calls["n"] == 1
     assert cur == 0
     assert len(msg) == 500
