@@ -267,6 +267,22 @@ def test_as_fact_row_errors_list() -> None:
     assert "local_uid_semd" in row
 
 
+def test_build_record_passes_exchangelog_log_id_and_message_egmid() -> None:
+    p = EgiszMonitorParser()
+    xml = _soap("SRC-1", "success", kind="<ns2:kind>62</ns2:kind>")
+    rec = p.build_record(
+        "http://gost-1.infoclinica.lan/",
+        msg_text=xml,
+        document_id="D1",
+        exchangelog_log_id=991_001,
+        egisz_messages_egmid=42,
+    )
+    assert rec is not None
+    row = rec.as_fact_row()
+    assert row["exchangelog_log_id"] == 991_001
+    assert row["egisz_messages_egmid"] == 42
+
+
 def test_parse_xml_rejects_doctype_with_internal_entity() -> None:
     """defusedxml forbids DTD/entity expansion (Gordon-2 baseline)."""
     p = EgiszMonitorParser()

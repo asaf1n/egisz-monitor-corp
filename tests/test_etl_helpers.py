@@ -1,7 +1,7 @@
 """Юнит-тесты для расщеплённых хелперов run_sync и advisory lock helpers.
 
 Покрытие:
-1. `_export_egisz_licenses_full` — кэш справочников Firebird (mock fetch_all; один запрос лицензий + JOIN JPERSONS).
+1. `_export_egisz_licenses_full` — кэш справочников Firebird (mock fetch_all; JPERSONS и EGISZ_LICENSES отдельно; при pg=None — сшивка в Python).
 2. `_count_exchangelog_total` — выбор COUNT-SQL и graceful degrade при ошибке FB.
 3. `_pipeline_lock_key` — детерминированный bigint в диапазоне int64.
 4. `try_acquire_pipeline_lock` / `release_pipeline_lock` — корректная логика на FakeConn.

@@ -70,6 +70,8 @@ def test_etl_firebird_query_timeout_defaults_and_clamp() -> None:
     )
     assert cfg.etl.firebird_query_timeout_sec == 900
     assert cfg.etl.skip_firebird_progress_count is False
+    assert cfg.etl.facts_upsert_chunk_size == 500
+    assert cfg.etl.pg_upsert_statement_timeout_sec == 120
     hi = parse_corp_config_dict(
         {
             "firebird": {"host": "h", "port": 1, "database": "d", "user": "u", "password": "p"},
@@ -80,6 +82,19 @@ def test_etl_firebird_query_timeout_defaults_and_clamp() -> None:
     )
     assert hi.etl.firebird_query_timeout_sec == 7200
     assert hi.etl.skip_firebird_progress_count is True
+
+
+def test_etl_facts_upsert_and_pg_timeout_from_yaml() -> None:
+    lo = parse_corp_config_dict(
+        {
+            "firebird": {"host": "h", "port": 1, "database": "d", "user": "u", "password": "p"},
+            "postgres": {"host": "h", "port": 2, "database": "d", "user": "u", "password": "p"},
+            "etl": {"facts_upsert_chunk_size": 200, "pg_upsert_statement_timeout_sec": None},
+        },
+        use_yaml_postgres_only=True,
+    )
+    assert lo.etl.facts_upsert_chunk_size == 200
+    assert lo.etl.pg_upsert_statement_timeout_sec is None
 
 
 def test_etl_max_msgtext_bytes_zero_means_disabled() -> None:

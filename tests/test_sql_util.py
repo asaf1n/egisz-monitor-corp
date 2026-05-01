@@ -63,11 +63,12 @@ def test_default_count_logid_only_no_join() -> None:
     assert "LOGDATE" not in sql
 
 
-def test_default_select_is_exchangelog_only_with_msgid() -> None:
+def test_default_select_exchangelog_joins_messages_for_egmid() -> None:
     s = default_exchangelog_select()
     assert "FROM EXCHANGELOG e" in s
     assert "e.MSGID AS MSGID" in s
-    assert "EGISZ_MESSAGES" not in s
+    assert "LEFT JOIN EGISZ_MESSAGES m ON m.MSGID = e.MSGID" in s.replace("\n", " ")
+    assert "m.EGMID AS MESSAGE_EGMID" in s.replace("\n", " ")
     assert "DATEADD" not in s
 
 

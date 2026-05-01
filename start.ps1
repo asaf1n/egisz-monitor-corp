@@ -507,22 +507,42 @@ function Invoke-PostgresEnsureAppRole {
 }
 
 function Invoke-PostgresSchemaInit {
-    Write-Host "[kubectl] ConfigMap + Job: apply schema to egisz_reports (001 + 002 + 005)..." -ForegroundColor Cyan
-    $sql1 = Join-Path $Root "sql\001_schema.sql"
-    $sql2 = Join-Path $Root "sql\002_etl_state.sql"
-    $sql5 = Join-Path $Root "sql\005_healthcheck.sql"
-    if (-not (Test-Path $sql1) -or -not (Test-Path $sql2) -or -not (Test-Path $sql5)) {
-        Write-Host "ERROR: Missing sql\001_schema.sql, sql\002_etl_state.sql or sql\005_healthcheck.sql" -ForegroundColor Red
+    Write-Host "[kubectl] ConfigMap + Job: apply warehouse DDL (sql/schema_apply_order.txt)..." -ForegroundColor Cyan
+    $orderFile = Join-Path $Root "sql\schema_apply_order.txt"
+    if (-not (Test-Path $orderFile)) {
+        Write-Host "ERROR: Missing $orderFile" -ForegroundColor Red
         exit 1
     }
-    # Do not pipe ConfigMap YAML through PowerShell: it can transcode UTF-8 SQL aliases to '?'.
-    # Create the ConfigMap directly from files so Russian UI column names stay byte-exact.
+    $names = New-Object System.Collections.Generic.List[string]
+    Get-Content -LiteralPath $orderFile -Encoding UTF8 | ForEach-Object {
+        $parts = $_ -split '#', 2
+        $line = $parts[0].Trim()
+        if ($line.Length -gt 0) {
+            [void]$names.Add($line)
+        }
+    }
+    if ($names.Count -eq 0) {
+        Write-Host "ERROR: No SQL filenames in schema_apply_order.txt" -ForegroundColor Red
+        exit 1
+    }
+    foreach ($n in $names) {
+        $p = Join-Path $Root "sql\$n"
+        if (-not (Test-Path $p)) {
+            Write-Host "ERROR: Listed in schema_apply_order.txt but file missing: $p" -ForegroundColor Red
+            exit 1
+        }
+    }
     kubectl -n egisz-monitor delete configmap/egisz-reports-schema --ignore-not-found
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    kubectl -n egisz-monitor create configmap egisz-reports-schema `
-        --from-file=001_schema.sql=$sql1 `
-        --from-file=002_etl_state.sql=$sql2 `
-        --from-file=005_healthcheck.sql=$sql5
+    $kubectlArgs = @(
+        '-n', 'egisz-monitor', 'create', 'configmap', 'egisz-reports-schema',
+        "--from-file=schema_apply_order.txt=$orderFile"
+    )
+    foreach ($n in $names) {
+        $p = Join-Path $Root "sql\$n"
+        $kubectlArgs += "--from-file=${n}=$p"
+    }
+    & kubectl $kubectlArgs
     if ($LASTEXITCODE -ne 0) { exit 1 }
     kubectl -n egisz-monitor delete job/egisz-reports-schema-init --ignore-not-found
     kubectl apply -f (Join-Path $Root "k8s\postgres\egisz-reports-schema-job.yaml")

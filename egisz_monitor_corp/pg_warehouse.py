@@ -92,6 +92,27 @@ def sql_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "sql"
 
 
+def reports_schema_sql_filenames() -> tuple[str, ...]:
+    """Имена .sql для витрины egisz_reports (порядок = sql/schema_apply_order.txt)."""
+    order = sql_dir() / "schema_apply_order.txt"
+    if not order.is_file():
+        raise FileNotFoundError(f"Schema apply manifest missing: {order}")
+    names: list[str] = []
+    for raw in order.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        names.append(line)
+    if not names:
+        raise ValueError(f"No SQL filenames in {order}")
+    return tuple(names)
+
+
+def apply_reports_schema(con) -> None:  # type: ignore[no-untyped-def]
+    """Идемпотентный DDL витрины: тот же набор, что k8s Job egisz-reports-schema-init."""
+    apply_sql_files(con, *reports_schema_sql_filenames())
+
+
 def apply_sql_files(con, *names: str) -> None:  # type: ignore[no-untyped-def]
     """Execute bundled .sql files in order (idempotent DDL)."""
     root = sql_dir()
@@ -236,10 +257,103 @@ def upsert_dim_clinic(
         )
 
 
-def refresh_licenses_import_staging(con, rows: list[dict[str, Any]]) -> None:  # type: ignore[no-untyped-def]
-    """Полная перезапись сырого снимка лицензий; дальше merge в dim_clinics и выборка для ETL — в PostgreSQL."""
+def _dedupe_jpersons_by_jid(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Один ряд на JID (последняя строка побеждает), только с непустым JID."""
+    by_jid: dict[int, dict[str, Any]] = {}
+    for r in rows:
+        jid_raw = r.get("jid")
+        if jid_raw is None:
+            continue
+        try:
+            jid = int(jid_raw)
+        except (TypeError, ValueError):
+            continue
+        if jid <= 0:
+            continue
+        by_jid[jid] = r
+    return list(by_jid.values())
+
+
+def refresh_license_staging_from_firebird_exports(
+    con,
+    *,
+    jpersons_rows: list[dict[str, Any]],
+    license_rows: list[dict[str, Any]],
+    insert_chunk_size: int = 2000,
+) -> None:  # type: ignore[no-untyped-def]
+    """TRUNCATE staging JPERSONS + лицензий; вставка из Firebird; сшивка JNAME/JINN/FIR_OID в PostgreSQL (UPDATE … FROM)."""
+    jp = _dedupe_jpersons_by_jid(jpersons_rows)
     with con.cursor() as cur:
-        cur.execute("TRUNCATE stg_egisz_licenses_import")
+        cur.execute("TRUNCATE stg_jpersons_import, stg_egisz_licenses_import")
+    if not jp and not license_rows:
+        return
+    jp_tuples: list[tuple[Any, ...]] = []
+    for r in jp:
+        jp_tuples.append(
+            (
+                int(r["jid"]),
+                (str(r.get("jname")).strip() if r.get("jname") is not None else None) or None,
+                (str(r.get("jinn")).strip() if r.get("jinn") is not None else None) or None,
+                (str(r.get("fir_oid")).strip() if r.get("fir_oid") is not None else None) or None,
+            )
+        )
+    if jp_tuples:
+        with con.cursor() as cur:
+            execute_values(
+                cur,
+                """
+                INSERT INTO stg_jpersons_import (jid, jname, jinn, fir_oid) VALUES %s
+                """,
+                jp_tuples,
+            )
+    if not license_rows:
+        return
+    ins_chunk = max(200, min(int(insert_chunk_size), 20_000))
+    for i in range(0, len(license_rows), ins_chunk):
+        part = license_rows[i : i + ins_chunk]
+        tuples: list[tuple[Any, ...]] = []
+        for r in part:
+            tuples.append(
+                (
+                    r.get("id"),
+                    r.get("jid"),
+                    (str(r.get("mo_uid")).strip() if r.get("mo_uid") is not None else None) or None,
+                    (str(r.get("mo_domen")).strip() if r.get("mo_domen") is not None else None) or None,
+                    r.get("modifydate"),
+                    r.get("egisz_licenses_kind"),
+                    None,
+                    None,
+                    None,
+                )
+            )
+        with con.cursor() as cur:
+            execute_values(
+                cur,
+                """
+                INSERT INTO stg_egisz_licenses_import (
+                    fb_id, jid, mo_uid, mo_domen, modifydate, egisz_licenses_kind, jname, jinn, fir_oid
+                ) VALUES %s
+                """,
+                tuples,
+            )
+    with con.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE stg_egisz_licenses_import s
+            SET
+                jname = NULLIF(BTRIM(j.jname::text), ''),
+                jinn = COALESCE(NULLIF(BTRIM(j.jinn::text), ''), ''),
+                fir_oid = COALESCE(NULLIF(BTRIM(j.fir_oid::text), ''), '')
+            FROM stg_jpersons_import j
+            WHERE s.jid IS NOT NULL AND j.jid = s.jid
+            """
+        )
+
+
+def refresh_licenses_import_staging(con, rows: list[dict[str, Any]]) -> None:  # type: ignore[no-untyped-def]
+    """Обратная совместимость: снимок уже сшитый (JNAME на строках лицензий). Предпочтительно `refresh_license_staging_from_firebird_exports`."""
+    with con.cursor() as cur:
+        cur.execute("TRUNCATE stg_jpersons_import, stg_egisz_licenses_import")
     if not rows:
         return
     tuples: list[tuple[Any, ...]] = []
@@ -519,122 +633,114 @@ def fetch_healthcheck_snapshot(con, *, top_clinics: int = 5) -> dict[str, Any]: 
 
 
 def fetch_pg_sync_snapshot(con, pipeline: str) -> dict[str, Any]:  # type: ignore[no-untyped-def]
-    """Снимок для UI: last_log_id, last_egmid (последняя выгрузка EGISZ_MESSAGES), витрина, MAX(egmid) в staging, пики FB в etl_state."""
+    """Три показателя для UI: курсор LOGID, загруженный EGMID, MAX(MODIFYDATE) лицензий из etl_state."""
     with con.cursor() as cur:
         cur.execute(
             """
             SELECT
-                (SELECT MAX(ts) FROM (
-                    SELECT MAX(processed_at) AS ts FROM fact_egisz_transactions
-                    UNION ALL
-                    SELECT MAX(synced_at) AS ts FROM stg_egisz_outbound_documents
-                    UNION ALL
-                    SELECT MAX(updated_at) AS ts FROM etl_state WHERE pipeline = %s
-                    UNION ALL
-                    SELECT source_peaks_updated_at AS ts FROM etl_state WHERE pipeline = %s AND source_peaks_updated_at IS NOT NULL
-                ) s) AS last_record_at,
                 (SELECT last_log_id FROM etl_state WHERE pipeline = %s) AS last_log_id,
                 (SELECT COALESCE(last_egmid, 0) FROM etl_state WHERE pipeline = %s) AS last_egmid,
-                (SELECT MAX(egmid) FROM stg_egisz_outbound_documents) AS max_egmid_staging,
-                (SELECT source_max_egmid FROM etl_state WHERE pipeline = %s) AS source_max_egmid,
-                (SELECT source_max_licenses_modifydate FROM etl_state WHERE pipeline = %s) AS source_max_licenses_modifydate,
-                (SELECT source_peaks_updated_at FROM etl_state WHERE pipeline = %s) AS source_peaks_updated_at
+                (SELECT COALESCE(source_max_egmid, 0) FROM etl_state WHERE pipeline = %s) AS source_max_egmid,
+                (SELECT source_max_licenses_modifydate FROM etl_state WHERE pipeline = %s)
+                    AS source_max_licenses_modifydate
             """,
-            (pipeline, pipeline, pipeline, pipeline, pipeline, pipeline, pipeline),
+            (pipeline, pipeline, pipeline, pipeline),
         )
         row = cur.fetchone()
-    (
-        last_at,
-        lid_raw,
-        last_egmid_raw,
-        eg_staging_raw,
-        src_eg_raw,
-        src_lic_raw,
-        src_peaks_at,
-    ) = row if row else (None, None, None, None, None, None, None)
+    if not row:
+        return {"log_id": None, "egmid": None, "licenses_modifydate": None}
+    lid_raw, last_egmid_raw, src_eg_raw, lic_raw = row
+    log_id = int(lid_raw) if lid_raw is not None else None
+    last_eg = int(last_egmid_raw) if last_egmid_raw is not None else 0
+    src_eg = int(src_eg_raw) if src_eg_raw is not None else 0
+    eg_display = max(last_eg, src_eg)
+    lic_iso = lic_raw.isoformat() if lic_raw is not None else None
 
-    eg_staging = int(eg_staging_raw) if eg_staging_raw is not None else None
-    src_eg = int(src_eg_raw) if src_eg_raw is not None else None
-    last_eg = int(last_egmid_raw) if last_egmid_raw is not None else None
-    lic_iso = src_lic_raw.isoformat() if src_lic_raw is not None else None
-
-    # UI «EGMID»: max(last_egmid, source_max_egmid) — полный прогон поднимает оба; при сбое после выгрузки
-    # сообщений source_max_egmid уже отражает последнюю выгрузку из FB, last_egmid — закоммиченный ватермарк.
-    eg_candidates: list[int] = []
-    if last_eg is not None:
-        eg_candidates.append(last_eg)
-    if src_eg is not None:
-        eg_candidates.append(src_eg)
-    eg_display = max(eg_candidates) if eg_candidates else eg_staging
-
-    out: dict[str, Any] = {
-        "sync_at": last_at.isoformat() if last_at else None,
-        "log_id": int(lid_raw) if lid_raw is not None else None,
-        "last_egmid": last_eg,
+    return {
+        "log_id": log_id,
         "egmid": eg_display,
-        "egmid_staging_max": eg_staging,
-        "source_max_egmid": src_eg,
         "licenses_modifydate": lic_iso,
-        "source_peaks_updated_at": src_peaks_at.isoformat() if src_peaks_at else None,
     }
-    return out
 
 
-def upsert_facts_batch(con, rows: list[dict[str, Any]]) -> None:  # type: ignore[no-untyped-def]
-    """Batch UPSERT into fact_egisz_transactions."""
+def upsert_facts_batch(
+    con,
+    rows: list[dict[str, Any]],
+    *,
+    chunk_size: int = 500,
+    commit_each_chunk: bool = True,
+    statement_timeout_sec: int | None = None,
+) -> None:  # type: ignore[no-untyped-def]
+    """Batch UPSERT в fact_egisz_transactions; при большом буфере — несколько execute_values + COMMIT между частями."""
     if not rows:
         return
-    # execute_values + ON CONFLICT: duplicate relates_to_id in one statement is rejected (CardinalityViolation).
     dedup: dict[str, dict[str, Any]] = {}
     for r in rows:
         dedup[r["relates_to_id"]] = r
     rows = list(dedup.values())
-    tuples: list[tuple[Any, ...]] = []
-    for r in rows:
-        err = r["errors_json"]
-        if isinstance(err, str):
-            err = json.loads(err)
-        tuples.append(
-            (
-                r["relates_to_id"],
-                r.get("local_uid_semd"),
-                r["jid"],
-                r["gost_jid_token"],
-                r["org_oid"],
-                r["kind_code"],
-                r["status"],
-                r["emdr_id"],
-                Json(err),
-                r["registration_date"],
-                r.get("semd_creation_at"),
-                r["processed_at"],
+    cs = max(50, min(int(chunk_size), 10_000))
+    template = "(%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s)"
+    n = len(rows)
+    multi = n > cs
+    for start in range(0, n, cs):
+        chunk = rows[start : start + cs]
+        tuples: list[tuple[Any, ...]] = []
+        for r in chunk:
+            err = r["errors_json"]
+            if isinstance(err, str):
+                err = json.loads(err)
+            tuples.append(
+                (
+                    r["relates_to_id"],
+                    r.get("local_uid_semd"),
+                    r["jid"],
+                    r["gost_jid_token"],
+                    r["org_oid"],
+                    r["kind_code"],
+                    r["status"],
+                    r["emdr_id"],
+                    Json(err),
+                    r["registration_date"],
+                    r.get("semd_creation_at"),
+                    r["processed_at"],
+                    r.get("exchangelog_log_id"),
+                    r.get("egisz_messages_egmid"),
+                )
             )
-        )
-    template = "(%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s)"  # Json() → jsonb
-    with con.cursor() as cur:
-        execute_values(
-            cur,
-            """
-            INSERT INTO fact_egisz_transactions (
-                relates_to_id, local_uid_semd, jid, gost_jid_token, org_oid, kind_code, status,
-                emdr_id, errors_json, registration_date, semd_creation_at, processed_at
-            ) VALUES %s
-            ON CONFLICT (relates_to_id) DO UPDATE SET
-                local_uid_semd = EXCLUDED.local_uid_semd,
-                jid = EXCLUDED.jid,
-                gost_jid_token = EXCLUDED.gost_jid_token,
-                org_oid = EXCLUDED.org_oid,
-                kind_code = EXCLUDED.kind_code,
-                status = EXCLUDED.status,
-                emdr_id = EXCLUDED.emdr_id,
-                errors_json = EXCLUDED.errors_json,
-                registration_date = EXCLUDED.registration_date,
-                semd_creation_at = EXCLUDED.semd_creation_at,
-                processed_at = EXCLUDED.processed_at
-            """,
-            tuples,
-            template=template,
-        )
+        with con.cursor() as cur:
+            if statement_timeout_sec is not None:
+                cur.execute(
+                    "SET LOCAL statement_timeout = %s",
+                    (f"{max(5, int(statement_timeout_sec))}s",),
+                )
+            execute_values(
+                cur,
+                """
+                INSERT INTO fact_egisz_transactions (
+                    relates_to_id, local_uid_semd, jid, gost_jid_token, org_oid, kind_code, status,
+                    emdr_id, errors_json, registration_date, semd_creation_at, processed_at,
+                    exchangelog_log_id, egisz_messages_egmid
+                ) VALUES %s
+                ON CONFLICT (relates_to_id) DO UPDATE SET
+                    local_uid_semd = EXCLUDED.local_uid_semd,
+                    jid = EXCLUDED.jid,
+                    gost_jid_token = EXCLUDED.gost_jid_token,
+                    org_oid = EXCLUDED.org_oid,
+                    kind_code = EXCLUDED.kind_code,
+                    status = EXCLUDED.status,
+                    emdr_id = EXCLUDED.emdr_id,
+                    errors_json = EXCLUDED.errors_json,
+                    registration_date = EXCLUDED.registration_date,
+                    semd_creation_at = EXCLUDED.semd_creation_at,
+                    processed_at = EXCLUDED.processed_at,
+                    exchangelog_log_id = EXCLUDED.exchangelog_log_id,
+                    egisz_messages_egmid = EXCLUDED.egisz_messages_egmid
+                """,
+                tuples,
+                template=template,
+            )
+        if commit_each_chunk and multi:
+            con.commit()
 
 
 def insert_staging_errors(con, rows: list[tuple[str | None, str, str, str | None]]) -> None:  # type: ignore[no-untyped-def]

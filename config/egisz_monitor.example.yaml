@@ -39,6 +39,10 @@ etl:
   # skip_firebird_progress_count: false
   # Опционально: макс. размер MSGTEXT в байтах UTF-8; больше — строка журнала пропускается (stg_parse_errors: MSGTEXT_TOO_LARGE). null = без лимита.
   # max_msgtext_bytes: 4194304
+  # Размер одного UPSERT фактов в PostgreSQL (строк за один execute_values); больше буфера — несколько батчей и COMMIT между ними.
+  # facts_upsert_chunk_size: 500
+  # Лимит statement_timeout в секундах на каждый батч UPSERT (SET LOCAL); null = не задавать для этого шага.
+  # pg_upsert_statement_timeout_sec: 120
 
 metabase:
   # Site URL в настройках Metabase. Учётка администратора UI: admin@egisz.local / egisz (k8s: Secret metabase-admin).

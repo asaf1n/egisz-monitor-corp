@@ -19,10 +19,10 @@
 | Модуль | Роль |
 |--------|------|
 | `cli.py` | CLI: `sync`, `apply-schema`, проверки БД |
-| `etl.py` | **`run_sync`**: JPERSONS и EGISZ_LICENSES из FB по отдельности → сшивка в Python → `stg_egisz_licenses_import`, merge в `dim_clinics`; чередование пакетов по 65k **EGISZ_MESSAGES** (EGMID) и **EXCHANGELOG** (LOGID) с дозагрузкой сообщений по MSGID и фоновым SELECT следующей страницы сообщений на время парсинга журнала; без COUNT в Firebird; outbound по `EGMID` |
+| `etl.py` | **`run_sync`**: JPERSONS и EGISZ_LICENSES из FB по отдельности → `stg_jpersons_import` + `stg_egisz_licenses_import`, сшивка JNAME/JINN/FIR_OID в **PostgreSQL** (`UPDATE … FROM`), merge в `dim_clinics`; чередование пакетов по 65k **EGISZ_MESSAGES** (EGMID) и **EXCHANGELOG** (LOGID) с дозагрузкой по MSGID и фоновым SELECT следующей страницы сообщений на время парсинга журнала; без COUNT в Firebird; UPSERT фактов **чанками** (`facts_upsert_chunk_size`, опционально `pg_upsert_statement_timeout_sec`); outbound по `EGMID` |
 | `parser.py` | **`EgiszMonitorParser`**: разбор MSGTEXT (SOAP/XML), `relates_to_id`, `status`, `errors_json`, `localUid`, `resolve_clinic` |
 | `sql_util.py` | SQL к Firebird: `EXCHANGELOG` и пагинация по `LOGID` (до 65k); инкремент `EGISZ_MESSAGES` по `EGMID` (до 65k); выборка по списку `MSGID`; полный `JPERSONS`; полная выборка `EGISZ_LICENSES` без JOIN; outbound по минимальному `EGMID` |
-| `pg_warehouse.py` | Подключение PG, применение `sql/*.sql`, `etl_state`, staging лицензий, UPSERT факта/измерений |
+| `pg_warehouse.py` | Подключение PG, применение `sql/*.sql`, `etl_state`, staging JPERSONS/лицензий, UPSERT факта чанками / измерений |
 | `fb_client.py` | Клиент Firebird |
 | `config_loader.py` | Загрузка YAML (`EGISZ_MONITOR_CONFIG`, по умолчанию `config/egisz_monitor.yaml`) |
 | `config_app.py` | Flask-приложение конфиг-UI (если используется) |
@@ -33,14 +33,14 @@
 
 | Файл | Содержимое |
 |------|------------|
-| `001_schema.sql` | Таблицы факта/измерений, `stg_egisz_licenses_import`, `stg_egisz_outbound_documents`, представления `v_*`, функции `egisz_friendly_*`, `dim_column_display_labels` |
+| `001_schema.sql` | Таблицы факта/измерений, `stg_jpersons_import`, `stg_egisz_licenses_import`, `stg_egisz_outbound_documents`, представления `v_*`, функции `egisz_friendly_*`, `dim_column_display_labels` |
 | `002_etl_state.sql` | Таблица `etl_state`: курсоры `last_log_id` (EXCHANGELOG.LOGID), `last_egmid` (EGISZ_MESSAGES.EGMID), пики FB |
 | `003_diagnostic_counts_firebird.sql` | Шаблоны диагностики FB |
 | `004_diagnostic_counts_postgres.sql` | Шаблоны диагностики PG |
 | `005_healthcheck.sql` | Healthcheck-витрина: `v_health_by_clinic` (агрегаты за 24ч), `v_health_signals` (5 сигналов), `v_health_proxy_db` (сводка staging исходящих + курсор ETL) + UI-обёртки `*_ui` для дашборда `11_healthcheck.json` |
 | `006_firebird_proxy_export.sql` | Ручные выгрузки с прокси Firebird (пики, outbound, журнал 65k / инкремент после `LOGID`); не применяется Job'ом схемы |
 
-Схема на кластере: Job `egisz-reports-schema-init` (применяет `001 + 002 + 005`), локально — `egisz-monitor apply-schema`. ETL `run_sync` идемпотентно ререпит ту же тройку при каждом запуске.
+Схема на кластере: Job `egisz-reports-schema-init` (порядок файлов — `sql/schema_apply_order.txt`, по умолчанию `001 + 002 + 005`), локально — `egisz-monitor apply-schema`. ETL `run_sync` идемпотентно применяет тот же набор при каждом запуске.
 
 ## Тесты (`tests/`)
 
@@ -68,7 +68,7 @@
 | Путь | Назначение |
 |------|------------|
 | `k8s/` | Обзор: [`k8s/README.md`](k8s/README.md) — Postgres, Metabase, conf-ui, примеры секретов |
-| `k8s/postgres/` | StatefulSet, сервисы, Job **`egisz-reports-schema-init`** (`001_schema.sql`, `002_etl_state.sql`, `005_healthcheck.sql`), Job’ы Metabase app DB и (при необходимости) Airflow metadata |
+| `k8s/postgres/` | StatefulSet, сервисы, Job **`egisz-reports-schema-init`** (DDL по `sql/schema_apply_order.txt`), Job’ы Metabase app DB и (при необходимости) Airflow metadata |
 | `k8s/metabase.yaml` | Deployment Metabase (образ `egisz-monitor-metabase:k8s-v15`); `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75 -XX:+UseG1GC`, startupProbe (240s), `METABASE_FORCE_PROVISION=auto` (идемпотентный provision — dashboard ID не меняются) |
 | `k8s/conf-ui.yaml` | Config UI (gunicorn 1×16t + `sync_routes`); non-root UID 10001, `/healthz`, RollingUpdate `maxUnavailable=0` |
 | `k8s/etl-cron.yaml` | **CronJob `egisz-monitor-sync`**: `*/15 * * * *`, тот же образ `egisz-conf-ui:corp-web`, CLI `egisz-monitor sync`, `concurrencyPolicy: Forbid` + advisory lock в Postgres против гонки с UI-кнопкой |
@@ -86,18 +86,19 @@
 
 | Артефакт | Назначение |
 |----------|------------|
-| `sql/005_healthcheck.sql` | Витрины `v_health_by_clinic` / `v_health_signals` / `v_health_proxy_db` + UI-обёртки `*_ui` (русские подписи через `dim_column_display_labels`). Применяется ETL `run_sync` и Job `egisz-reports-schema-init`. |
+| `sql/005_healthcheck.sql` | Витрины `v_health_by_clinic` / `v_health_signals` / `v_health_proxy_db` + UI-обёртки `*_ui` (русские подписи через `dim_column_display_labels`). Входит в `schema_apply_order.txt`; применяется ETL `run_sync` и Job `egisz-reports-schema-init`. |
 | `egisz_monitor_corp/pg_warehouse.py` → `fetch_healthcheck_snapshot(con)` | Чтение трёх view + агрегаты для UI/JSON; `statement_timeout = 10s` на каждый блок. |
 | `GET /api/healthcheck` (`egisz_monitor_corp/config_app.py`) | JSON-снимок `{signals, by_clinic_top, proxy_db, level_summary}`. При недоступной PG — `ok: false` и `errors[]` (graceful). |
 | Config UI: вкладки **Snapshot / Healthcheck** | Snapshot — текущие `EGMID/LOGID/MODIFYDATE` (как раньше). Healthcheck — сигналы, top-3 клиники, прокси-БД (опрос `/api/healthcheck` каждые 30 c). |
 | Дашборд `metabase_dashboards/11_healthcheck.json` | «11 Healthcheck интеграции»: сигналы, heatmap клиник × дни, age-buckets очереди, тренд parse-errors, сводка прокси-БД. |
 | Полный аудит | `docs/INTEGRATION_AUDIT.md` (3 фокуса: техника/бизнес/healthcheck). |
+| Операторам Config UI (лог, прогресс, курсоры, Metabase vs веб) | `README.md` → [Синхронизация Firebird → PostgreSQL](README.md#синхронизация-firebird--postgresql) |
 
 ## ETL: pipeline и параллельный запуск
 
 `etl.run_sync` расщеплён на чистые функции (см. `etl.py`):
 
-- `_export_egisz_licenses_full` — сначала `JPERSONS`, затем `EGISZ_LICENSES` без JOIN, сшивка в Python; сырой снимок в `stg_egisz_licenses_import`, merge в `dim_clinics`, строки для кэша ETL — выборка из PostgreSQL.
+- `_export_egisz_licenses_full` — `JPERSONS`, затем `EGISZ_LICENSES` без JOIN в Firebird; в PG — два staging, **`UPDATE … FROM`** для полей юрлица, merge в `dim_clinics`, выборка для кэша ETL из PostgreSQL; при `dry_run` без PG — сшивка в Python.
 - `_count_exchangelog_total` — заглушка: COUNT в Firebird для прогресса не выполняется.
 - `_run_interleaved_messages_and_journal` — чередование пакетов по 65k: сообщения по `EGMID`, журнал по `LOGID`; дозагрузка `EGISZ_MESSAGES` по недостающим `MSGID` страницы журнала; `ThreadPoolExecutor`: следующая страница сообщений читается из FB, пока парсится текущая страница журнала; `last_egmid` — после успешного прогона.
 - `_process_exchangelog_pages` — полный проход журнала с уже загруженным `msg_by_msgid` (тесты и совместимость).

@@ -1,7 +1,7 @@
 -- Healthcheck-витрина EGISZ Monitor Corp.
 -- Источники: fact_egisz_transactions, dim_clinics, stg_parse_errors, stg_egisz_outbound_documents, etl_state.
 -- Запрашиваются Config UI (/api/healthcheck) и дашбордом Metabase 11_healthcheck.
--- Идемпотентен: применяется в run_sync.apply_sql_files и в k8s Job egisz-reports-schema-init.
+-- Идемпотентен: применяется в run_sync.apply_reports_schema и в k8s Job egisz-reports-schema-init.
 
 -- Индекс для горячих агрегатов по дате обработки (ETL загрузка / пересчёт healthcheck).
 CREATE INDEX IF NOT EXISTS idx_fact_egisz_processed_at ON fact_egisz_transactions (processed_at);

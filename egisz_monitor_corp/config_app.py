@@ -98,13 +98,13 @@ PAGE = """
     .hc-row-red { color: #FECDD3; }
     .hc-row-yellow { color: #FDE68A; }
     .hc-row-green { color: #A7F3D0; }
-    .hc-row { display: flex; align-items: baseline; gap: 0.4rem; min-width: 0; }
+    .hc-row { display: flex; align-items: flex-start; gap: 0.5rem; min-width: 0; }
     .hc-row .hc-bullet {
       flex-shrink: 0;
-      width: 0.55rem;
-      height: 0.55rem;
+      width: 0.62rem;
+      height: 0.62rem;
       border-radius: 9999px;
-      margin-top: 0.15rem;
+      margin-top: 0.28rem;
     }
     .hc-bullet-red { background: rgba(244, 63, 94, 0.85); box-shadow: 0 0 0 1px rgba(244, 63, 94, 0.3); }
     .hc-bullet-yellow { background: rgba(245, 158, 11, 0.85); box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.3); }
@@ -211,10 +211,10 @@ PAGE = """
         </div>
         </div>
 
-        <div id="connStatusStrip" class="relative rounded-md border border-transparent bg-transparent min-h-[2.75rem] lg:h-[2.75rem] overflow-hidden text-xs sm:text-sm font-mono transition-[background-color,border-color,color] duration-150" role="status" aria-live="polite">
+        <div id="connStatusStrip" class="relative rounded-md border border-transparent bg-transparent min-h-[2.75rem] overflow-hidden text-xs sm:text-sm font-mono transition-[background-color,border-color,color] duration-150" role="status" aria-live="polite">
           <div id="connStatusProgressFill" class="absolute inset-y-0 left-0 top-0 transition-[width] duration-300 ease-out" style="width:0%"></div>
-          <div class="relative z-[1] flex min-h-[2.75rem] items-center justify-center gap-3 px-3 py-2 text-center">
-            <span id="connStatusText" class="text-inherit leading-snug break-words max-w-[min(100%,64rem)]"></span>
+          <div class="relative z-[1] flex min-h-[2.75rem] w-full items-start justify-start gap-3 px-3 py-2 text-left lg:min-h-[2.75rem]">
+            <span id="connStatusText" class="min-w-0 flex-1 whitespace-pre-line text-inherit leading-snug break-words"></span>
             <span id="connStatusPct" class="hidden shrink-0 font-mono tabular-nums text-inherit min-w-[3rem] text-right"></span>
           </div>
         </div>
@@ -231,7 +231,7 @@ PAGE = """
           </button>
         </div>
 
-        <div class="flex min-h-0 flex-1 flex-col gap-4 border-t border-[#1B2940] pt-4 lg:grid lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,22rem)_minmax(18rem,1fr)] lg:gap-4 lg:pt-3">
+        <div class="flex min-h-0 flex-1 flex-col gap-4 border-t border-[#1B2940] pt-4 lg:grid lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(17rem,20rem)_minmax(16rem,1fr)] lg:gap-4 lg:pt-3">
           <div class="flex min-w-0 flex-col gap-3 lg:min-h-0">
             <button type="button" id="btnSync" class="inline-flex w-full min-h-12 items-center justify-center rounded-md border border-[#F59F36] bg-[#F59F36] px-3.5 py-2.5 font-mono text-sm text-[#121826] transition hover:bg-[#FFB95D] lg:min-h-[2.875rem]">
               Запустить синхронизацию
@@ -259,6 +259,7 @@ PAGE = """
           <div class="flex min-h-0 w-full shrink-0 flex-col gap-2 rounded-lg border border-[#2D3F5E] bg-[#121826] px-3 py-3 lg:h-full lg:max-h-none lg:min-h-0 lg:gap-1.5 lg:overflow-y-auto lg:py-2 fixed-scroll">
             <div class="mb-1 shrink-0">
               <h2 class="text-sm font-semibold tracking-tight text-[#D1D5DB] lg:text-sm">Последние значения синхронизации</h2>
+              <p id="pgSnapHint" class="mt-1 hidden text-[10px] leading-snug text-[#6B7280] lg:text-[10px]">Пока идёт синк: LOGID и EGMID ниже подменяются значениями из текущего прогона ETL (payload), это не обязательно уже зафиксированные в PostgreSQL курсоры.</p>
             </div>
 
             <section id="tabSnapshot" class="flex flex-col gap-2.5">
@@ -302,42 +303,42 @@ PAGE = """
     </section>
     </div>
 
-    <aside class="mt-5 flex w-full min-h-0 flex-1 flex-col gap-3 border-t border-[#1B2940] pt-5 lg:mt-0 lg:h-full lg:max-w-[min(22rem,30vw)] lg:w-[22rem] lg:flex-none lg:shrink-0 lg:self-stretch lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
+    <aside class="mt-5 flex w-full min-h-0 flex-1 flex-col gap-3 border-t border-[#1B2940] pt-5 lg:mt-0 lg:h-full lg:w-[min(30rem,38vw)] lg:max-w-[min(34rem,44vw)] lg:flex-none lg:shrink-0 lg:self-stretch lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
       {% if metabase_site_url %}
       <a href="{{ metabase_site_url }}" target="_blank" rel="noopener noreferrer" class="inline-flex min-h-12 w-full shrink-0 items-center justify-center rounded-md border border-[#509EE3]/90 bg-[#1B2940] px-3 py-3 text-center text-sm font-semibold uppercase tracking-[0.12em] text-[#E5F6FF] transition hover:border-[#60B5FF] hover:bg-[#223555] lg:min-h-0 lg:py-2.5 lg:text-[11px] lg:tracking-[0.14em]">
         Metabase →
       </a>
       {% endif %}
-      <div class="flex min-h-[14rem] flex-1 flex-col overflow-hidden rounded-lg border border-[#2D3F5E] bg-[#121826] px-3 py-3 lg:min-h-0">
-        <h2 class="mb-2 shrink-0 text-sm font-medium uppercase tracking-[0.12em] text-[#9CA3AF] lg:text-[11px] lg:font-normal lg:tracking-[0.16em] lg:text-[#4B5563]">Healthcheck</h2>
-        <div class="fixed-scroll flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-0.5 lg:gap-2">
-              <p id="hcHint" class="text-xs leading-snug text-[#6B7280] lg:text-[11px]">Сигналы по витрине + топ-3 проблемные клиники + сводка прокси-БД (см. <code class="text-[#509EE3]">v_health_signals</code>, <code class="text-[#509EE3]">v_health_by_clinic</code>).</p>
-              <div id="hcLevelSummary" class="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.12em] lg:gap-1.5 lg:text-[10px] lg:tracking-[0.14em]">
-                <span class="rounded-full px-2 py-0.5 border border-rose-700/60 bg-rose-900/20 text-rose-200" data-level="red">red <span data-count="red">0</span></span>
-                <span class="rounded-full px-2 py-0.5 border border-amber-600/60 bg-amber-900/20 text-amber-200" data-level="yellow">yellow <span data-count="yellow">0</span></span>
-                <span class="rounded-full px-2 py-0.5 border border-emerald-700/60 bg-emerald-900/20 text-emerald-300" data-level="green">green <span data-count="green">0</span></span>
+      <div class="flex min-h-[14rem] flex-1 flex-col overflow-hidden rounded-lg border border-[#2D3F5E] bg-[#121826] px-4 py-4 lg:min-h-0">
+        <h2 class="mb-3 shrink-0 text-base font-semibold uppercase tracking-[0.1em] text-[#D1D5DB]">Healthcheck</h2>
+        <div class="fixed-scroll flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
+              <p id="hcHint" class="text-sm leading-snug text-[#9CA3AF]" aria-live="polite">Загрузка…</p>
+              <div id="hcLevelSummary" class="flex flex-wrap items-center gap-2 text-xs font-medium uppercase tracking-[0.08em]">
+                <span class="rounded-full px-2.5 py-1 border border-rose-700/60 bg-rose-900/20 text-rose-200" data-level="red">red <span data-count="red">0</span></span>
+                <span class="rounded-full px-2.5 py-1 border border-amber-600/60 bg-amber-900/20 text-amber-200" data-level="yellow">yellow <span data-count="yellow">0</span></span>
+                <span class="rounded-full px-2.5 py-1 border border-emerald-700/60 bg-emerald-900/20 text-emerald-300" data-level="green">green <span data-count="green">0</span></span>
               </div>
               <div>
-                <h3 class="mb-1 text-xs font-medium uppercase tracking-[0.12em] text-[#509EE3] lg:text-[10px] lg:font-normal lg:tracking-[0.14em]">Сигналы</h3>
-                <ul id="hcSignals" class="space-y-2 text-sm leading-snug lg:space-y-1.5 lg:text-[11px]"></ul>
+                <h3 class="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#509EE3]">Сигналы</h3>
+                <ul id="hcSignals" class="space-y-3 text-sm leading-snug"></ul>
               </div>
               <div>
-                <h3 class="mb-1 text-xs font-medium uppercase tracking-[0.12em] text-[#509EE3] lg:text-[10px] lg:font-normal lg:tracking-[0.14em]">Топ клиник по проблемам</h3>
-                <ul id="hcClinics" class="space-y-2 text-sm leading-snug lg:space-y-1.5 lg:text-[11px]"></ul>
+                <h3 class="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#509EE3]">Топ клиник по проблемам</h3>
+                <ul id="hcClinics" class="space-y-3 text-sm leading-snug"></ul>
               </div>
               <div>
-                <h3 class="mb-1 text-xs font-medium uppercase tracking-[0.12em] text-[#509EE3] lg:text-[10px] lg:font-normal lg:tracking-[0.14em]">Прокси-БД и курсор</h3>
-                <ul id="hcProxyDb" class="grid grid-cols-1 gap-x-3 gap-y-2 text-sm leading-snug sm:grid-cols-2 lg:gap-y-1 lg:text-[11px]"></ul>
+                <h3 class="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#509EE3]">Прокси-БД и курсор</h3>
+                <ul id="hcProxyDb" class="grid grid-cols-1 gap-x-4 gap-y-2.5 text-sm leading-snug sm:grid-cols-2"></ul>
               </div>
         </div>
       </div>
       <div class="shrink-0 rounded-lg border border-[#2D3F5E] bg-[#121826] px-3 py-3 lg:py-2.5">
         <input type="file" id="pgRestoreFile" accept=".dump,.backup,application/octet-stream" class="sr-only" tabindex="-1" aria-hidden="true"/>
         <div class="flex flex-col gap-2">
-          <button type="button" id="btnPgBackup" class="inline-flex min-h-11 w-full items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3 py-2.5 font-mono text-[11px] text-[#D1D5DB] transition hover:border-[#509EE3] hover:bg-[#223555] hover:text-white lg:min-h-10">
+          <button type="button" id="btnPgBackup" class="inline-flex min-h-11 w-full items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#509EE3] hover:bg-[#223555] hover:text-white lg:min-h-10">
             Скачать бэкап
           </button>
-          <button type="button" id="btnPgRestore" class="inline-flex min-h-11 w-full items-center justify-center rounded-md border border-rose-700/70 bg-rose-950/40 px-3 py-2.5 font-mono text-[11px] text-rose-100 transition hover:bg-rose-900/50 lg:min-h-10">
+          <button type="button" id="btnPgRestore" class="inline-flex min-h-11 w-full items-center justify-center rounded-md border border-rose-700/70 bg-rose-950/40 px-3 py-2.5 font-mono text-sm text-rose-100 transition hover:bg-rose-900/50 lg:min-h-10">
             Восстановить из дампа
           </button>
         </div>
@@ -347,56 +348,177 @@ PAGE = """
 
   <script>
   let lastSyncJson = { running: false, error: null, message: '', last_stats: null };
-  /** Не даём полоске синхронизации откатываться назад при смене фазы (напр. после EGISZ_MESSAGES → EXCHANGELOG). */
-  let syncProgressCarry = 0;
   let lastUiMessage = { ok: true, text: '' };
   const STRIP_BASE =
-    'relative rounded-md border min-h-[2.75rem] lg:h-[2.75rem] overflow-hidden text-xs sm:text-sm font-mono transition-[background-color,border-color,color] duration-150';
-  function rawEtlProgressPercent(p) {
-    if (!p || typeof p !== 'object') return null;
-    const phase = String(p.phase || '');
-    if (phase === 'outbound_fetch' || phase === 'outbound_parse' || phase === 'outbound_postgres' || phase === 'outbound_done') {
-      const total = Number(p.outbound_total) || 0;
-      const loaded = Number(p.outbound_loaded) || 0;
-      if (phase === 'outbound_done' || (phase === 'outbound_postgres' && total === 0)) return 100;
-      if (total > 0) return 88 + Math.min(12, Math.round((loaded / total) * 12));
-      return 88;
-    }
-    if (phase === 'enrichment_firebird') return 5;
-    if (phase === 'counting' || phase === 'messages_counting') return 12;
-    if (phase === 'messages_incremental') {
-      const lo = Number(p.loaded_rows) || 0;
-      const tot = Number(p.total_rows) || 0;
-      if (tot > 0) return Math.min(34, Math.round(12 + (lo / tot) * 22));
-      const pg = Number(p.page) || 0;
-      if (pg <= 0 && lo <= 0) return 12;
-      const loPart = Math.min(12, Math.log10(1 + lo / 80.0) * 4.2);
-      const pgPart = Math.min(6, Math.sqrt(pg) * 1.35);
-      return Math.min(34, Math.floor(12 + loPart + pgPart));
-    }
-    if (phase === 'exchangelog_ready') {
-      const tr = Number(p.total_rows);
-      if (Number.isFinite(tr) && tr === 0) return 88;
-      return 36;
-    }
-    if (phase === 'exchangelog_done') return 100;
-    const totalRows = Number(p.total_rows);
-    const loadedRows = Number(p.loaded_rows) || 0;
-    if (Number.isFinite(totalRows) && totalRows > 0) {
-      return Math.min(87, Math.round(36 + (loadedRows / totalRows) * 51));
-    }
-    if (Number.isFinite(totalRows) && totalRows === 0) {
-      return 87;
-    }
-    return 36;
+    'relative rounded-md border min-h-[2.75rem] overflow-hidden text-xs sm:text-sm font-mono transition-[background-color,border-color,color] duration-150';
+  function etlPhaseLabelRu(phase) {
+    const m = {
+      enrichment_firebird: 'Справочники Firebird (лицензии, JPERSONS)',
+      counting: 'Подготовка к журналу',
+      messages_counting: 'Подсчёт сообщений',
+      messages_incremental: 'Выгрузка EGISZ_MESSAGES по курсору EGMID',
+      exchangelog_ready: 'Старт инкремента EXCHANGELOG по LOGID',
+      exchangelog_export: 'Чтение пакета EXCHANGELOG из Firebird',
+      exchangelog_parse: 'Парсинг пакета журнала',
+      parsing: 'Разбор строк журнала (пакет)',
+      page_done: 'Пакет журнала обработан',
+      exchangelog_done: 'Журнал и сообщения — завершено',
+      outbound_firebird: 'Исходящие документы: запрос к Firebird',
+      outbound_fetch: 'Исходящие документы: выборка',
+      outbound_parse: 'Исходящие документы: разбор',
+      outbound_postgres: 'Исходящие документы: запись в PostgreSQL',
+      outbound_done: 'Исходящие документы: готово',
+    };
+    return m[phase] || (phase ? 'Фаза: ' + phase : '');
   }
-  function syncProgressPercent(p) {
-    const raw = rawEtlProgressPercent(p);
-    if (raw == null || !Number.isFinite(raw)) {
-      return syncProgressCarry > 0 ? syncProgressCarry : null;
+  function fmtIntRu(n) {
+    if (n == null || !Number.isFinite(Number(n))) return null;
+    return Math.trunc(Number(n)).toLocaleString('ru-RU');
+  }
+  /** Факты из payload ETL (без процентов «от потолка»). */
+  function etlProgressFactsLine(p) {
+    if (!p || typeof p !== 'object') return '';
+    const ph = String(p.phase || '');
+    const bits = [];
+    const lo = Number(p.loaded_rows);
+    const tot = Number(p.total_rows);
+    const page = Number(p.page);
+    const facts = Number(p.parsed_facts != null ? p.parsed_facts : p.journal_facts);
+    const stag = Number(p.staging_errors);
+    const logid = p.cursor_log_id;
+    const egm = p.messages_cursor_egmid;
+    const br = p.messages_batch_rows;
+    const cache = p.messages_msgid_cache_size;
+    const outL = Number(p.outbound_loaded);
+    const outT = Number(p.outbound_total);
+    if (ph === 'messages_incremental') {
+      if (Number.isFinite(lo) && lo > 0) bits.push('сообщений загружено ' + fmtIntRu(lo));
+      if (Number.isFinite(page) && page > 0) bits.push('страница выборки ' + fmtIntRu(page));
+      if (egm != null && egm !== '') bits.push('курсор EGMID ' + String(egm));
+      if (Number.isFinite(br) && br > 0) bits.push('строк в последнем пакете ' + fmtIntRu(br));
+      if (Number.isFinite(cache) && cache > 0) bits.push('MSGID в кэше ' + fmtIntRu(cache));
+      bits.push('полный объём EGISZ_MESSAGES в FB не считается (без COUNT)');
+    } else if (
+      ph === 'exchangelog_export' ||
+      ph === 'exchangelog_parse' ||
+      ph === 'parsing' ||
+      ph === 'page_done'
+    ) {
+      if (Number.isFinite(page) && page > 0) bits.push('пакет журнала ' + fmtIntRu(page));
+      if (Number.isFinite(lo) && lo > 0) bits.push('строк журнала обработано ' + fmtIntRu(lo));
+      if (Number.isFinite(tot) && tot > 0) bits.push('всего строк (оценка) ' + fmtIntRu(tot));
+      else bits.push('полный объём журнала в FB не считается');
+      if (Number.isFinite(facts) && facts >= 0) bits.push('фактов ' + fmtIntRu(facts));
+      if (Number.isFinite(stag) && stag > 0) bits.push('ошибок staging ' + fmtIntRu(stag));
+    } else if (ph === 'exchangelog_ready') {
+      if (logid != null && logid !== '') bits.push('курсор LOGID на старте ' + String(logid));
+      if (Number.isFinite(tot) && tot > 0) bits.push('всего строк журнала (оценка) ' + fmtIntRu(tot));
+      else bits.push('полный объём журнала в FB не считается');
+    } else if (ph.indexOf('outbound_') === 0) {
+      if (Number.isFinite(outT) && outT > 0 && Number.isFinite(outL))
+        bits.push('документов ' + fmtIntRu(outL) + ' / ' + fmtIntRu(outT));
+      if (Number.isFinite(facts) && facts >= 0 && ph !== 'outbound_fetch') bits.push('в staging ' + fmtIntRu(facts));
+    } else if (ph === 'enrichment_firebird') {
+      bits.push('загрузка справочников в начале прогона');
+    } else if (ph === 'counting') {
+      bits.push('переход к выборке из Firebird');
     }
-    syncProgressCarry = Math.max(syncProgressCarry, raw);
-    return syncProgressCarry;
+    if (
+      logid != null &&
+      logid !== '' &&
+      ph !== 'exchangelog_ready' &&
+      ph.indexOf('messages_') !== 0 &&
+      ph !== 'enrichment_firebird' &&
+      ph !== 'counting'
+    ) {
+      bits.push('LOGID ' + String(logid));
+    }
+    return bits.join(' · ');
+  }
+  /**
+   * Полоска: только при известном знаменателе (доля журнала или исходящих).
+   * Иначе — неопределённая анимация и подпись «…», без выдуманных процентов.
+   */
+  function etlBarVisual(p) {
+    if (!p || typeof p !== 'object') {
+      return { indeterminate: true, pct: null, label: '…' };
+    }
+    const ph = String(p.phase || '');
+    if (ph === 'enrichment_firebird' || ph === 'counting' || ph === 'messages_counting') {
+      return { indeterminate: true, pct: null, label: '…' };
+    }
+    if (ph === 'messages_incremental' || ph === 'exchangelog_ready') {
+      return { indeterminate: true, pct: null, label: '…' };
+    }
+    if (ph === 'exchangelog_done') {
+      return { indeterminate: false, pct: 100, label: '100%' };
+    }
+    const tot = Number(p.total_rows);
+    const lo = Number(p.loaded_rows) || 0;
+    const journalPh =
+      ph === 'exchangelog_export' ||
+      ph === 'exchangelog_parse' ||
+      ph === 'parsing' ||
+      ph === 'page_done';
+    if (journalPh && Number.isFinite(tot) && tot > 0) {
+      const pct = Math.min(100, Math.round((lo / tot) * 100));
+      return { indeterminate: false, pct, label: pct + '%' };
+    }
+    if (journalPh) {
+      return { indeterminate: true, pct: null, label: '…' };
+    }
+    if (ph === 'outbound_firebird') {
+      return { indeterminate: true, pct: null, label: '…' };
+    }
+    const ot = Number(p.outbound_total) || 0;
+    const ol = Number(p.outbound_loaded) || 0;
+    if (ph.indexOf('outbound_') === 0 && ph !== 'outbound_firebird') {
+      if (ph === 'outbound_done') {
+        return { indeterminate: false, pct: 100, label: '100%' };
+      }
+      if (ot > 0) {
+        const pct = Math.min(100, Math.round((ol / ot) * 100));
+        return { indeterminate: false, pct, label: pct + '%' };
+      }
+      return { indeterminate: true, pct: null, label: '…' };
+    }
+    return { indeterminate: true, pct: null, label: '…' };
+  }
+  function connStatusMainText(j) {
+    const msg = j && j.message != null ? String(j.message).trim() : '';
+    const p = j && j.progress && typeof j.progress === 'object' ? j.progress : null;
+    const phase = p ? String(p.phase || '') : '';
+    const head = phase ? etlPhaseLabelRu(phase) : '';
+    const facts = p ? etlProgressFactsLine(p) : '';
+    if (!j || !j.running) return msg;
+    const parts = [];
+    if (head) parts.push(head);
+    if (msg) parts.push(msg);
+    if (facts) parts.push(facts);
+    let s = parts.join('\n');
+    if (s.length > 1200) s = s.slice(0, 1197) + '…';
+    return s || 'Синхронизация';
+  }
+  function syncProgressMetaBlock(j) {
+    const p = j && j.progress && typeof j.progress === 'object' ? j.progress : null;
+    const phase = p ? String(p.phase || '') : '';
+    const head = phase ? etlPhaseLabelRu(phase) : '';
+    const msg = j && j.message != null ? String(j.message).trim() : '';
+    const facts = p ? etlProgressFactsLine(p) : '';
+    const lines = [];
+    if (head) lines.push(head);
+    if (msg) lines.push(msg);
+    if (facts) lines.push(facts);
+    lines.push('—');
+    lines.push('Курсор прогона (payload ETL):');
+    lines.push.apply(lines, syncMetricsLines(j));
+    return lines.filter(function (x) { return x; }).join(String.fromCharCode(10));
+  }
+  function setPgSnapHintVisible(on) {
+    const h = document.getElementById('pgSnapHint');
+    if (!h) return;
+    if (on) h.classList.remove('hidden');
+    else h.classList.add('hidden');
   }
   function refreshConnStatusStrip() {
     const wrap = document.getElementById('connStatusStrip');
@@ -406,26 +528,23 @@ PAGE = """
     if (!wrap || !textEl || !fill || !pctEl) return;
     const j = lastSyncJson;
     wrap.className = STRIP_BASE;
-    textEl.className = 'text-inherit leading-snug break-words max-w-[min(100%,64rem)]';
+    fill.classList.remove('sync-progress-indeterminate');
     fill.style.width = '0%';
     pctEl.className = 'hidden shrink-0 font-mono tabular-nums text-inherit min-w-[3rem] text-right';
     pctEl.textContent = '';
     if (j.running) {
       const p = j.progress;
-      const phase = p && typeof p === 'object' ? (p.phase || '') : '';
-      const pct = syncProgressPercent(p);
+      const bar = etlBarVisual(p && typeof p === 'object' ? p : null);
       wrap.classList.add('border-[#509EE3]/85', 'bg-[#0C4A6E]/60', 'text-[#E5F6FF]');
-      if (phase === 'counting' || phase === 'messages_counting') {
+      textEl.textContent = connStatusMainText(j);
+      pctEl.className = 'shrink-0 font-mono tabular-nums text-inherit min-w-[3rem] text-right';
+      pctEl.textContent = bar.label;
+      if (bar.indeterminate) {
         fill.classList.add('sync-progress-indeterminate');
         fill.style.width = '';
       } else {
-        fill.classList.remove('sync-progress-indeterminate');
-        fill.style.width = pct == null ? '32%' : pct + '%';
+        fill.style.width = (bar.pct != null ? bar.pct : 0) + '%';
       }
-      textEl.textContent = 'Синхронизация';
-      pctEl.className = 'shrink-0 font-mono tabular-nums text-inherit min-w-[3rem] text-right';
-      pctEl.textContent =
-        phase === 'counting' || phase === 'messages_counting' || pct == null ? '…' : pct + '%';
       return;
     }
     if (j.error) {
@@ -589,26 +708,21 @@ PAGE = """
       fill.style.width = '';
       setBarIndeterminate(fill, true);
       pctEl.textContent = '…';
-      meta.textContent = syncMetricsLines(j).join(String.fromCharCode(10));
+      meta.textContent = syncProgressMetaBlock(j);
       return;
     }
 
-    const barPct = syncProgressPercent(p);
-    const indet =
-      phase === 'counting' ||
-      phase === 'messages_counting' ||
-      phase === 'outbound_firebird';
-    if (indet) {
+    const bar = etlBarVisual(p);
+    if (bar.indeterminate) {
       fill.style.width = '';
       setBarIndeterminate(fill, true);
-      pctEl.textContent = '…';
+      pctEl.textContent = bar.label;
     } else {
       setBarIndeterminate(fill, false);
-      const disp = barPct != null && Number.isFinite(barPct) ? barPct : 32;
-      fill.style.width = disp + '%';
-      pctEl.textContent = disp + '%';
+      fill.style.width = (bar.pct != null ? bar.pct : 0) + '%';
+      pctEl.textContent = bar.label;
     }
-    meta.textContent = syncMetricsLines(j).join(String.fromCharCode(10));
+    meta.textContent = syncProgressMetaBlock(j);
   }
   async function pollPgSnapshot() {
     const logEl = document.getElementById('pgSnapLogId');
@@ -713,13 +827,13 @@ PAGE = """
       });
       hint.textContent = (j.errors && j.errors.length)
         ? 'Ошибки healthcheck: ' + j.errors.join(' · ')
-        : 'Источник: v_health_signals + v_health_by_clinic + v_health_proxy_db. Снимок ' + (j.generated_at ? formatPgSyncAtRu(j.generated_at) : '—') + '.';
+        : ('Свежее: ' + (j.generated_at ? formatPgSyncAtRu(j.generated_at) : '—'));
       hint.classList.toggle('text-orange-300', !!(j.errors && j.errors.length));
 
       signalsList.innerHTML = '';
       const sigs = Array.isArray(j.signals) ? j.signals : [];
       if (!sigs.length) {
-        signalsList.innerHTML = '<li class="text-[#6B7280]">Нет сигналов (витрина не наполнена или схема не применена).</li>';
+        signalsList.innerHTML = '<li class="text-sm text-[#6B7280]">Нет сигналов.</li>';
       } else {
         for (const s of sigs) {
           const li = document.createElement('li');
@@ -729,24 +843,15 @@ PAGE = """
           bullet.className = 'hc-bullet hc-bullet-' + lvl2;
           li.appendChild(bullet);
           const body = document.createElement('div');
-          body.className = 'min-w-0 flex-1';
-          const title = document.createElement('div');
-          title.className = 'flex items-baseline gap-2 min-w-0';
+          body.className = 'min-w-0 flex-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5';
           const name = document.createElement('span');
-          name.className = 'truncate';
+          name.className = 'font-medium text-[#E5E7EB]';
           name.textContent = s.title || s.code;
           const val = document.createElement('span');
-          val.className = 'shrink-0 font-mono text-[10px] text-[#9CA3AF]';
+          val.className = 'shrink-0 font-mono tabular-nums text-xs text-[#9CA3AF]';
           val.textContent = fmtPctOrNum(s.value, s.value_unit);
-          title.appendChild(name);
-          title.appendChild(val);
-          body.appendChild(title);
-          if (s.hint) {
-            const hintEl = document.createElement('div');
-            hintEl.className = 'text-[10px] text-[#6B7280]';
-            hintEl.textContent = s.hint;
-            body.appendChild(hintEl);
-          }
+          body.appendChild(name);
+          body.appendChild(val);
           li.appendChild(body);
           signalsList.appendChild(li);
         }
@@ -755,7 +860,7 @@ PAGE = """
       clinicsList.innerHTML = '';
       const clinics = Array.isArray(j.by_clinic_top) ? j.by_clinic_top : [];
       if (!clinics.length) {
-        clinicsList.innerHTML = '<li class="text-[#6B7280]">Нет агрегатов по клиникам.</li>';
+        clinicsList.innerHTML = '<li class="text-sm text-[#6B7280]">Нет агрегатов по клиникам.</li>';
       } else {
         for (const c of clinics) {
           const li = document.createElement('li');
@@ -765,22 +870,17 @@ PAGE = """
           bullet.className = 'hc-bullet hc-bullet-' + lvl2;
           li.appendChild(bullet);
           const body = document.createElement('div');
-          body.className = 'min-w-0 flex-1';
-          const top = document.createElement('div');
-          top.className = 'flex items-baseline gap-2 min-w-0';
+          body.className = 'min-w-0 flex-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5';
           const name = document.createElement('span');
-          name.className = 'truncate';
+          name.className = 'font-medium text-[#E5E7EB]';
           name.textContent = c.clinic_name || ('JID ' + c.jid);
-          const er = document.createElement('span');
-          er.className = 'shrink-0 font-mono text-[10px] text-[#9CA3AF]';
-          er.textContent = (c.error_rate_24h != null ? Number(c.error_rate_24h).toFixed(1) + '%' : '—') + ' err';
-          top.appendChild(name);
-          top.appendChild(er);
-          body.appendChild(top);
-          const meta = document.createElement('div');
-          meta.className = 'text-[10px] text-[#6B7280]';
-          meta.textContent = '24ч: ' + fmtNum(c.facts_24h) + ' · queue: ' + fmtNum(c.pending_now) + ' · last ' + fmtIsoShort(c.last_seen_at);
-          body.appendChild(meta);
+          const stats = document.createElement('span');
+          stats.className = 'font-mono tabular-nums text-xs text-[#9CA3AF]';
+          stats.textContent =
+            (c.error_rate_24h != null ? Number(c.error_rate_24h).toFixed(1) + '% err' : '—')
+            + ' · ' + fmtNum(c.facts_24h) + ' / ' + fmtNum(c.pending_now) + ' · ' + fmtIsoShort(c.last_seen_at);
+          body.appendChild(name);
+          body.appendChild(stats);
           li.appendChild(body);
           clinicsList.appendChild(li);
         }
@@ -800,12 +900,12 @@ PAGE = """
       ];
       for (const it of items) {
         const li = document.createElement('li');
-        li.className = 'flex items-baseline justify-between gap-1 min-w-0';
+        li.className = 'flex items-baseline justify-between gap-2 min-w-0';
         const lab = document.createElement('span');
-        lab.className = 'truncate text-[#9CA3AF] text-[10px]';
+        lab.className = 'truncate text-[#9CA3AF] text-sm';
         lab.textContent = it.label;
         const v = document.createElement('span');
-        v.className = 'shrink-0 font-mono text-[10px] text-[#E5E7EB]';
+        v.className = 'shrink-0 font-mono tabular-nums text-sm text-[#E5E7EB]';
         v.textContent = it.value;
         li.appendChild(lab);
         li.appendChild(v);
@@ -859,19 +959,14 @@ PAGE = """
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const j = await r.json();
       POLL_FAIL.sync = 0;
-      const wasRunning = lastSyncJson && lastSyncJson.running;
-      if (!j.running) {
-        syncProgressCarry = 0;
-      } else if (!wasRunning) {
-        syncProgressCarry = 0;
-      }
       lastSyncJson = j;
+      setPgSnapHintVisible(!!j.running);
       renderProgress(j);
       refreshConnStatusStrip();
       const parts = [];
       const msg = j.message != null ? String(j.message).trim() : '';
       if (j.running) {
-        parts.push(syncMetricsLines(j).join(String.fromCharCode(10)));
+        parts.push(syncProgressMetaBlock(j));
         if (msg && /Предупреждение/i.test(msg)) parts.push(msg);
       } else {
         if (msg) parts.push(msg);

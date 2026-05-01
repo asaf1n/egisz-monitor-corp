@@ -1,12 +1,13 @@
 """Default Firebird extraction SQL.
 
 Schema (PROXY_EGISZ): EXCHANGELOG (LOGTEXT = URL/хост клиники, MSGTEXT = SOAP/XML),
-EGISZ_MESSAGES (DOCUMENTID, REPLYTO, MSGID), EGISZ_LICENSES (MO_UID, MO_DOMEN, JID, KIND),
+EGISZ_MESSAGES (DOCUMENTID, REPLYTO, MSGID, EGMID), EGISZ_LICENSES (MO_UID, MO_DOMEN, JID, KIND),
 JPERSONS (JNAME, JINN VARCHAR(12), FIR_OID VARCHAR(255) — как MO UID для <organization>).
 KIND exists only in EGISZ_LICENSES — not on EGISZ_MESSAGES. Строка EGISZ_LICENSES: REPLYTO matches MO_DOMEN.
 localUid в SOAP ↔ DOCUMENTID; клиника: gost- сначала в MSGTEXT (разбор текста сообщения), затем LOGTEXT, иначе REPLYTO → MO_DOMEN → JID → JPERSONS.
 
-Инкремент журнала по EXCHANGELOG.LOGID; сообщения EGISZ_MESSAGES — постранично по EGMID выше курсора; лицензии — полная выгрузка EGISZ_LICENSES без JOIN (JPERSONS отдельным SELECT в начале ETL), merge в dim_clinics в PostgreSQL; сопоставление с журналом по MSGID и REPLYTO→лицензия после выгрузки.
+Инкремент журнала по EXCHANGELOG.LOGID; в выборке журнала — LEFT JOIN EGISZ_MESSAGES по MSGID (поле MESSAGE_EGMID).
+Сообщения дополнительно кэшируются постранично по EGMID выше курсора; лицензии — полная выгрузка EGISZ_LICENSES без JOIN в Firebird; JPERSONS отдельно; сшивка JNAME/JINN/FIR_OID в PostgreSQL (`stg_jpersons_import` + `UPDATE … FROM`); merge в dim_clinics в PostgreSQL; сопоставление с журналом по MSGID и REPLYTO→лицензия после выгрузки.
 """
 
 
@@ -14,7 +15,7 @@ from __future__ import annotations
 
 
 def default_exchangelog_select() -> str:
-    """Журнал без связи с EGISZ_MESSAGES и без фильтра по дате на источнике; ограничение по LOGID задаёт пагинация."""
+    """Журнал EXCHANGELOG; EGMID строки EGISZ_MESSAGES — через LEFT JOIN по MSGID (как LOGID в той же выборке)."""
     return """
 SELECT
     e.LOGID AS LOGID,
@@ -29,8 +30,10 @@ SELECT
     e.GRPID AS GRPID,
     e.MODIFYDATE AS MODIFYDATE,
     e.CREATEDATE AS LOG_CREATED_AT,
-    e.MSGID AS MSGID
+    e.MSGID AS MSGID,
+    m.EGMID AS MESSAGE_EGMID
 FROM EXCHANGELOG e
+LEFT JOIN EGISZ_MESSAGES m ON m.MSGID = e.MSGID
 WHERE 1=1
 """.strip()
 

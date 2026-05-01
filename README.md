@@ -55,6 +55,8 @@ Firebird: EXCHANGELOG, EGISZ_MESSAGES, EGISZ_LICENSES (+ JPERSONS)
 
 Главная процедура — **`run_sync`** в [`egisz_monitor_corp/etl.py`](egisz_monitor_corp/etl.py). Firebird читается только **`SELECT`**-запросами; в PostgreSQL выполняются UPSERT и обновление staging.
 
+При **`.\start.ps1`** с действиями **`deploy`**, **`apply`**, **`start`**, **`apply-rebuild`**, **`reset-deploy`** после готовности Postgres пересобирается ConfigMap **`egisz-reports-schema`** из файлов в репозитории и запускается Job **`egisz-reports-schema-init`**, который по **[`sql/schema_apply_order.txt`](sql/schema_apply_order.txt)** применяет весь DDL витрины в **`egisz_reports`** (идемпотентно, **без** удаления баз PostgreSQL). Так появляются новые объекты схемы (в том числе **`stg_jpersons_import`**), без отдельного ручного прогона, если кластер обновляется через `start.ps1`.
+
 ### Курсоры и `etl_state`
 
 | Поле / смысл | Поведение |
@@ -66,17 +68,33 @@ Firebird: EXCHANGELOG, EGISZ_MESSAGES, EGISZ_LICENSES (+ JPERSONS)
 
 ### Порядок фаз `run_sync` (как в коде)
 
-1. **Справочники** — полная выгрузка **`EGISZ_LICENSES`** с **`LEFT JOIN JPERSONS`**; отбор по **`MODIFYDATE`** в окне **`sync_window_days`** выполняется в Python после загрузки.
-2. **Подсчёт журнала** — `COUNT` строк **`EXCHANGELOG`** с `LOGID > last_log_id` (для прогресса; ошибка подсчёта не останавливает sync).
-3. **`EGISZ_MESSAGES`** — подсчёт строк в окне (фаза прогресса `messages_counting`), затем постраничная выгрузка по **`EGMID`** + **`CREATEDATE`** в пределах **`sync_window_days`**. В **`etl_state`** сразу обновляется **`source_max_egmid`**.
-4. **`EXCHANGELOG`** — страницы `FIRST {batch_size}` с `LOGID > last_id`, сортировка по **`LOGID`**. Строки сопоставляются с выгруженными сообщениями по **`MSGID`** в памяти; **`MSGTEXT`** разбирается как SOAP/XML; после каждой страницы двигается **`last_log_id`** до максимального обработанного **`LOGID`**.
-5. **Исходящие документы** — полная перезапись **`stg_egisz_outbound_documents`** из Firebird для отчёта «Документы без ответа» (после успешной обработки журнала).
+1. **Справочники** — полные выборки **`JPERSONS`** и **`EGISZ_LICENSES`** из Firebird (без JOIN в Firebird). В PostgreSQL: **`stg_jpersons_import`**, **`stg_egisz_licenses_import`**, сшивка **`JNAME` / `JINN` / `FIR_OID`** через **`UPDATE … FROM`**, затем **`merge_dim_clinics_from_license_staging`**. В режиме **`dry_run`** без записи в PG сшивка выполняется в Python.
+2. **Готовность к журналу** — фаза прогресса `counting` / `exchangelog_ready`; **`COUNT` по журналу в Firebird для UI не выполняется** (заглушка объёма; в payload не передаётся «фиктивный» ноль как знаменатель).
+3. **Чередование 65k** — пакеты **`EGISZ_MESSAGES`** (курсор **`EGMID`**) и **`EXCHANGELOG`** (курсор **`LOGID`**); дозагрузка сообщений по **`MSGID`**; следующая страница сообщений может читаться из Firebird **параллельно** с парсингом текущей страницы журнала. В **`etl_state`** по ходу обновляется **`source_max_egmid`**; **`last_egmid`** — после **успешного** завершения всего прогона (журнал + исходящие).
+4. **Исходящие документы** — полная перезапись **`stg_egisz_outbound_documents`** из Firebird (после журнала).
 
-Ошибки разбора без построения факта пишутся в **`stg_parse_errors`**. На старте в PostgreSQL идемпотентно применяются **`001_schema.sql`**, **`002_etl_state.sql`**, **`005_healthcheck.sql`**.
+Факты в **`fact_egisz_transactions`** пишутся **чанками** (`facts_upsert_chunk_size` в YAML `etl`, при необходимости **`pg_upsert_statement_timeout_sec`** — см. [`config/egisz_monitor.example.yaml`](config/egisz_monitor.example.yaml)). Ошибки разбора без факта — в **`stg_parse_errors`**. На старте ETL и в k8s Job идемпотентно применяется полный набор DDL из **[`sql/schema_apply_order.txt`](sql/schema_apply_order.txt)** (по умолчанию **`001_schema.sql`**, **`002_etl_state.sql`**, **`005_healthcheck.sql`**; без DROP баз PostgreSQL).
 
 **Один запуск на пайплайн:** `pg_try_advisory_lock(hash(pipeline_name))` — параллельно не выполняются ручной sync из UI и CronJob; при занятости lock второй процесс получает **`PipelineLockBusyError`** (CLI / CronJob — код **75**).
 
-### Как запустить
+### Config UI: откуда берутся строка состояния, лог и «Последние значения»
+
+| Блок в UI | Источник | Зачем смотреть |
+|-----------|----------|----------------|
+| **Строка над формой** | `GET /api/sync/status`: фаза **`progress.phase`**, последняя строка **`message`** (`progress_cb`), числовые поля **`progress`** | Текущий шаг и факты прогона; **процент «от всего объёма»** показывается только если известен знаменатель (например исходящие с `outbound_total`). Иначе — неопределённая полоска и **«…»** — это ожидаемо (без тяжёлого `COUNT` в Firebird). |
+| **System log** | То же + блок «Курсор прогона (payload ETL)» и строки LOGID / EGMID / дата лицензий | Сводка для копирования; при **running** включается текст лога ETL. |
+| **Последние значения синхронизации** | **`GET /api/pg/sync-snapshot`** → таблица **`etl_state`** | После **завершения** синка — зафиксированные курсоры. **Во время синка** значения могут **подменяться** полями из payload текущего прогона (см. подсказку под заголовком в UI). |
+| **EGMID в снимке** | **`max(last_egmid, source_max_egmid)`** | И закоммиченный курсор сообщений, и **пик** последней выгрузки из Firebird; число может не совпадать с «только `last_egmid`» до конца прогона. |
+
+Сообщение об ошибке синка в Config UI хранится **в памяти** процесса gunicorn; после сбоя помогает **`kubectl rollout restart deployment/conf-ui`** (или новый успешный опрос после исправления).
+
+### Почему в Metabase уже есть данные, а в вебе «ещё не обновилось»
+
+- **Metabase** при каждом открытии / обновлении дашборда выполняет SQL к **`egisz_reports`** — отчёт показывает **текущее** состояние витрины (например «01 Оперативный» по **`dwh_date`** и фильтрам).
+- **Config UI** не подписан на push из БД: блок **«Последние значения»** опрашивается примерно **раз в 1,5 с** (пока вкладка видима), **Healthcheck** — **раз в 30 с**. Пока не пришёл очередной ответ или вкладка была в фоне, вы можете видеть **старый** LOGID/EGMID и сигналы (например «курсор не двигался» по **`etl_state.updated_at`**) при уже обновлённых строках в **`fact_egisz_transactions`** в Postgres.
+- **EGMID = 0** при большом **LOGID**: до **полного** успешного завершения прогона в **`etl_state`** может не обновиться **`last_egmid`**; пик **`source_max_egmid`** обновляется по мере выгрузки сообщений — при расхождении смотрите оба поля и лог ETL.
+
+### Как запустить синхронизацию
 
 | Способ | Описание |
 |--------|----------|
@@ -86,7 +104,7 @@ Firebird: EXCHANGELOG, EGISZ_MESSAGES, EGISZ_LICENSES (+ JPERSONS)
 | `kubectl exec deploy/conf-ui -- egisz-monitor sync` | Ручной запуск в поде **conf-ui** |
 | CronJob **`egisz-monitor-sync`** | Тот же образ и Secret, что у Deployment; расписание ***/15** в UTC |
 
-`start.ps1` поднимает кластер и схему; **полный** прогон ETL в `deploy` / `apply` по умолчанию **не** встроен (ETL — по кнопке, CLI или CronJob).
+`start.ps1` поднимает кластер; **полный** прогон ETL в `deploy` / `apply` по умолчанию **не** встроен (ETL — по кнопке, CLI или CronJob). DDL витрины при этом на каждом таком запуске `start.ps1` применяется автоматически (см. абзац выше).
 
 ## Окно данных и справочники
 
@@ -117,6 +135,8 @@ Firebird: EXCHANGELOG, EGISZ_MESSAGES, EGISZ_LICENSES (+ JPERSONS)
 | Поле | Источник | Смысл |
 |------|----------|--------|
 | `relates_to_id` | `<relatesToMessage>` в `MSGTEXT` | Связь ответа РЭМД с исходящим запросом |
+| `exchangelog_log_id` | `EXCHANGELOG.LOGID` в выгрузке журнала | Водяной знак строки журнала на факте (удобно для SQL без join к сырью) |
+| `egisz_messages_egmid` | `EGISZ_MESSAGES.EGMID` (JOIN по `MSGID` в SQL журнала или кэш дозагрузки) | Первичный ключ сообщения в прокси-БД рядом с `LOGID` |
 | `local_uid_semd` | `<localUid>` или `DOCUMENTID` | Идентификатор экземпляра СЭМД; поиск «без ответа» |
 | `jid` | gost-токены, лицензии, `MO_UID` | Внутренний идентификатор клиники |
 | `kind_code` | `<kind>` в XML или `EGISZ_LICENSES.KIND` | Тип СЭМД; в `*_ui` — текст для Metabase |

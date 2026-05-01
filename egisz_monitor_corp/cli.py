@@ -11,9 +11,8 @@ from egisz_monitor_corp.etl import run_sync
 from egisz_monitor_corp.fb_client import fetch_all
 from egisz_monitor_corp.pg_warehouse import (
     PipelineLockBusyError,
-    apply_sql_files,
+    apply_reports_schema,
     connect_pg,
-    ensure_etl_state_table,
     test_pg_connection,
 )
 
@@ -29,7 +28,10 @@ def main(argv: list[str] | None = None) -> int:
     t = sub.add_parser("test-fb", help="SELECT 1 FROM RDB$DATABASE on Firebird")
     t2 = sub.add_parser("test-pg", help="SELECT 1 on PostgreSQL")
 
-    a = sub.add_parser("apply-schema", help="Apply sql/001_schema.sql (полная витрина) и 002_etl_state.sql")
+    a = sub.add_parser(
+        "apply-schema",
+        help="Применить DDL витрины (файлы из sql/schema_apply_order.txt, по умолчанию 001+002+005)",
+    )
 
     sub.add_parser("config-ui", help="Run Flask config editor on FLASK_RUN_HOST:FLASK_RUN_PORT")
 
@@ -71,8 +73,7 @@ def main(argv: list[str] | None = None) -> int:
         cfg = load_corp_config()
         pg = connect_pg(cfg.postgres)
         try:
-            apply_sql_files(pg, "001_schema.sql", "002_etl_state.sql", "005_healthcheck.sql")
-            ensure_etl_state_table(pg)
+            apply_reports_schema(pg)
         finally:
             pg.close()
         print("schema_applied")

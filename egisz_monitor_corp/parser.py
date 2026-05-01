@@ -105,6 +105,8 @@ class NormalizedRecord:
     registration_date: datetime | None
     semd_creation_at: datetime | None = None
     processed_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    exchangelog_log_id: int | None = None
+    egisz_messages_egmid: int | None = None
 
     def as_fact_row(self) -> dict[str, Any]:
         return {
@@ -120,6 +122,8 @@ class NormalizedRecord:
             "registration_date": self.registration_date,
             "semd_creation_at": self.semd_creation_at,
             "processed_at": self.processed_at,
+            "exchangelog_log_id": self.exchangelog_log_id,
+            "egisz_messages_egmid": self.egisz_messages_egmid,
         }
 
 
@@ -323,6 +327,8 @@ class EgiszMonitorParser:
         msg_created_at: datetime | None = None,
         log_created_at: datetime | None = None,
         on_staging_error: Callable[[StagingParseError], None] | None = None,
+        exchangelog_log_id: int | None = None,
+        egisz_messages_egmid: int | None = None,
     ) -> NormalizedRecord | None:
         """
         SOAP только из MSGTEXT; хост gost- из MSGTEXT затем LOGTEXT затем REPLYTO.
@@ -423,6 +429,8 @@ class EgiszMonitorParser:
             registration_date=registration_date,
             semd_creation_at=semd_creation_at,
             processed_at=processed_at,
+            exchangelog_log_id=exchangelog_log_id,
+            egisz_messages_egmid=egisz_messages_egmid,
         )
 
 

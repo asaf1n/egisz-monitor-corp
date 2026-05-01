@@ -81,6 +81,10 @@ class EtlConfig:
     firebird_query_timeout_sec: int = 900
     # Не выполнять COUNT(*) для прогресс-бара (журнал/сообщения) — мгновенно, без процента в UI.
     skip_firebird_progress_count: bool = False
+    # UPSERT фактов в PostgreSQL: размер одного execute_values; при большем буфере — несколько батчей и COMMIT между ними.
+    facts_upsert_chunk_size: int = 500
+    # SET LOCAL statement_timeout на каждый батч UPSERT (сек.); None — не задавать лимит на стороне PG для этого шага.
+    pg_upsert_statement_timeout_sec: int | None = 120
 
 
 @dataclass
@@ -179,6 +183,18 @@ def parse_corp_config_dict(
     _fb_to = _int(etl.get("firebird_query_timeout_sec"), 900)
     _fb_to = max(30, min(_fb_to, 7200))
 
+    _fchunk = _int(etl.get("facts_upsert_chunk_size"), 500)
+    _fchunk = max(50, min(_fchunk, 10_000))
+
+    if "pg_upsert_statement_timeout_sec" in etl:
+        _pto_raw = etl.get("pg_upsert_statement_timeout_sec")
+        if _pto_raw is None or _pto_raw == "":
+            pg_upsert_statement_timeout_sec = None
+        else:
+            pg_upsert_statement_timeout_sec = max(5, min(_int(_pto_raw), 7200))
+    else:
+        pg_upsert_statement_timeout_sec = 120
+
     return CorpAppConfig(
         firebird=FirebirdConfig(
             host=_str(fb.get("host")),
@@ -205,6 +221,8 @@ def parse_corp_config_dict(
             max_msgtext_bytes=max_msgtext_bytes,
             firebird_query_timeout_sec=_fb_to,
             skip_firebird_progress_count=_bool(etl.get("skip_firebird_progress_count"), False),
+            facts_upsert_chunk_size=_fchunk,
+            pg_upsert_statement_timeout_sec=pg_upsert_statement_timeout_sec,
         ),
         metabase=dict(mb) if isinstance(mb, dict) else {},
     )
