@@ -20,14 +20,13 @@ Namespace по умолчанию: **`egisz-monitor`**. Контекст: **Dock
 | Чистый namespace + образы без кэша (**PVC Postgres и витрина удаляются**) | `.\start.ps1 -Action reset-deploy` |
 | Только пересобрать образы | `.\start.ps1 -Action build` |
 | Правки **Config UI (Flask)** → образ + apply манифестов + **перезапуск обоих** web-служб | `.\start.ps1 -Action apply` |
-| То же, но **без** перезапуска Metabase (быстрее) | `.\start.ps1 -Action apply -SkipMetabaseRolloutRestart` |
 | Config UI: **полная** пересборка образа (`--no-cache`) + apply (**данные Postgres сохраняются**) | `.\start.ps1 -Action apply-rebuild` или `.\scripts\apply-local-rebuild.ps1` |
 | Перезапуск **только Metabase** (образ уже в Docker / в кластере) | `.\start.ps1 -Action restart-metabase` |
 | Перезапуск **только conf-ui** | `.\start.ps1 -Action restart-conf-ui` |
 | Перезапуск **Metabase + conf-ui** без `docker build` и без `kubectl apply` | `.\start.ps1 -Action restart-web` |
 | Сброс только app DB Metabase в Postgres | `.\start.ps1 -Action reset-metabase` |
 | Статус подов и сервисов | `.\start.ps1 -Action status` |
-| Проверка витрины + дашбордов в поде Metabase | `.\start.ps1 -Action verify` |
+| Проверка витрины + дашбордов в поде Metabase (перед проверкой поднимается port-forward 8080/3000, как при apply) | `.\start.ps1 -Action verify` |
 | Только port-forward (8080 conf-ui, 3000 Metabase) | `.\start.ps1 -Action web` |
 | Остановить фоновые port-forward из скрипта | `.\start.ps1 -Action stop-forward` |
 
@@ -44,14 +43,14 @@ Namespace по умолчанию: **`egisz-monitor`**. Контекст: **Dock
 5. **DROP/CREATE** базы приложения **`metabase`** в Postgres (чистый Metabase + провижининг дашбордов из образа при старте пода).  
 6. **`rollout restart`** Metabase и conf-ui.  
 7. Ожидание **Ready**, smoke, **verify** (при сбое — recovery restart по логике `start.ps1`).  
-8. Port-forward **8080** и **3000** (если не указан `-SkipPortForwardAfterDeploy`). Опционально Postgres на **5432**: `-IncludePostgresPortForward`.
+8. Port-forward **8080** и **3000** на localhost (как при ручной работе с UI), затем smoke и verify. Опционально Postgres на **5432**: `-IncludePostgresPortForward`.
 
 ### `apply` (по умолчанию при **`.\start.ps1`** без параметров; то же **`-Action start`**)
 
 1. Только сборка **conf-ui** (Metabase **не** пересобирается).  
 2. `kubectl apply` полного стека (как в deploy, **без** DROP/CREATE `metabase`).  
-3. По умолчанию **`rollout restart`** и Metabase, и conf-ui → холодный JVM Metabase; для правок только Flask используйте **`-SkipMetabaseRolloutRestart`** — тогда ожидание rollout только у conf-ui.  
-4. Smoke, verify, port-forward (опционально).
+3. **`rollout restart`** Metabase и conf-ui → холодный JVM Metabase. Только conf-ui без полного `apply`: **`.\start.ps1 -Action restart-conf-ui`**.  
+4. Port-forward 8080/3000, smoke, verify.
 
 ### `apply-rebuild`
 
@@ -127,8 +126,6 @@ kubectl -n egisz-monitor exec -it deploy/conf-ui -- egisz-monitor sync
 |----------|------------------|
 | `-SkipKindCluster` | Не создавать kind; должен отвечать уже настроенный `kubectl cluster-info`. |
 | `-DockerNoCache` | `build` / `apply`: `docker build --no-cache` для conf-ui (и весь `build` — для Metabase). |
-| `-SkipPortForwardAfterDeploy` | `deploy` / `apply` / `reset-deploy`: не поднимать port-forward и не открывать браузер в конце. |
-| `-SkipMetabaseRolloutRestart` | Только **`apply`**: не перезапускать Metabase, только conf-ui. |
 | `-SkipPostgresPortForward` | `web` / `forward`: не пробрасывать 5432 на хост. |
 | `-BackgroundPortForward:$false` | Отдельные окна PowerShell с `kubectl port-forward` вместо фоновых процессов. |
 

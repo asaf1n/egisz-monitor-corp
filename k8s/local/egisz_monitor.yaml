@@ -23,9 +23,9 @@ postgres:
   schema: "public"
 
 etl:
-  batch_size: 500
+  batch_size: 300
   pipeline_name: "firebird_exchangelog"
-  sync_window_days: 30
+  sync_window_days: 10
   source_query: null
   # Таймаут SELECT к Firebird (сек.); в Config UI не редактируется — только YAML/Secret (см. config/egisz_monitor.example.yaml).
   firebird_query_timeout_sec: 900

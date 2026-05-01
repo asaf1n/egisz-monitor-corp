@@ -1,6 +1,12 @@
 """Firebird → PostgreSQL ETL for corp fact table (LOGID cursor, not MODIFYDATE).
 
-Архитектура `run_sync` (сначала выгрузка из FB, затем парсинг/UPSERT):
+Источники Firebird в `run_sync` (четыре таблицы, затем витрина):
+  • Полная перезагрузка в staging: **JPERSONS**, **EGISZ_LICENSES** (`_export_egisz_licenses_full`).
+  • Инкремент по ключу: **EGISZ_MESSAGES** (курсор EGMID), **EXCHANGELOG** (курсор LOGID) — чередование
+    пакетов по 65k, дозагрузка MSGID, парсинг и UPSERT фактов.
+  • Дополнительно: `_refresh_outbound_documents` — снимок исходящих по EGMID.
+
+Архитектура (сначала выгрузка из FB, затем парсинг/UPSERT):
   1. `_export_egisz_licenses_full` — JPERSONS и EGISZ_LICENSES отдельными SELECT из FB; в PostgreSQL — `stg_jpersons_import`, `stg_egisz_licenses_import`, сшивка JNAME/JINN/FIR_OID в SQL (`UPDATE … FROM`), staging, merge в `dim_clinics`.
   2. `_count_exchangelog_total` — заглушка (без COUNT в Firebird); в payload UI поле `total_rows` не передаётся, пока объём неизвестен.
   3. Чередование пакетов по 65k: EGISZ_MESSAGES (EGMID) и EXCHANGELOG (LOGID); дозагрузка сообщений по MSGID строки журнала;
@@ -102,7 +108,10 @@ class LicenseReplyRow:
 
 
 class EtlProgressPayload(TypedDict, total=False):
-    """Снимок прогресса для UI (все поля опциональны кроме phase)."""
+    """Снимок прогресса для UI (все поля опциональны кроме phase).
+
+    phase: pipeline_bootstrap | enrichment_firebird | counting | messages_* | exchangelog_* | outbound_* | …
+    """
 
     phase: str
     total_rows: int
@@ -1163,8 +1172,15 @@ def run_sync(
     lock_acquired = False
 
     try:
+        log(
+            "ETL: четыре источника Firebird — JPERSONS и EGISZ_LICENSES (полная выгрузка в staging), "
+            "EGISZ_MESSAGES по курсору EGMID и EXCHANGELOG по LOGID (инкремент); далее витрина и исходящие."
+        )
+        detail({"phase": "pipeline_bootstrap"})
         if pg is not None:
+            log("PostgreSQL: применение DDL витрины (идемпотентно), ожидайте…")
             apply_reports_schema(pg)
+            log("PostgreSQL: DDL применён; запрос advisory lock для пайплайна…")
             # Single-flight на уровне БД: блокирует параллельный запуск из CronJob и UI.
             # Lock освобождается при close() соединения, поэтому крэш не оставит «навечно занято».
             lock_acquired = try_acquire_pipeline_lock(pg, pipeline)
@@ -1173,6 +1189,7 @@ def run_sync(
                     f"Sync пайплайна '{pipeline}' уже выполняется (advisory lock занят). "
                     "Дождитесь завершения текущего запуска или проверьте `pg_locks`."
                 )
+            log("PostgreSQL: lock получен; полная выгрузка JPERSONS и EGISZ_LICENSES из Firebird…")
 
         enrichment = _export_egisz_licenses_full(cfg, log, pg=pg)
         lic_iso = (

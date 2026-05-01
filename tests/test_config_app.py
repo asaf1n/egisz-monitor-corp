@@ -146,6 +146,20 @@ def test_healthcheck_graceful_when_pg_down(cfg_yaml: Path) -> None:
     assert any("PostgreSQL" in str(e) or "network" in str(e) for e in data.get("errors", []))
 
 
+def test_index_html_uses_null_safe_bind_click(cfg_yaml: Path) -> None:
+    """Раньше document.getElementById('…').onclick = … ронял весь <script>, если элемента не было — не работали все кнопки."""
+    app = create_app()
+    app.testing = True
+    resp = app.test_client().get("/")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert "function bindClick" in html
+    assert "bindClick('btnSaveYaml'" in html
+    assert "bindClick('btnSync'" in html
+    assert "document.getElementById('btnSaveYaml').onclick" not in html
+    assert "document.getElementById('btnPgBackup').onclick" not in html
+
+
 def test_healthcheck_404_when_no_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EGISZ_MONITOR_CONFIG", str(tmp_path / "missing.yaml"))
     monkeypatch.setenv("CONFIG_WRITE_PATH", str(tmp_path / "missing.yaml"))

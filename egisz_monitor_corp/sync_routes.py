@@ -21,6 +21,12 @@ def _run_sync_job(config_path: str, merged_dict: dict[str, Any] | None = None) -
         with _state_lock:
             _state["message"] = m
 
+    def boot_progress(phase: str) -> None:
+        with _state_lock:
+            _state["progress"] = {"phase": phase}
+
+    log("Синхронизация: фоновый поток стартовал; загрузка модулей и конфигурации…")
+    boot_progress("pipeline_bootstrap")
     try:
         import os
 

@@ -1,6 +1,6 @@
 # Metabase на корпоративном DWH
 
-**Доступ с ПК (порт 3000):** в `k8s/metabase.yaml` объявлен Service **`metabase`** (`type: LoadBalancer`); на Docker Desktop он обычно публикует **[http://127.0.0.1:3000/](http://127.0.0.1:3000/)** — без `kubectl port-forward`. Если `LoadBalancer` в Pending (не Docker Desktop) — `kubectl -n egisz-monitor port-forward svc/metabase 3000:3000`. В Deployment **нет `hostPort`** (иначе на однонодовом кластере новый под Metabase часто зависает в **Pending** из‑за занятого порта 3000 на ноде). После `.\start.ps1 -Action apply` по умолчанию выполняется **`rollout restart` Metabase** — холодный JVM, миграции app DB и readiness; это **2–6+ минут** нормально. Только правки Config UI: **`.\start.ps1 -Action apply -SkipMetabaseRolloutRestart`**.
+**Доступ с ПК (порт 3000):** в `k8s/metabase.yaml` объявлен Service **`metabase`** (`type: LoadBalancer`); на Docker Desktop он обычно публикует **[http://127.0.0.1:3000/](http://127.0.0.1:3000/)** — без `kubectl port-forward`. Если `LoadBalancer` в Pending (не Docker Desktop) — `kubectl -n egisz-monitor port-forward svc/metabase 3000:3000`. В Deployment **нет `hostPort`** (иначе на однонодовом кластере новый под Metabase часто зависает в **Pending** из‑за занятого порта 3000 на ноде). После `.\start.ps1 -Action apply` всегда выполняется **`rollout restart` Metabase и conf-ui** — холодный JVM, миграции app DB и readiness; это **2–6+ минут** нормально. БД приложения Metabase при `apply` **не** сбрасывается (DROP/CREATE только при `deploy` / `reset-deploy` / `reset-metabase`).
 
 ### Долгий старт или под в Pending после apply
 
@@ -8,7 +8,7 @@
 |--------|----------------|
 | **Pending** долго | `kubectl -n egisz-monitor describe pod -l app.kubernetes.io/name=metabase` → Events (раньше часто был конфликт **hostPort:3000**; в манифесте убран). Память ноды: запрос пода **1Gi** — увеличьте RAM у Docker Desktop / kind worker. |
 | **Running**, но деплой «Progressing» | Это ожидание **readiness** (`/api/health`): JVM Metabase + миграции Flyway к БД `metabase` в Postgres. Логи: `kubectl -n egisz-monitor logs deploy/metabase --tail=100`. |
-| Каждый **apply** долго | `apply` по умолчанию перезапускает и Metabase, и conf-ui. Если образ Metabase не меняли — **`-SkipMetabaseRolloutRestart`**. После смены JSON дашбордов нужен **`build`** и rollout Metabase. |
+| Каждый **apply** долго | `apply` всегда перезапускает Metabase и conf-ui. Только правки Flask без полного цикла: **`.\start.ps1 -Action restart-conf-ui`**. После смены JSON дашбордов нужен **`build`** и rollout Metabase. |
 
 
 **Где искать дашборды:** провижининг кладёт дашборды **в корень личной коллекции** пользователя Metabase, под которым идёт API-сессия (обычно первый администратор): `GET /api/user/current` → `personal_collection_id`. В UI это тот же пункт **«Персональная коллекция …»** / **Your personal collection** — откройте его: дашборды должны быть **на этой странице**, без отдельной вложенной папки. Проверка после деплоя: `.\start.ps1 -Action verify` или логи пода `metabase` (`provision.sh`, `verify-corp-stack.sh`).

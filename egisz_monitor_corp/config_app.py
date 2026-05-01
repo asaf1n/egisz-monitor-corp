@@ -113,7 +113,7 @@ PAGE = """
 </head>
 <body class="min-h-[100dvh] min-h-screen bg-[#121826] text-white lg:h-screen lg:overflow-hidden pb-[env(safe-area-inset-bottom,0px)]">
   <div class="mx-auto flex w-full min-h-[100dvh] min-w-0 max-w-[min(96rem,calc(100vw-1.5rem))] flex-col px-3 py-3 sm:px-[clamp(1rem,4vw,2.5rem)] sm:py-5 lg:min-h-0 lg:h-screen lg:flex-row lg:items-stretch lg:gap-4 lg:py-3">
-    <div class="flex min-h-0 min-w-0 flex-1 flex-col lg:min-h-0 lg:overflow-hidden">
+    <div class="flex min-h-0 min-w-0 flex-1 flex-col lg:min-h-0 lg:overflow-y-auto lg:overflow-x-hidden lg:overscroll-y-contain">
     <nav class="mb-3 flex min-h-[2.75rem] shrink-0 items-center justify-center gap-3 text-sm text-[#D1D5DB] lg:text-xs">
       <span class="text-[#509EE3]">FB2PG Sync</span>
       <span class="text-[#4B5563]">|</span>
@@ -233,7 +233,7 @@ PAGE = """
 
         <div class="flex min-h-0 flex-1 flex-col gap-4 border-t border-[#1B2940] pt-4 lg:grid lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(17rem,20rem)_minmax(16rem,1fr)] lg:gap-4 lg:pt-3">
           <div class="flex min-w-0 flex-col gap-3 lg:min-h-0">
-            <button type="button" id="btnSync" class="inline-flex w-full min-h-12 items-center justify-center rounded-md border border-[#F59F36] bg-[#F59F36] px-3.5 py-2.5 font-mono text-sm text-[#121826] transition hover:bg-[#FFB95D] lg:min-h-[2.875rem]">
+            <button type="button" id="btnSync" data-default-label="Запустить синхронизацию" class="inline-flex w-full min-h-12 items-center justify-center rounded-md border border-[#F59F36] bg-[#F59F36] px-3.5 py-2.5 font-mono text-sm text-[#121826] transition hover:bg-[#FFB95D] disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-[2.875rem]">
               Запустить синхронизацию
             </button>
             <div class="min-w-0">
@@ -353,6 +353,7 @@ PAGE = """
     'relative rounded-md border min-h-[2.75rem] overflow-hidden text-xs sm:text-sm font-mono transition-[background-color,border-color,color] duration-150';
   function etlPhaseLabelRu(phase) {
     const m = {
+      pipeline_bootstrap: 'Подготовка ETL (схема PostgreSQL, lock; затем 4 таблицы Firebird)',
       enrichment_firebird: 'Справочники Firebird (лицензии, JPERSONS)',
       counting: 'Подготовка к журналу',
       messages_counting: 'Подсчёт сообщений',
@@ -444,7 +445,7 @@ PAGE = """
       return { indeterminate: true, pct: null, label: '…' };
     }
     const ph = String(p.phase || '');
-    if (ph === 'enrichment_firebird' || ph === 'counting' || ph === 'messages_counting') {
+    if (ph === 'pipeline_bootstrap' || ph === 'enrichment_firebird' || ph === 'counting' || ph === 'messages_counting') {
       return { indeterminate: true, pct: null, label: '…' };
     }
     if (ph === 'messages_incremental' || ph === 'exchangelog_ready') {
@@ -946,6 +947,8 @@ PAGE = """
   // Счётчики последовательных сбоев fetch: сценарий «conf-ui pod пересоздаётся, port-forward
   // разорван» теперь сначала молчит, потом показывает аккуратную диагностику без визуального шума.
   const POLL_FAIL = { sync: 0, snap: 0, hc: 0 };
+  /** Пока идёт POST /api/sync/start — pollSync не перезаписывает #syncStatus (иначе тик 1.5 с затирает «Запрос…» и кажется, что клик ничего не сделал). */
+  var syncStartInFlight = false;
   function isFetchTransportError(e) {
     if (!e) return false;
     const name = e && e.name ? String(e.name) : '';
@@ -954,6 +957,7 @@ PAGE = """
   }
   async function pollSync() {
     const el = document.getElementById('syncStatus');
+    if (!el) return;
     try {
       const r = await fetch('/api/sync/status', { cache: 'no-store' });
       if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -984,7 +988,9 @@ PAGE = """
         if (!already) parts.push('Ошибка: ' + errStr);
       }
       if (j.last_stats) parts.push(JSON.stringify(j.last_stats, null, 2));
-      el.textContent = parts.filter(Boolean).join(String.fromCharCode(10));
+      if (!syncStartInFlight) {
+        el.textContent = parts.filter(Boolean).join(String.fromCharCode(10));
+      }
     } catch (e) {
       POLL_FAIL.sync += 1;
       // Один-два пропущенных тика во время rollout/port-forward — нормальное явление, не шумим.
@@ -993,7 +999,7 @@ PAGE = """
       const reason = transport
         ? 'conf-ui недоступен (rollout / port-forward / sleep). Повтор через несколько секунд.'
         : ('Ошибка опроса: ' + (e && e.message ? e.message : e));
-      el.textContent = reason;
+      if (el && !syncStartInFlight) el.textContent = reason;
     }
   }
   function showCfgMessage(ok, text) {
@@ -1018,29 +1024,34 @@ PAGE = """
     }
     showCfgMessage(!!j.ok, j.message || (j.ok ? 'OK' : 'Ошибка'));
   }
-  document.getElementById('btnSaveYaml').onclick = async function () {
+  function bindClick(id, fn) {
+    var elBind = document.getElementById(id);
+    if (elBind) elBind.addEventListener('click', fn);
+    else if (typeof console !== 'undefined' && console.warn) console.warn('[config-ui] missing #' + id);
+  }
+  bindClick('btnSaveYaml', async function () {
     if (!confirm('Сохранить текущую конфигурацию из полей формы в YAML на сервере?')) return;
     try {
       await postConfigForm('/save');
     } catch (e) {
       showCfgMessage(false, String(e));
     }
-  };
-  document.getElementById('btnTestFb').onclick = async function () {
+  });
+  bindClick('btnTestFb', async function () {
     try {
       await postConfigForm('/test-fb');
     } catch (e) {
       showCfgMessage(false, String(e));
     }
-  };
-  document.getElementById('btnTestPg').onclick = async function () {
+  });
+  bindClick('btnTestPg', async function () {
     try {
       await postConfigForm('/test-pg');
     } catch (e) {
       showCfgMessage(false, String(e));
     }
-  };
-  document.getElementById('btnPgBackup').onclick = async function () {
+  });
+  bindClick('btnPgBackup', async function () {
     const fd = new FormData(document.getElementById('configForm'));
     let r;
     try {
@@ -1085,8 +1096,8 @@ PAGE = """
     a.remove();
     URL.revokeObjectURL(url);
     showCfgMessage(true, 'Бэкап скачан.');
-  };
-  document.getElementById('btnPgRestore').onclick = async function () {
+  });
+  bindClick('btnPgRestore', async function () {
     const inp = document.getElementById('pgRestoreFile');
     if (!inp || !inp.files || !inp.files[0]) {
       if (inp) inp.click();
@@ -1117,34 +1128,76 @@ PAGE = """
     }
     showCfgMessage(!!j.ok, j.message || (j.ok ? 'OK' : 'Ошибка'));
     if (j.ok && inp) inp.value = '';
-  };
-  document.getElementById('btnSync').onclick = async function() {
+  });
+  var btnSyncEl = document.getElementById('btnSync');
+  var btnSyncDefaultLabel = 'Запустить синхронизацию';
+  if (btnSyncEl && btnSyncEl.getAttribute('data-default-label')) {
+    btnSyncDefaultLabel = btnSyncEl.getAttribute('data-default-label');
+  }
+  bindClick('btnSync', async function() {
     const el = document.getElementById('syncStatus');
-    el.textContent = 'Запрос...';
-    const fd = new FormData(document.getElementById('configForm'));
-    let r;
-    try {
-      r = await fetch('/api/sync/start', {
-        method: 'POST',
-        body: fd,
-        headers: { Accept: 'application/json' },
-        credentials: 'same-origin',
-      });
-    } catch (e) {
-      el.textContent = String(e);
+    const form = document.getElementById('configForm');
+    if (!el) return;
+    if (!form) {
+      el.textContent = 'В DOM нет формы #configForm — обновите страницу (кэш/прокси могли отдать неполный HTML).';
       return;
     }
-    const raw = await r.text();
-    let j;
-    try {
-      j = JSON.parse(raw);
-    } catch (e2) {
-      el.textContent = 'Ответ сервера не JSON (код ' + r.status + '). ' + raw.slice(0, 400);
-      return;
+    if (btnSyncEl && btnSyncEl.disabled) return;
+    syncStartInFlight = true;
+    if (btnSyncEl) {
+      btnSyncEl.disabled = true;
+      btnSyncEl.setAttribute('aria-busy', 'true');
+      btnSyncEl.textContent = 'Запуск...';
     }
-    el.textContent = j.message || j.error || JSON.stringify(j);
-    await pollSync();
-  };
+    try {
+      el.textContent = 'Запрос...';
+      const fd = new FormData(form);
+      var ac = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      var to = ac ? setTimeout(function () { ac.abort(); }, 45000) : null;
+      let r;
+      try {
+        r = await fetch('/api/sync/start', {
+          method: 'POST',
+          body: fd,
+          headers: { Accept: 'application/json' },
+          credentials: 'same-origin',
+          signal: ac ? ac.signal : undefined,
+        });
+      } catch (e) {
+        if (to) clearTimeout(to);
+        const name = e && e.name ? String(e.name) : '';
+        if (name === 'AbortError') {
+          el.textContent = 'Таймаут запроса (45 с): нет ответа от conf-ui (rollout, перегрузка или обрыв сети). Обновите страницу или проверьте kubectl/port-forward.';
+        } else {
+          el.textContent = String(e);
+        }
+        return;
+      }
+      if (to) clearTimeout(to);
+      const raw = await r.text();
+      if (!r.ok) {
+        el.textContent = 'Ошибка HTTP ' + r.status + String.fromCharCode(10) + raw.slice(0, 800);
+        await pollSync();
+        return;
+      }
+      let j;
+      try {
+        j = JSON.parse(raw);
+      } catch (e2) {
+        el.textContent = 'Ответ сервера не JSON (код ' + r.status + '). ' + raw.slice(0, 400);
+        return;
+      }
+      el.textContent = j.message || j.error || JSON.stringify(j);
+      await pollSync();
+    } finally {
+      syncStartInFlight = false;
+      if (btnSyncEl) {
+        btnSyncEl.disabled = false;
+        btnSyncEl.removeAttribute('aria-busy');
+        btnSyncEl.textContent = btnSyncDefaultLabel;
+      }
+    }
+  });
   // Опрос только пока вкладка видима. Скрытая вкладка через 5–10 минут sleep'а
   // получала залп fetch'ей разом и стабильно ловила TypeError: Failed to fetch.
   let fastTimer = null;
