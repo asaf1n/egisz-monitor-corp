@@ -86,7 +86,8 @@ PAGE = """
       background: rgba(34, 211, 238, 0.72);
       border-right: 1px solid rgba(186, 230, 253, 0.9);
     }
-    #syncBannerProgressFill.sync-progress-indeterminate {
+    #syncBannerProgressFill.sync-progress-indeterminate,
+    #connStatusProgressFill.sync-progress-indeterminate {
       width: 32% !important;
       animation: sync-bar-indeterminate 1.15s ease-in-out infinite alternate;
     }
@@ -230,25 +231,6 @@ PAGE = """
           </button>
         </div>
 
-        <div class="mt-3 space-y-3 rounded-lg border border-[#2D3F5E] bg-[#121826] px-3 py-3 sm:px-4">
-          <h2 class="text-xs font-medium uppercase tracking-[0.12em] text-[#9CA3AF] lg:text-[10px]">PostgreSQL: бэкап и восстановление</h2>
-          <p class="text-xs leading-snug text-[#6B7280]">Клиент в образе: стандартный <code class="text-[#509EE3]">pg_dump</code> / <code class="text-[#509EE3]">pg_restore</code> (пакет <code class="text-[#509EE3]">postgresql-client</code>). Путь на диске задаётся только в диалоге сохранения браузера; на Windows удобно: <code class="text-[#509EE3]">I:\\DB\\egisz-monitor-backups\\</code></p>
-          <div class="flex flex-wrap gap-2">
-            <button type="button" id="btnPgBackup" class="inline-flex min-h-12 items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3.5 py-2.5 font-mono text-xs text-[#D1D5DB] transition hover:border-[#509EE3] hover:bg-[#223555] hover:text-white">
-              Скачать бэкап (-Fc)
-            </button>
-          </div>
-          <p class="text-xs leading-snug text-[#6B7280]">Восстановление: выберите файл <code class="text-[#509EE3]">.dump</code>. Режим фиксированный: <code class="text-[#509EE3]">pg_restore --data-only --no-owner --no-acl</code> (схема в БД уже должна совпадать, например после Job 001+002+005).</p>
-          <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
-            <label class="block min-w-0 text-xs text-[#9CA3AF]">Файл дампа
-              <input type="file" id="pgRestoreFile" accept=".dump,.backup,application/octet-stream" class="mt-1 block w-full max-w-md text-xs text-[#D1D5DB] file:mr-2 file:rounded file:border-0 file:bg-[#1B2940] file:px-2 file:py-1 file:text-[#509EE3]"/>
-            </label>
-            <button type="button" id="btnPgRestore" class="inline-flex min-h-12 shrink-0 items-center justify-center rounded-md border border-rose-700/70 bg-rose-950/40 px-3.5 py-2.5 font-mono text-xs text-rose-100 transition hover:bg-rose-900/50">
-              Восстановить из дампа
-            </button>
-          </div>
-        </div>
-
         <div class="flex min-h-0 flex-1 flex-col gap-4 border-t border-[#1B2940] pt-4 lg:grid lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,22rem)_minmax(18rem,1fr)] lg:gap-4 lg:pt-3">
           <div class="flex min-w-0 flex-col gap-3 lg:min-h-0">
             <button type="button" id="btnSync" class="inline-flex w-full min-h-12 items-center justify-center rounded-md border border-[#F59F36] bg-[#F59F36] px-3.5 py-2.5 font-mono text-sm text-[#121826] transition hover:bg-[#FFB95D] lg:min-h-[2.875rem]">
@@ -358,6 +340,17 @@ PAGE = """
               </div>
         </div>
       </div>
+      <div class="shrink-0 rounded-lg border border-[#2D3F5E] bg-[#121826] px-3 py-3 lg:py-2.5">
+        <input type="file" id="pgRestoreFile" accept=".dump,.backup,application/octet-stream" class="sr-only" tabindex="-1" aria-hidden="true"/>
+        <div class="flex flex-col gap-2">
+          <button type="button" id="btnPgBackup" class="inline-flex min-h-11 w-full items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3 py-2.5 font-mono text-[11px] text-[#D1D5DB] transition hover:border-[#509EE3] hover:bg-[#223555] hover:text-white lg:min-h-10">
+            Скачать бэкап
+          </button>
+          <button type="button" id="btnPgRestore" class="inline-flex min-h-11 w-full items-center justify-center rounded-md border border-rose-700/70 bg-rose-950/40 px-3 py-2.5 font-mono text-[11px] text-rose-100 transition hover:bg-rose-900/50 lg:min-h-10">
+            Восстановить из дампа
+          </button>
+        </div>
+      </div>
     </aside>
   </div>
 
@@ -432,10 +425,17 @@ PAGE = """
       const phase = p && typeof p === 'object' ? (p.phase || '') : '';
       const pct = syncProgressPercent(p);
       wrap.classList.add('border-[#509EE3]/85', 'bg-[#0C4A6E]/60', 'text-[#E5F6FF]');
-      fill.style.width = pct == null ? '32%' : pct + '%';
+      if (phase === 'counting' || phase === 'messages_counting') {
+        fill.classList.add('sync-progress-indeterminate');
+        fill.style.width = '';
+      } else {
+        fill.classList.remove('sync-progress-indeterminate');
+        fill.style.width = pct == null ? '32%' : pct + '%';
+      }
       textEl.textContent = 'Синхронизация';
       pctEl.className = 'shrink-0 font-mono tabular-nums text-inherit min-w-[3rem] text-right';
-      pctEl.textContent = pct == null ? '…' : pct + '%';
+      pctEl.textContent =
+        phase === 'counting' || phase === 'messages_counting' || pct == null ? '…' : pct + '%';
       return;
     }
     if (j.error) {
@@ -674,6 +674,21 @@ PAGE = """
       return;
     }
 
+    if (phase === 'counting' || phase === 'messages_counting') {
+      setProgressTheme(banner, 'blue');
+      titleEl.className = SYNC_TITLE_BLUE;
+      fill.style.width = '';
+      setBarIndeterminate(fill, true);
+      pctEl.textContent = '…';
+      meta.className = SYNC_META_BASE + 'text-[#9CA3AF]';
+      const waitLine =
+        phase === 'counting'
+          ? 'Firebird считает EXCHANGELOG (COUNT). На большой базе это долго; процент здесь недоступен.'
+          : 'Firebird считает EGISZ_MESSAGES в окне sync_window_days (COUNT). На большой базе это долго; процент здесь недоступен.';
+      meta.textContent = phaseTitle + String.fromCharCode(10) + waitLine;
+      return;
+    }
+
     if (phase === 'outbound_firebird') {
       setProgressTheme(banner, 'orange');
       titleEl.className = SYNC_TITLE_ORANGE;
@@ -733,15 +748,7 @@ PAGE = """
       const tr = totalRowsState(p);
       const lo = Number(p.loaded_rows) || 0;
 
-      if (phase === 'counting') {
-        lineA =
-          'Выполняется подсчёт строк EXCHANGELOG в Firebird (на большой базе это может занять время)…';
-        pct = 12;
-      } else if (phase === 'messages_counting') {
-        lineA =
-          'Выполняется подсчёт строк EGISZ_MESSAGES в окне sync_window_days (на большой базе это может занять время)…';
-        pct = 12;
-      } else if (tr.kind === 'positive') {
+      if (tr.kind === 'positive') {
         pct = Math.min(87, Math.round(36 + (lo / tr.n) * 51));
         lineA = 'Загружено из журнала: ' + lo + ' / ' + tr.n + ' строк';
       } else if (tr.kind === 'zero') {
@@ -1185,12 +1192,12 @@ PAGE = """
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
-    showCfgMessage(true, 'Файл бэкапа скачан (сохраните в нужную папку, например I:\\\\DB\\\\egisz-monitor-backups\\\\).');
+    showCfgMessage(true, 'Бэкап скачан.');
   };
   document.getElementById('btnPgRestore').onclick = async function () {
     const inp = document.getElementById('pgRestoreFile');
-    if (!inp.files || !inp.files[0]) {
-      showCfgMessage(false, 'Выберите файл дампа.');
+    if (!inp || !inp.files || !inp.files[0]) {
+      if (inp) inp.click();
       return;
     }
     if (!confirm('ВНИМАНИЕ: pg_restore перезапишет данные в целевой БД (data-only). Продолжить?')) return;
@@ -1217,6 +1224,7 @@ PAGE = """
       return;
     }
     showCfgMessage(!!j.ok, j.message || (j.ok ? 'OK' : 'Ошибка'));
+    if (j.ok && inp) inp.value = '';
   };
   document.getElementById('btnSync').onclick = async function() {
     const el = document.getElementById('syncStatus');
