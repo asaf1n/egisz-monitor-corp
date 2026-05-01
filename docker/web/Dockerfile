@@ -35,7 +35,7 @@ LABEL org.opencontainers.image.title="egisz-conf-ui" \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libfbclient2 tini \
+    && apt-get install -y --no-install-recommends libfbclient2 tini postgresql-client \
     && FB_SO="$(find /usr/lib -name 'libfbclient.so.*' -type f 2>/dev/null | sort -V | tail -n1)" \
     && test -n "$FB_SO" && test -f "$FB_SO" \
     && mkdir -p /usr/local/lib \
@@ -50,15 +50,15 @@ ENV FB_CLIENT_LIBRARY=/usr/local/lib/libfbclient.so
 
 COPY --from=builder /opt/venv /opt/venv
 COPY sql ./sql
-COPY config/egisz_corp.example.yaml ./config/egisz_corp.yaml
+COPY config/egisz_monitor.example.yaml ./config/egisz_monitor.yaml
 
 # Финальная проверка драйвера в собранном слое + права на /app/config (туда POST /save
 # пишет YAML; в k8s он перекрывается emptyDir с fsGroup=10001, но локально CMD должен работать тоже).
 RUN python -c "from firebird.driver import fbapi; fbapi.load_api()" \
     && chown -R app:app /app
 
-ENV EGISZ_CORP_CONFIG=/app/config/egisz_corp.yaml \
-    EGISZ_CORP_SQL_DIR=/app/sql
+ENV EGISZ_MONITOR_CONFIG=/app/config/egisz_monitor.yaml \
+    EGISZ_MONITOR_SQL_DIR=/app/sql
 
 USER 10001:10001
 EXPOSE 8080

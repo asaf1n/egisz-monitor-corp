@@ -1,5 +1,5 @@
 -- Диагностические COUNT для сверки с ETL (предикаты как в sql_util.py).
--- Подставьте N = etl.sync_window_days из актуального config/egisz_corp.yaml (или ConfigMap / UI).
+-- Подставьте N = etl.sync_window_days из актуального config/egisz_monitor.yaml (или ConfigMap / UI).
 -- Для запросов с курсором подставьте LAST_LOG_ID из PostgreSQL: SELECT last_log_id FROM etl_state WHERE pipeline = 'firebird_exchangelog';
 
 -- --- Журнал EXCHANGELOG: строки в окне по LOGDATE (без учёта курсора LOGID) ---
@@ -16,14 +16,14 @@ WHERE e.LOGDATE >= DATEADD(-30 DAY TO CURRENT_TIMESTAMP)
   AND e.LOGID > 0;
 -- Замените 30 на N; 0 на LAST_LOG_ID из etl_state (для full_scan старт с 0).
 
--- Лёгкий вариант без JOIN (только EXCHANGELOG), совместим с exchangelog_count_window_after_cursor:
+-- Лёгкий вариант без JOIN (только EXCHANGELOG), совместим с exchangelog_count_logid_after_cursor / дефолтным ETL:
 SELECT COUNT(*) AS exchangelog_rows_after_cursor_simple
 FROM EXCHANGELOG e
 WHERE e.LOGDATE >= DATEADD(-30 DAY TO CURRENT_TIMESTAMP)
   AND e.LOGID > 0;
 -- Замените 30 на N и 0 на LAST_LOG_ID.
 
--- --- Исходящие сообщения: то же окно, что outbound_documents_staging_select (CREATEDATE) ---
+-- --- Исходящие сообщения: то же окно CREATEDATE, что outbound_documents_staging_select (сортировка в ETL — по EGMID DESC) ---
 SELECT COUNT(*) AS egisz_messages_in_createdate_window
 FROM EGISZ_MESSAGES m
 WHERE m.DOCUMENTID IS NOT NULL

@@ -28,23 +28,23 @@ except ImportError as e:  # pragma: no cover
 
 
 def logical_config_path() -> Path:
-    """Path for UI and EGISZ_CORP_CONFIG: does not resolve symlinks (K8s Secret mounts use ..date.. dirs)."""
+    """Path for UI and EGISZ_MONITOR_CONFIG: does not resolve symlinks (K8s Secret mounts use ..date.. dirs)."""
     w = os.environ.get("CONFIG_WRITE_PATH")
     if w:
         return _strip_k8s_secret_timestamp_dir(Path(w).expanduser())
-    env = os.environ.get("EGISZ_CORP_CONFIG")
+    env = os.environ.get("EGISZ_MONITOR_CONFIG")
     if env:
         return _strip_k8s_secret_timestamp_dir(Path(env).expanduser())
     root = Path(__file__).resolve().parents[1]
-    return root / "config" / "egisz_corp.yaml"
+    return root / "config" / "egisz_monitor.yaml"
 
 
 def default_config_path() -> Path:
-    env = os.environ.get("EGISZ_CORP_CONFIG")
+    env = os.environ.get("EGISZ_MONITOR_CONFIG")
     if env:
         return Path(env).expanduser().resolve()
     root = Path(__file__).resolve().parents[1]
-    return (root / "config" / "egisz_corp.yaml").resolve()
+    return (root / "config" / "egisz_monitor.yaml").resolve()
 
 
 @dataclass
@@ -76,6 +76,8 @@ class EtlConfig:
     sync_window_days: int = 30
     full_scan: bool = False
     source_query: str | None = None
+    # None / не задано — без лимита. UTF-8 размер MSGTEXT; при превышении строка журнала пропускается (staging MSGTEXT_TOO_LARGE).
+    max_msgtext_bytes: int | None = None
 
 
 @dataclass
@@ -126,8 +128,8 @@ def load_corp_config(path: Path | None = None) -> CorpAppConfig:
     cfg_path = path or default_config_path()
     if not cfg_path.is_file():
         raise FileNotFoundError(
-            f"Config file not found: {cfg_path}. Copy config/egisz_corp.example.yaml "
-            f"to config/egisz_corp.yaml or set EGISZ_CORP_CONFIG."
+            f"Config file not found: {cfg_path}. Copy config/egisz_monitor.example.yaml "
+            f"to config/egisz_monitor.yaml or set EGISZ_MONITOR_CONFIG."
         )
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     return parse_corp_config_dict(raw)
@@ -149,6 +151,13 @@ def parse_corp_config_dict(
     if not isinstance(fb, dict) or not isinstance(pg, dict) or not isinstance(etl, dict):
         raise ValueError("firebird, postgres, and etl must be mappings")
 
+    _raw_mmb = etl.get("max_msgtext_bytes")
+    if _raw_mmb is None or _raw_mmb == "":
+        max_msgtext_bytes: int | None = None
+    else:
+        max_msgtext_bytes = _int(_raw_mmb)
+        if max_msgtext_bytes <= 0:
+            max_msgtext_bytes = None
     if use_yaml_postgres_only:
         pg_host = _str(pg.get("host"))
         pg_port = _int(pg.get("port"))
@@ -157,12 +166,12 @@ def parse_corp_config_dict(
         pg_password = _str(pg.get("password"))
         pg_schema = _str(pg.get("schema"), "public")
     else:
-        pg_host = _env_nonempty("EGISZ_CORP_POSTGRES_HOST") or _str(pg.get("host"))
-        pg_port = _int(_env_nonempty("EGISZ_CORP_POSTGRES_PORT") or pg.get("port"))
-        pg_db = _env_nonempty("EGISZ_CORP_POSTGRES_DB") or _str(pg.get("database"))
-        pg_user = _env_nonempty("EGISZ_CORP_POSTGRES_USER") or _str(pg.get("user"))
-        pg_password = _env_nonempty("EGISZ_CORP_POSTGRES_PASSWORD") or _str(pg.get("password"))
-        pg_schema = _env_nonempty("EGISZ_CORP_POSTGRES_SCHEMA") or _str(pg.get("schema"), "public")
+        pg_host = _env_nonempty("EGISZ_MONITOR_POSTGRES_HOST") or _str(pg.get("host"))
+        pg_port = _int(_env_nonempty("EGISZ_MONITOR_POSTGRES_PORT") or pg.get("port"))
+        pg_db = _env_nonempty("EGISZ_MONITOR_POSTGRES_DB") or _str(pg.get("database"))
+        pg_user = _env_nonempty("EGISZ_MONITOR_POSTGRES_USER") or _str(pg.get("user"))
+        pg_password = _env_nonempty("EGISZ_MONITOR_POSTGRES_PASSWORD") or _str(pg.get("password"))
+        pg_schema = _env_nonempty("EGISZ_MONITOR_POSTGRES_SCHEMA") or _str(pg.get("schema"), "public")
 
     return CorpAppConfig(
         firebird=FirebirdConfig(
@@ -188,6 +197,7 @@ def parse_corp_config_dict(
             sync_window_days=_int(etl.get("sync_window_days"), 30),
             full_scan=_bool(etl.get("full_scan"), False),
             source_query=_str(etl.get("source_query"), "") or None,
+            max_msgtext_bytes=max_msgtext_bytes,
         ),
         metabase=dict(mb) if isinstance(mb, dict) else {},
     )

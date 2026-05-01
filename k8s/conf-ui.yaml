@@ -1,4 +1,4 @@
-# Config UI (Flask): редактирование YAML конфигурации EGISZ Corp.
+# Config UI (Flask): редактирование YAML конфигурации EGISZ Monitor.
 # NodePort — доступ с хоста Windows без kubectl port-forward (Docker Desktop / kind).
 # Рабочая копия YAML в emptyDir (запись из UI); при новом поде init снова копирует из Secret. Другие Job’ы читают Secret — обновляйте его при необходимости (deploy / kubectl apply).
 apiVersion: v1
@@ -71,7 +71,7 @@ spec:
           securityContext:
             runAsNonRoot: false
             runAsUser: 0
-          command: ["sh", "-c", "set -e; cp /seed/egisz_corp.yaml /work/egisz_corp.yaml; chmod 0660 /work/egisz_corp.yaml"]
+          command: ["sh", "-c", "set -e; cp /seed/egisz_monitor.yaml /work/egisz_monitor.yaml; chmod 0660 /work/egisz_monitor.yaml"]
           volumeMounts:
             - name: cfg-secret
               mountPath: /seed
@@ -86,7 +86,7 @@ spec:
           ports:
             - containerPort: 8080
           # gunicorn (см. docker/web/Dockerfile CMD) сам слушает 0.0.0.0:8080 — переменные FLASK_RUN_*
-          # не нужны и могли путать читателей. EGISZ_CORP_CONFIG / EGISZ_CORP_SQL_DIR / FB_CLIENT_LIBRARY
+          # не нужны и могли путать читателей. EGISZ_MONITOR_CONFIG / EGISZ_MONITOR_SQL_DIR / FB_CLIENT_LIBRARY
           # уже встроены в образ как ENV, оставляем здесь для прозрачности.
           env:
             - name: LANG
@@ -95,11 +95,11 @@ spec:
               value: C.UTF-8
             - name: PYTHONUTF8
               value: "1"
-            - name: EGISZ_CORP_CONFIG
-              value: /app/config/egisz_corp.yaml
+            - name: EGISZ_MONITOR_CONFIG
+              value: /app/config/egisz_monitor.yaml
             - name: FB_CLIENT_LIBRARY
               value: "/usr/local/lib/libfbclient.so"
-            - name: EGISZ_CORP_SQL_DIR
+            - name: EGISZ_MONITOR_SQL_DIR
               value: "/app/sql"
           securityContext:
             allowPrivilegeEscalation: false
@@ -137,11 +137,11 @@ spec:
                 command: ["sh", "-c", "sleep 5"]
           resources:
             requests:
-              cpu: "50m"
-              memory: "192Mi"
+              cpu: "100m"
+              memory: "256Mi"
             limits:
               cpu: "1"
-              memory: "768Mi"
+              memory: "1Gi"
       volumes:
         - name: cfg-secret
           secret:

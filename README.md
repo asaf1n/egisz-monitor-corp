@@ -27,9 +27,9 @@ Firebird EXCHANGELOG / EGISZ_MESSAGES
 | Язык | Python 3.10 и новее |
 | Источник данных | Firebird, пакет `firebird-driver`, нативный клиент `fbclient` / переменная `FB_CLIENT_LIBRARY` |
 | Хранилище витрины | PostgreSQL, пакет `psycopg2-binary` |
-| Конфигурация | YAML через `PyYAML`; файл `config/egisz_corp.yaml` или путь из `EGISZ_CORP_CONFIG` |
+| Конфигурация | YAML через `PyYAML`; файл `config/egisz_monitor.yaml` или путь из `EGISZ_MONITOR_CONFIG` |
 | Веб-интерфейс | Flask Config UI, ручной запуск синхронизации через `sync_routes.py` |
-| Планировщик | Apache Airflow, DAG `egisz_corp_firebird_to_postgres` |
+| Планировщик | Apache Airflow, DAG `egisz_monitor_firebird_to_postgres` |
 | Аналитика | Metabase поверх PostgreSQL, дашборды хранятся в `metabase_dashboards/*.json` |
 
 Команды пакета зарегистрированы в `pyproject.toml`: **`egisz-corp`** и **`egisz-monitor`** ведут в один CLI-модуль `egisz_monitor_corp.cli`.
@@ -38,23 +38,23 @@ Firebird EXCHANGELOG / EGISZ_MESSAGES
 
 Главная процедура — **`run_sync`** в `egisz_monitor_corp.etl`. Она читает Firebird только `SELECT`-запросами и обновляет витрину в PostgreSQL.
 
-Инкремент строится по полю **`EXCHANGELOG.LOGID`**. Последний обработанный идентификатор хранится в `etl_state.last_log_id` для пайплайна из конфигурации, по умолчанию `firebird_exchangelog`. Если включить `full_scan: true`, курсор начинается с нуля, но выборка всё равно ограничивается настроенным окном `sync_window_days`.
+Инкремент строится по полю **`EXCHANGELOG.LOGID`**. Последний обработанный идентификатор хранится в `etl_state.last_log_id` для пайплайна из конфигурации, по умолчанию `firebird_exchangelog`. Для сообщений в **`etl_state`**: **`last_egmid`** — ватермарк после полного успешного sync; **`source_max_egmid`** — пик последней выгрузки `EGISZ_MESSAGES` из Firebird (в т.ч. до завершения журнала; в Config UI поле EGMID показывает max из двух). Если включить `full_scan: true`, оба курсора начинаются с нуля, но выборка журнала ограничивается настроенным окном `sync_window_days`.
 
 Один прогон выполняет следующие шаги:
 
-1. Загружает справочники `EGISZ_LICENSES` и `JPERSONS` в память процесса.
-2. Считает количество строк `EXCHANGELOG` после курсора для прогресса в интерфейсе. Ошибка этого подсчёта не останавливает синхронизацию.
-3. Читает журнал страницами: `SELECT FIRST {batch_size}` с условием `e.LOGID > {last_id}` и сортировкой по `LOGID`.
-4. Разбирает `MSGTEXT` как источник SOAP/XML и использует `LOGTEXT` / `REPLYTO` как транспортные поля для поиска клиники.
-5. Записывает факты и измерения через UPSERT. Ошибки разбора попадают в `stg_parse_errors`.
-6. После страницы двигает `etl_state.last_log_id` до максимального обработанного `LOGID`.
+1. Полностью выгружает `EGISZ_LICENSES` и `JPERSONS` в память процесса (каждый запуск).
+2. Считает количество строк `EXCHANGELOG` после курсора `LOGID` для прогресса в интерфейсе. Ошибка этого подсчёта не останавливает синхронизацию.
+3. Один раз считает объём **`EGISZ_MESSAGES`** под выгрузку (тот же фильтр **`EGMID`** + **`CREATEDATE`** в окне `sync_window_days`), затем постранично выгружает их; в `etl_state` сразу пишется **`source_max_egmid`** (пик для UI). **`last_egmid`** обновляется только после **успешного** завершения всего прогона (журнал + outbound), чтобы при сбое повторный запуск снова подтянул те же сообщения для сопоставления по `MSGID`.
+4. Читает журнал страницами из Firebird: `SELECT FIRST {batch_size}` с `e.LOGID > {last_id}` и сортировкой по `LOGID`.
+5. Сопоставляет строки журнала с выгруженными сообщениями по `MSGID` в памяти; разбирает `MSGTEXT` как SOAP/XML и использует `LOGTEXT` / `REPLYTO` для поиска клиники.
+6. Записывает факты и измерения через UPSERT. Ошибки разбора попадают в `stg_parse_errors`. После каждой страницы журнала двигает `etl_state.last_log_id` до максимального обработанного `LOGID`.
 7. Отдельно обновляет `stg_egisz_outbound_documents` для отчёта «Документы без ответа».
 
 Запустить тот же код можно несколькими способами:
 
 | Способ | Что происходит |
 | :--- | :--- |
-| `egisz-corp sync` | CLI-запуск синхронизации; конфиг берётся из `--config` или `EGISZ_CORP_CONFIG`. |
+| `egisz-monitor sync` | CLI-запуск синхронизации; конфиг берётся из `--config` или `EGISZ_MONITOR_CONFIG`. |
 | Config UI | Flask запускает `run_sync` в фоновом потоке. Повторный старт во время активной синхронизации отклоняется. |
 | Apache Airflow | DAG сначала проверяет соединения, затем вызывает `run_sync`. |
 | `kubectl exec deploy/conf-ui -- egisz-monitor sync` | Ручной запуск внутри Kubernetes-пода `conf-ui`. |
@@ -65,7 +65,7 @@ Firebird EXCHANGELOG / EGISZ_MESSAGES
 
 Окно журнала ограничивается по **`LOGDATE`**: в типовом SQL используется `DATEADD(-sync_window_days DAY TO CURRENT_TIMESTAMP)`. Пакетная обработка идёт по страницам размера `batch_size`, курсор сдвигается после каждой страницы.
 
-Перед основным циклом сервис загружает строки `EGISZ_LICENSES` и `JPERSONS` с непустым `JID`. В памяти строятся словари и списки для быстрого поиска `MO_UID → JID`, названия клиники, ИНН и `FIR_OID`. Поэтому каждая транзакция не делает отдельные запросы к Firebird за справочными данными.
+Перед основным циклом сервис одним запросом загружает **все** строки **`EGISZ_LICENSES`** с **`LEFT JOIN JPERSONS`**, затем в Python оставляет только строки с **`MODIFYDATE`** в окне **`sync_window_days`** (или без даты). Инкрементальная выгрузка **`EGISZ_MESSAGES`** по-прежнему с фильтром по **`CREATEDATE`** в SQL.
 
 ### Разбор сообщения и идентификация
 
@@ -147,7 +147,7 @@ Firebird EXCHANGELOG / EGISZ_MESSAGES
 
 ### Конфигурация и доступы
 
-Параметры соединений хранятся в `config/egisz_corp.yaml`, в Kubernetes-примере — в `k8s/local/egisz_corp.yaml`.
+Параметры соединений хранятся в `config/egisz_monitor.yaml`, в Kubernetes-примере — в `k8s/local/egisz_monitor.yaml`.
 
 Примеры из репозитория:
 

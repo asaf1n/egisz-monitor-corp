@@ -1,7 +1,11 @@
 from egisz_monitor_corp.sql_util import (
     default_exchangelog_select,
+    egisz_messages_count_sql,
+    egisz_messages_incremental_sql,
+    enrichment_egisz_licenses_sql,
     exchangelog_count_after_cursor,
-    exchangelog_count_window_after_cursor,
+    exchangelog_count_logid_after_cursor,
+    outbound_documents_staging_select,
     paginated_exchangelog_sql,
 )
 
@@ -22,20 +26,48 @@ def test_count_wraps_inner_and_filters_logid() -> None:
     assert "LOGID > 42" in sql
 
 
-def test_fast_count_matches_default_window_not_full_inner_select() -> None:
-    sql = exchangelog_count_window_after_cursor(30, last_log_id=0)
+def test_enrichment_licenses_sql_full_scan_no_modifydate_predicate() -> None:
+    s = enrichment_egisz_licenses_sql()
+    assert "FROM EGISZ_LICENSES" in s
+    assert "JOIN JPERSONS" in s.upper()
+    assert "DATEADD" not in s
+
+
+def test_default_count_logid_only_no_join() -> None:
+    sql = exchangelog_count_logid_after_cursor(last_log_id=0)
     assert "COUNT(*)" in sql
     assert "EXCHANGELOG" in sql
-    assert "EGISZ_MESSAGES" in sql
-    assert "LOGDATE" in sql and "DATEADD(-30 DAY" in sql
     assert "LOGID > 0" in sql
-    assert "EGISZ_LICENSES" not in sql
+    assert "EGISZ_MESSAGES" not in sql
+    assert "LOGDATE" not in sql
 
 
-def test_default_select_contains_egisz_licenses_columns() -> None:
-    s = default_exchangelog_select(7)
-    assert "EGISZ_LICENSES_KIND" in s
-    assert "EGISZ_LICENSES_JID" in s
-    assert "EGISZ_LICENSES" in s
-    assert "MSG_CREATED_AT" in s
+def test_default_select_is_exchangelog_only_with_msgid() -> None:
+    s = default_exchangelog_select()
+    assert "FROM EXCHANGELOG e" in s
+    assert "e.MSGID AS MSGID" in s
+    assert "EGISZ_MESSAGES" not in s
+    assert "DATEADD" not in s
+
+
+def test_outbound_staging_select_orders_by_egmid_desc_no_license_subqueries() -> None:
+    s = outbound_documents_staging_select(14)
+    assert "ORDER BY m.EGMID DESC" in s
+    assert "DATEADD(-14 DAY" in s
+    assert "EGISZ_LICENSES" not in s
+
+
+def test_egisz_messages_incremental_orders_by_egmid() -> None:
+    s = egisz_messages_incremental_sql(last_egmid=99, limit=100, sync_window_days=10)
+    assert "FIRST 100" in s
+    assert "EGMID > 99" in s
+    assert "ORDER BY m.EGMID" in s
+    assert "DATEADD(-10 DAY" in s
+    assert "EGISZ_LICENSES" not in s
+
+
+def test_egisz_messages_count_matches_incremental_window() -> None:
+    s = egisz_messages_count_sql(last_egmid=5, sync_window_days=7)
+    assert "COUNT(*)" in s
+    assert "EGMID > 5" in s
     assert "DATEADD(-7 DAY" in s

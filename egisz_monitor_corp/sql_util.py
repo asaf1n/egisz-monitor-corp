@@ -1,18 +1,20 @@
 """Default Firebird extraction SQL.
 
 Schema (PROXY_EGISZ): EXCHANGELOG (LOGTEXT = URL/хост клиники, MSGTEXT = SOAP/XML),
-EGISZ_MESSAGES (DOCUMENTID, REPLYTO), EGISZ_LICENSES (MO_UID, MO_DOMEN, JID, KIND),
+EGISZ_MESSAGES (DOCUMENTID, REPLYTO, MSGID), EGISZ_LICENSES (MO_UID, MO_DOMEN, JID, KIND),
 JPERSONS (JNAME, JINN VARCHAR(12), FIR_OID VARCHAR(255) — как MO UID для <organization>).
 KIND exists only in EGISZ_LICENSES — not on EGISZ_MESSAGES. Строка EGISZ_LICENSES: REPLYTO matches MO_DOMEN.
 localUid в SOAP ↔ DOCUMENTID; клиника: gost- сначала в MSGTEXT (разбор текста сообщения), затем LOGTEXT, иначе REPLYTO → MO_DOMEN → JID → JPERSONS.
+
+Инкремент журнала по EXCHANGELOG.LOGID; сообщения EGISZ_MESSAGES — постраничная выгрузка по EGMID и окну CREATEDATE (sync_window_days) в SQL; лицензии — полная выгрузка EGISZ_LICENSES с LEFT JOIN JPERSONS, окно по MODIFYDATE применяется в Python; сопоставление с журналом по MSGID и REPLYTO→лицензия после выгрузки.
 """
 
 from __future__ import annotations
 
 
-def default_exchangelog_select(sync_window_days: int) -> str:
-    # Scalar subqueries: несколько строк EGISZ_LICENSES на один REPLYTO — берём FIRST 1 по дате/ID.
-    return f"""
+def default_exchangelog_select() -> str:
+    """Журнал без связи с EGISZ_MESSAGES и без фильтра по дате на источнике; ограничение по LOGID задаёт пагинация."""
+    return """
 SELECT
     e.LOGID AS LOGID,
     e.LOGDATE AS LOGDATE,
@@ -26,49 +28,21 @@ SELECT
     e.GRPID AS GRPID,
     e.MODIFYDATE AS MODIFYDATE,
     e.CREATEDATE AS LOG_CREATED_AT,
-    m.REPLYTO AS REPLYTO,
-    m.DOCUMENTID AS DOCUMENTID,
-    m.CREATEDATE AS MSG_CREATED_AT,
-    (
-        SELECT FIRST 1 l2.MO_UID
-        FROM EGISZ_LICENSES l2
-        WHERE m.REPLYTO IS NOT NULL
-          AND l2.MO_DOMEN IS NOT NULL
-          AND TRIM(l2.MO_DOMEN) <> ''
-          AND POSITION(TRIM(l2.MO_DOMEN) IN TRIM(m.REPLYTO)) > 0
-        ORDER BY l2.MODIFYDATE DESC, l2.ID DESC
-    ) AS MO_UID,
-    (
-        SELECT FIRST 1 l2.KIND
-        FROM EGISZ_LICENSES l2
-        WHERE m.REPLYTO IS NOT NULL
-          AND l2.MO_DOMEN IS NOT NULL
-          AND TRIM(l2.MO_DOMEN) <> ''
-          AND POSITION(TRIM(l2.MO_DOMEN) IN TRIM(m.REPLYTO)) > 0
-        ORDER BY l2.MODIFYDATE DESC, l2.ID DESC
-    ) AS EGISZ_LICENSES_KIND,
-    (
-        SELECT FIRST 1 l2.JID
-        FROM EGISZ_LICENSES l2
-        WHERE m.REPLYTO IS NOT NULL
-          AND l2.MO_DOMEN IS NOT NULL
-          AND TRIM(l2.MO_DOMEN) <> ''
-          AND POSITION(TRIM(l2.MO_DOMEN) IN TRIM(m.REPLYTO)) > 0
-        ORDER BY l2.MODIFYDATE DESC, l2.ID DESC
-    ) AS EGISZ_LICENSES_JID
+    e.MSGID AS MSGID
 FROM EXCHANGELOG e
-LEFT JOIN EGISZ_MESSAGES m
-    ON m.MSGID = e.MSGID
-WHERE e.LOGDATE >= DATEADD(-{sync_window_days} DAY TO CURRENT_TIMESTAMP)
+WHERE 1=1
 """.strip()
 
 
 def enrichment_egisz_licenses_sql() -> str:
-    """Все строки EGISZ_LICENSES с JID; KIND и join к JPERSONS по JID."""
+    """Все строки EGISZ_LICENSES с JID; LEFT JOIN JPERSONS для JNAME/ИНН/OID МО. Фильтр по sync_window_days — в ETL (Python), не в SQL."""
     return """
 SELECT
+    l.ID AS ID,
     l.JID AS JID,
     l.MO_UID AS MO_UID,
+    l.MO_DOMEN AS MO_DOMEN,
+    l.MODIFYDATE AS MODIFYDATE,
     l.KIND AS EGISZ_LICENSES_KIND,
     jp.JNAME AS JNAME,
     jp.JINN AS JINN,
@@ -79,67 +53,63 @@ WHERE l.JID IS NOT NULL
 """.strip()
 
 
-def enrichment_jpersons_sql() -> str:
-    """JPERSONS: JNAME, ИНН (JINN), OID МО (FIR_OID; сопоставим с EGISZ_LICENSES.MO_UID / <organization>)."""
-    return """
-SELECT
-    jp.JID AS JID,
-    jp.JNAME AS JNAME,
-    jp.JINN AS JINN,
-    jp.FIR_OID AS FIR_OID
-FROM JPERSONS jp
-WHERE jp.JID IS NOT NULL
-""".strip()
-
-
 def outbound_documents_staging_select(sync_window_days: int) -> str:
-    """EGISZ_MESSAGES с DOCUMENTID за окно: KIND/JID через REPLYTO→EGISZ_LICENSES (как fallback после gost- в MSGTEXT в журнале EXCHANGELOG)."""
+    """Исходящие с DOCUMENTID; KIND/JID для staging задаются в Python по REPLYTO."""
+    sd = int(sync_window_days)
     return f"""
 SELECT
     TRIM(m.DOCUMENTID) AS DOCUMENTID,
     m.EGMID AS EGMID,
     m.CREATEDATE AS MSG_SENT_AT,
-    m.REPLYTO AS REPLYTO,
-    (
-        SELECT FIRST 1 l2.KIND
-        FROM EGISZ_LICENSES l2
-        WHERE m.REPLYTO IS NOT NULL
-          AND l2.MO_DOMEN IS NOT NULL
-          AND TRIM(l2.MO_DOMEN) <> ''
-          AND POSITION(TRIM(l2.MO_DOMEN) IN TRIM(m.REPLYTO)) > 0
-        ORDER BY l2.MODIFYDATE DESC, l2.ID DESC
-    ) AS EGISZ_LICENSES_KIND,
-    (
-        SELECT FIRST 1 l2.JID
-        FROM EGISZ_LICENSES l2
-        WHERE m.REPLYTO IS NOT NULL
-          AND l2.MO_DOMEN IS NOT NULL
-          AND TRIM(l2.MO_DOMEN) <> ''
-          AND POSITION(TRIM(l2.MO_DOMEN) IN TRIM(m.REPLYTO)) > 0
-        ORDER BY l2.MODIFYDATE DESC, l2.ID DESC
-    ) AS EGISZ_LICENSES_JID
+    m.REPLYTO AS REPLYTO
 FROM EGISZ_MESSAGES m
 WHERE m.DOCUMENTID IS NOT NULL
   AND TRIM(m.DOCUMENTID) <> ''
-  AND m.CREATEDATE >= DATEADD(-{sync_window_days} DAY TO CURRENT_TIMESTAMP)
+  AND m.CREATEDATE >= DATEADD(-{sd} DAY TO CURRENT_TIMESTAMP)
+ORDER BY m.EGMID DESC
 """.strip()
 
 
-def exchangelog_count_window_after_cursor(sync_window_days: int, *, last_log_id: int) -> str:
-    """
-    Count rows of the *default* EXCHANGELOG extract (LOGDATE window + join to EGISZ_MESSAGES) after LOGID cursor.
-    The heavy scalar subqueries in the main SELECT are not in the result rowset — this COUNT matches that rowset
-    but avoids N×(EGISZ_LICENSES lookups) work that a COUNT over the full inner SELECT would trigger.
-    """
-    sd = int(sync_window_days)
+def egisz_messages_incremental_sql(
+    *, last_egmid: int, limit: int, sync_window_days: int
+) -> str:
+    """Страница EGISZ_MESSAGES: EGMID выше курсора и CREATEDATE в окне sync_window_days (как outbound)."""
+    last = int(last_egmid)
+    lim = max(1, min(int(limit), 50_000))
+    sd = max(0, int(sync_window_days))
+    return f"""
+SELECT FIRST {lim}
+    m.EGMID AS EGMID,
+    m.MSGID AS MSGID,
+    m.REPLYTO AS REPLYTO,
+    TRIM(m.DOCUMENTID) AS DOCUMENTID,
+    m.CREATEDATE AS MSG_CREATED_AT
+FROM EGISZ_MESSAGES m
+WHERE m.EGMID > {last}
+  AND m.CREATEDATE >= DATEADD(-{sd} DAY TO CURRENT_TIMESTAMP)
+ORDER BY m.EGMID
+""".strip()
+
+
+def egisz_messages_count_sql(*, last_egmid: int, sync_window_days: int) -> str:
+    """COUNT строк EGISZ_MESSAGES под те же условия, что egisz_messages_incremental_sql (для прогресса UI)."""
+    last = int(last_egmid)
+    sd = max(0, int(sync_window_days))
+    return f"""
+SELECT COUNT(*) AS cnt
+FROM EGISZ_MESSAGES m
+WHERE m.EGMID > {last}
+  AND m.CREATEDATE >= DATEADD(-{sd} DAY TO CURRENT_TIMESTAMP)
+""".strip()
+
+
+def exchangelog_count_logid_after_cursor(*, last_log_id: int) -> str:
+    """COUNT строк EXCHANGELOG с LOGID выше курсора."""
     lid = int(last_log_id)
     return f"""
 SELECT COUNT(*) AS cnt
 FROM EXCHANGELOG e
-LEFT JOIN EGISZ_MESSAGES m
-    ON m.MSGID = e.MSGID
-WHERE e.LOGDATE >= DATEADD(-{sd} DAY TO CURRENT_TIMESTAMP)
-  AND e.LOGID > {lid}
+WHERE e.LOGID > {lid}
 """.strip()
 
 
@@ -159,7 +129,7 @@ ORDER BY e.LOGID
 
 
 def exchangelog_count_after_cursor(inner_select: str, *, last_log_id: int) -> str:
-    """Сколько строк EXCHANGELOG попадает в выборку при текущем курсоре (для прогресса ETL)."""
+    """Сколько строк EXCHANGELOG попадает в выборку при текущем курсоре (для прогресса ETL и кастомного source_query)."""
     lid = int(last_log_id)
     base = inner_select.strip().rstrip(";")
     return f"""

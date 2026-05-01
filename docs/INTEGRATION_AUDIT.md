@@ -18,7 +18,7 @@ flowchart LR
   PG[("PostgreSQL egisz_reports\nfact + stg + dim + v_*")]
   CLI["CLI egisz-monitor / egisz-corp"]
   ConfUI["Config UI Flask\nsync_routes single-flight"]
-  Air["Airflow DAG\negisz_corp_firebird_to_postgres"]
+  Air["Airflow DAG\negisz_monitor_firebird_to_postgres"]
   MB["Metabase OSS\nдашборды 01–11"]
 
   FB -->|fetch_all SELECT| ETL
@@ -34,8 +34,8 @@ flowchart LR
 | :--- | :--- | :--- |
 | `egisz-monitor sync` | [egisz_monitor_corp/cli.py](../egisz_monitor_corp/cli.py) | Каждый запуск — отдельный процесс. |
 | `POST /api/sync/start` | [egisz_monitor_corp/sync_routes.py](../egisz_monitor_corp/sync_routes.py) | **Single-flight** через `_state_lock` + `threading.Thread`; повторный запуск во время активного синка отклоняется. |
-| Kubernetes `CronJob egisz-corp-sync` | [k8s/etl-cron.yaml](../k8s/etl-cron.yaml) | `*/15 * * * *`, тот же образ что conf-ui, `concurrencyPolicy: Forbid`, `activeDeadlineSeconds: 1800`. |
-| Airflow DAG | `airflow/dags/egisz_corp_etl_dag.py` | Полагается на расписание Airflow и инкрементный курсор `etl_state.last_log_id`. |
+| Kubernetes `CronJob egisz-monitor-sync` | [k8s/etl-cron.yaml](../k8s/etl-cron.yaml) | `*/15 * * * *`, тот же образ что conf-ui, `concurrencyPolicy: Forbid`, `activeDeadlineSeconds: 1800`. |
+| Airflow DAG | `airflow/dags/egisz_monitor_etl_dag.py` | Полагается на расписание Airflow и инкрементный курсор `etl_state.last_log_id`. |
 
 **Защита от гонки CronJob ↔ UI-кнопки** реализована **session-level** advisory lock'ом в Postgres: `pg_try_advisory_lock(hash(pipeline_name))` берётся в начале `run_sync` (см. [`pg_warehouse.try_acquire_pipeline_lock`](../egisz_monitor_corp/pg_warehouse.py)). Если другой процесс уже владеет локом — `run_sync` бросает `PipelineLockBusyError`, CLI выходит с кодом 75 (`sync_skipped`), UI показывает «параллельный sync уже идёт». Lock автоматически освобождается при разрыве соединения, поэтому крэш воркера не оставляет «навечно занято» — ручной reset не нужен.
 
@@ -75,7 +75,7 @@ flowchart LR
 | :--- | :--- |
 | Тесты парсера | 12 тестов, покрытие edge-cases (gost host в MSGTEXT vs LOGTEXT vs REPLYTO, registration_date_time, missing relates, errors array). |
 | Идемпотентность | UPSERT по `relates_to_id` + дедуп в одном statement; курсор `last_log_id` коммитится постранично. |
-| Прозрачность UI | Прогресс по фазам (`counting`, `fetch_page`, `parsing`, `page_done`, `exchangelog_done`, `outbound_*`) с детализацией loaded/total. |
+| Прозрачность UI | Прогресс по фазам (`counting`, `messages_incremental`, `exchangelog_export`, `exchangelog_parse`, `parsing`, `page_done`, `exchangelog_done`, `outbound_*`) с детализацией loaded/total. |
 | Корректность кодировок | `WIN1251` по умолчанию для Firebird, `UTF8` `client_encoding` для PG, `LANG=C.UTF-8` в подах Metabase и conf-ui — устраняет «????» в кириллице. |
 | Безопасность доступа | Firebird — read-only credentials; PG — `egisz/egisz` локально, секрет в k8s; Metabase admin secret отдельный YAML; пароли при сохранении в YAML не очищаются, если поле пустое. |
 
@@ -99,11 +99,11 @@ flowchart LR
 
 ### 1.9 Интегрируемость в корпоративные системы
 
-- **Airflow**: DAG читает конфиг по переменным `egisz_corp_project_root` / `egisz_corp_config_path`; задача `test_connections` отделена от `corp_sync`. Вызывает `run_sync` напрямую без shell — устойчиво к изменениям CLI.
+- **Airflow**: DAG читает конфиг по переменным `egisz_monitor_project_root` / `egisz_monitor_config_path`; задача `test_connections` отделена от `monitor_sync`. Вызывает `run_sync` напрямую без shell — устойчиво к изменениям CLI.
 - **Kubernetes**: namespace `egisz-monitor`, отдельные Job (schema-init, airflow-metadata-init), отдельные Secret (`postgres-credentials`, `metabase-admin`, `egisz-monitor-conf-ui-config`). Init-container для Config UI копирует Secret в emptyDir, чтобы Flask мог писать YAML — хороший паттерн для read-only K8s Secret.
 - **Локальный dev**: `start.ps1` создаёт kind cluster при необходимости, грузит образы, делает `kubectl apply` и port-forward, поддерживает `restart-metabase`/`restart-conf-ui`/`restart-web` — даёт быстрый цикл итераций.
 - **CLI пакет**: `egisz-corp` и `egisz-monitor` зарегистрированы в `pyproject.toml`, оба ведут в `egisz_monitor_corp.cli`. Это позволяет включить пакет в любой корпоративный стек как `pip install -e .` и не зависеть от Docker-образа.
-- **Конфиг**: YAML с поддержкой `EGISZ_CORP_CONFIG`, `EGISZ_CORP_POSTGRES_*` ENV-overrides и Kubernetes Secret-mount (с обработкой ротируемого пути `..YYYY_MM_DD_*`).
+- **Конфиг**: YAML с поддержкой `EGISZ_MONITOR_CONFIG`, `EGISZ_MONITOR_POSTGRES_*` ENV-overrides и Kubernetes Secret-mount (с обработкой ротируемого пути `..YYYY_MM_DD_*`).
 
 ### 1.10 Рекомендации по интеграции в корпоративный стек
 

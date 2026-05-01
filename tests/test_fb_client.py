@@ -22,12 +22,9 @@ def _fb_cfg() -> FirebirdConfig:
 def test_fetch_firebird_source_peaks_ok() -> None:
     dt = datetime(2024, 6, 15, 10, 30, 0)
     with patch("egisz_monitor_corp.fb_client.fetch_all") as fa:
-        fa.side_effect = [
-            [{"max_egmid": 29261989}],
-            [{"max_licenses_modifydate": dt}],
-        ]
+        fa.return_value = [{"max_egmid": 29261989, "max_licenses_modifydate": dt}]
         out = fetch_firebird_source_peaks(_fb_cfg())
-    assert fa.call_count == 2
+    assert fa.call_count == 1
     assert out["error"] is None
     assert out["max_egmid"] == 29261989
     assert out["max_licenses_modifydate"] == "2024-06-15T10:30:00"

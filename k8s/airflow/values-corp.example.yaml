@@ -6,7 +6,7 @@
 #   2) Job airflow-metadata-db-init (создаёт БД airflow)
 #   3) Секрет airflow-metadata-connection (скопируйте из airflow-metadata-secret.example.yaml)
 #   4) Соберите и опубликуйте образ (k8s/airflow/Dockerfile), укажите repository/tag ниже
-#   5) Секрет с egisz_corp.yaml для воркеров (см. k8s/README.md), при необходимости смонтируйте через workers.celery.extraVolumes
+#   5) Секрет с egisz_monitor.yaml для воркеров (см. k8s/README.md), при необходимости смонтируйте через workers.celery.extraVolumes
 #
 # Установка (актуализируйте версию chart):
 #   helm repo add apache-airflow https://airflow.apache.org/charts

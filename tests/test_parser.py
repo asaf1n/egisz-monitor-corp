@@ -265,3 +265,30 @@ def test_as_fact_row_errors_list() -> None:
     row = rec.as_fact_row()
     assert row["errors_json"][0]["code"] == "C"
     assert "local_uid_semd" in row
+
+
+def test_parse_xml_rejects_doctype_with_internal_entity() -> None:
+    """defusedxml forbids DTD/entity expansion (Gordon-2 baseline)."""
+    p = EgiszMonitorParser()
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE registerDocumentResult [
+  <!ENTITY xxe "INJECT">
+]>
+<registerDocumentResult xmlns="http://egisz.rosminzdrav.ru/iehr/emdr/callback/">
+  <relatesToMessage>&xxe;</relatesToMessage>
+  <status>success</status>
+</registerDocumentResult>"""
+    assert p.parse_xml(xml) is None
+
+
+def test_parse_xml_rejects_external_entity_system() -> None:
+    p = EgiszMonitorParser()
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE registerDocumentResult [
+  <!ENTITY xxe SYSTEM "http://127.0.0.1:9/does-not-exist">
+]>
+<registerDocumentResult xmlns="http://egisz.rosminzdrav.ru/iehr/emdr/callback/">
+  <relatesToMessage>&xxe;</relatesToMessage>
+  <status>success</status>
+</registerDocumentResult>"""
+    assert p.parse_xml(xml) is None

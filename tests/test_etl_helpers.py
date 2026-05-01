@@ -1,7 +1,7 @@
 """Юнит-тесты для расщеплённых хелперов run_sync и advisory lock helpers.
 
 Покрытие:
-1. `_load_enrichment_cache` — кэш справочников Firebird (mock fetch_all).
+1. `_export_egisz_licenses_full` — кэш справочников Firebird (mock fetch_all; один запрос лицензий + JOIN JPERSONS).
 2. `_count_exchangelog_total` — выбор COUNT-SQL и graceful degrade при ошибке FB.
 3. `_pipeline_lock_key` — детерминированный bigint в диапазоне int64.
 4. `try_acquire_pipeline_lock` / `release_pipeline_lock` — корректная логика на FakeConn.
@@ -10,7 +10,9 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -21,9 +23,15 @@ from egisz_monitor_corp.config_loader import (
     PostgresConfig,
 )
 from egisz_monitor_corp.etl import (
+    EnrichmentCache,
     _count_exchangelog_total,
+    _egmid_sql_int,
+    _export_egisz_licenses_full,
+    _export_egisz_messages_by_egmid,
     _is_test_clinic,
-    _load_enrichment_cache,
+    _license_modifydate_in_window,
+    _process_exchangelog_pages,
+    _to_int,
 )
 from egisz_monitor_corp.pg_warehouse import (
     _pipeline_lock_key,
@@ -51,31 +59,35 @@ def _cfg(sync_window_days: int = 30, source_query: str | None = None) -> CorpApp
     )
 
 
-def test_load_enrichment_cache_builds_mo_uid_and_jname_maps() -> None:
+def test_export_egisz_licenses_full_builds_mo_uid_and_jname_maps() -> None:
     licenses = [
-        {"jid": 12, "mo_uid": "1.2.3", "jname": "Клиника A", "egisz_licenses_kind": "12"},
-        {"jid": 7, "mo_uid": "4.5.6", "jname": None, "egisz_licenses_kind": "31"},
-        {"jid": None, "mo_uid": "x", "jname": "skip"},
-    ]
-    jpersons = [
-        {"jid": 12, "jname": "Клиника A полное", "jinn": "1234567890", "fir_oid": "1.2.3.4"},
-        {"jid": 99, "jname": "Никогда не встречается"},
+        {
+            "jid": 12,
+            "mo_uid": "1.2.3",
+            "jname": "Клиника A полное",
+            "jinn": "1234567890",
+            "fir_oid": "1.2.3.4",
+            "egisz_licenses_kind": "12",
+            "id": 1,
+            "mo_domen": "clinic.example",
+        },
+        {"jid": 7, "mo_uid": "4.5.6", "jname": None, "jinn": None, "fir_oid": None, "egisz_licenses_kind": "31", "id": 2, "mo_domen": "b.example"},
+        {"jid": None, "mo_uid": "x", "jname": "skip", "id": 3, "mo_domen": None},
     ]
 
     def fake_fetch(_cfg: Any, sql: str) -> list[dict[str, Any]]:
         if "EGISZ_LICENSES" in sql.upper() and "JOIN JPERSONS" in sql.upper():
             return licenses
-        if "JPERSONS" in sql.upper():
-            return jpersons
         return []
 
     with patch("egisz_monitor_corp.etl.fetch_all", side_effect=fake_fetch):
-        cache = _load_enrichment_cache(_cfg(), log=lambda _m: None)
+        cache = _export_egisz_licenses_full(_cfg(), log=lambda _m: None)
 
     assert cache.mo_uid_to_jid_from_egisz_licenses == {"1.2.3": 12, "4.5.6": 7}
     assert cache.jname_by_jid[12] == "Клиника A полное"
-    assert cache.jname_by_jid[99] == "Никогда не встречается"
     assert cache.jpersons_by_jid[12] == ("Клиника A полное", "1234567890", "1.2.3.4")
+    assert cache.clinic_dim_by_jid[12] == ("Клиника A полное", "1234567890", "1.2.3.4")
+    assert cache.clinic_dim_by_jid[7] == (None, None, None)
     assert any(c[0] == 12 for c in cache.clinics)
     assert any(c[0] == 7 for c in cache.clinics)
 
@@ -183,3 +195,78 @@ def test_release_pipeline_lock_calls_unlock_and_commits() -> None:
     release_pipeline_lock(con, "firebird_exchangelog")
     assert any("pg_advisory_unlock" in q[0] for q in con.queries)
     assert con.commits == 1
+
+
+def test_to_int_rejects_zero_but_egmid_sql_int_keeps_zero_for_cursor() -> None:
+    assert _to_int(0) is None
+    assert _egmid_sql_int(0) == 0
+
+
+def test_license_modifydate_in_window() -> None:
+    assert _license_modifydate_in_window(None, 30) is True
+    assert _license_modifydate_in_window(None, 0) is True
+    assert _license_modifydate_in_window(datetime.now(timezone.utc) - timedelta(days=2), 10) is True
+    assert _license_modifydate_in_window(datetime.now(timezone.utc) - timedelta(days=20), 10) is False
+
+
+def test_process_exchangelog_pages_msgtext_too_large_staging_only() -> None:
+    """Строка с MSGTEXT больше max_msgtext_bytes не вызывает parse_xml; staging MSGTEXT_TOO_LARGE."""
+    huge = "ы" * 500  # UTF-8: 1000 байт
+    rows = [
+        {
+            "logid": 1,
+            "logtext": "",
+            "msgtext": huge,
+            "msgid": None,
+            "log_created_at": None,
+        }
+    ]
+
+    def fake_export(*_a: Any, **_k: Any) -> list[dict[str, Any]]:
+        return rows
+
+    flushed: list[list[tuple[Any, ...]]] = []
+    pg = MagicMock()
+
+    def capture_insert(_con: Any, buf: list[tuple[Any, ...]]) -> None:
+        flushed.append(list(buf))
+
+    cfg = _cfg()
+    cfg.etl.max_msgtext_bytes = 100
+
+    with (
+        patch("egisz_monitor_corp.etl._export_exchangelog_page", side_effect=fake_export),
+        patch("egisz_monitor_corp.etl.insert_staging_errors", side_effect=capture_insert),
+    ):
+        stats = _process_exchangelog_pages(
+            cfg,
+            pg,
+            base_sql="SELECT 1",
+            enrichment=EnrichmentCache(),
+            msg_by_msgid={},
+            last_id=0,
+            total_exchangelog=1,
+            progress_detail_cb=None,
+            log=lambda _m: None,
+            detail=lambda _p: None,
+        )
+
+    assert stats.facts == 0
+    assert any(any(t[1] == "MSGTEXT_TOO_LARGE" for t in batch) for batch in flushed)
+    """Полная страница без сдвига EGMID → выходим из цикла (иначе бесконечный опрос FB)."""
+    calls = {"n": 0}
+
+    def fake_fetch(_cfg: Any, sql: str) -> list[dict[str, Any]]:
+        calls["n"] += 1
+        if "COUNT(*)" in sql.upper():
+            return [{"cnt": 999}]
+        if calls["n"] > 3:
+            raise AssertionError("fetch_all called too many times (infinite loop)")
+        return [{"msgid": f"k{i}", "egmid": None, "replyto": None, "documentid": None, "msg_created_at": None} for i in range(500)]
+
+    with patch("egisz_monitor_corp.etl.fetch_all", side_effect=fake_fetch):
+        msg, cur = _export_egisz_messages_by_egmid(_cfg(), 0, log=lambda _m: None, detail=None)
+
+    assert calls["n"] == 2
+    assert cur == 0
+    assert len(msg) == 500

@@ -85,8 +85,8 @@ def connect_pg(cfg: PostgresConfig):  # type: ignore[no-untyped-def]
 
 
 def sql_dir() -> Path:
-    """Репозиторий: <root>/sql. Wheel в контейнере: задайте EGISZ_CORP_SQL_DIR (см. docker/web/Dockerfile)."""
-    override = (os.environ.get("EGISZ_CORP_SQL_DIR") or "").strip()
+    """Репозиторий: <root>/sql. Wheel в контейнере: задайте EGISZ_MONITOR_SQL_DIR (см. docker/web/Dockerfile)."""
+    override = (os.environ.get("EGISZ_MONITOR_SQL_DIR") or "").strip()
     if override:
         return Path(override)
     return Path(__file__).resolve().parent.parent / "sql"
@@ -126,6 +126,75 @@ def set_last_log_id(con, pipeline: str, last_log_id: int) -> None:  # type: igno
             """,
             (pipeline, last_log_id),
         )
+
+
+def get_last_egmid(con, pipeline: str) -> int:  # type: ignore[no-untyped-def]
+    with con.cursor() as cur:
+        cur.execute(
+            "SELECT COALESCE(last_egmid, 0) FROM etl_state WHERE pipeline = %s",
+            (pipeline,),
+        )
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
+
+
+def set_last_egmid(con, pipeline: str, last_egmid: int) -> None:  # type: ignore[no-untyped-def]
+    with con.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO etl_state (pipeline, last_log_id, last_egmid, updated_at)
+            VALUES (%s, 0, %s, NOW())
+            ON CONFLICT (pipeline) DO UPDATE
+            SET last_egmid = EXCLUDED.last_egmid, updated_at = NOW();
+            """,
+            (pipeline, last_egmid),
+        )
+
+
+def fetch_etl_source_peaks_from_pg(con, pipeline: str) -> dict[str, Any]:  # type: ignore[no-untyped-def]
+    """Последние source_max_* из etl_state (после успешного ETL), без опроса Firebird."""
+    with con.cursor() as cur:
+        cur.execute(
+            """
+            SELECT source_max_egmid, source_max_licenses_modifydate
+            FROM etl_state WHERE pipeline = %s
+            """,
+            (pipeline,),
+        )
+        row = cur.fetchone()
+    if not row:
+        return {"source_max_egmid": None, "source_max_licenses_modifydate": None}
+    eg_raw, lic_raw = row
+    eg = int(eg_raw) if eg_raw is not None else None
+    lic_out: Any = None
+    if lic_raw is not None:
+        iso = getattr(lic_raw, "isoformat", None)
+        lic_out = iso() if callable(iso) else lic_raw
+    return {"source_max_egmid": eg, "source_max_licenses_modifydate": lic_out}
+
+
+def set_etl_source_peaks(
+    con,
+    pipeline: str,
+    max_egmid: Any,
+    max_licenses_modifydate: Any,
+) -> None:  # type: ignore[no-untyped-def]
+    """Записать в etl_state «пики» источника (MAX EGMID / MAX MODIFYDATE лицензий), см. ETL sync."""
+    sets: list[str] = []
+    params: list[Any] = []
+    if max_egmid is not None:
+        sets.append("source_max_egmid = %s")
+        params.append(int(max_egmid))
+    if max_licenses_modifydate is not None:
+        sets.append("source_max_licenses_modifydate = %s")
+        params.append(max_licenses_modifydate)
+    if not sets:
+        return
+    sets.append("source_peaks_updated_at = NOW()")
+    params.append(pipeline)
+    sql = f"UPDATE etl_state SET {', '.join(sets)} WHERE pipeline = %s"
+    with con.cursor() as cur:
+        cur.execute(sql, tuple(params))
 
 
 def upsert_dim_semd(con, kind_code: str, kind_name: str) -> None:  # type: ignore[no-untyped-def]
@@ -168,7 +237,7 @@ def upsert_dim_clinic(
 
 
 def refresh_outbound_documents_staging(con, rows: list[dict[str, Any]]) -> None:  # type: ignore[no-untyped-def]
-    """Полная перезапись stg_egisz_outbound_documents снимком за окно (см. outbound_documents_staging_select)."""
+    """Полная перезапись stg_egisz_outbound_documents снимком (порядок строк как во входном iterable — типично EGMID DESC)."""
     with con.cursor() as cur:
         cur.execute("DELETE FROM stg_egisz_outbound_documents")
     if not rows:
@@ -364,7 +433,7 @@ def fetch_healthcheck_snapshot(con, *, top_clinics: int = 5) -> dict[str, Any]: 
 
 
 def fetch_pg_sync_snapshot(con, pipeline: str) -> dict[str, Any]:  # type: ignore[no-untyped-def]
-    """Последняя активность витрины, курсор LOGID и MAX(egmid) в stg_egisz_outbound_documents (окно ETL)."""
+    """Снимок для UI: last_log_id, last_egmid (последняя выгрузка EGISZ_MESSAGES), витрина, MAX(egmid) в staging, пики FB в etl_state."""
     with con.cursor() as cur:
         cur.execute(
             """
@@ -375,18 +444,52 @@ def fetch_pg_sync_snapshot(con, pipeline: str) -> dict[str, Any]:  # type: ignor
                     SELECT MAX(synced_at) AS ts FROM stg_egisz_outbound_documents
                     UNION ALL
                     SELECT MAX(updated_at) AS ts FROM etl_state WHERE pipeline = %s
+                    UNION ALL
+                    SELECT source_peaks_updated_at AS ts FROM etl_state WHERE pipeline = %s AND source_peaks_updated_at IS NOT NULL
                 ) s) AS last_record_at,
                 (SELECT last_log_id FROM etl_state WHERE pipeline = %s) AS last_log_id,
-                (SELECT MAX(egmid) FROM stg_egisz_outbound_documents) AS max_egmid
+                (SELECT COALESCE(last_egmid, 0) FROM etl_state WHERE pipeline = %s) AS last_egmid,
+                (SELECT MAX(egmid) FROM stg_egisz_outbound_documents) AS max_egmid_staging,
+                (SELECT source_max_egmid FROM etl_state WHERE pipeline = %s) AS source_max_egmid,
+                (SELECT source_max_licenses_modifydate FROM etl_state WHERE pipeline = %s) AS source_max_licenses_modifydate,
+                (SELECT source_peaks_updated_at FROM etl_state WHERE pipeline = %s) AS source_peaks_updated_at
             """,
-            (pipeline, pipeline),
+            (pipeline, pipeline, pipeline, pipeline, pipeline, pipeline, pipeline),
         )
         row = cur.fetchone()
-    last_at, lid_raw, eg_raw = row if row else (None, None, None)
+    (
+        last_at,
+        lid_raw,
+        last_egmid_raw,
+        eg_staging_raw,
+        src_eg_raw,
+        src_lic_raw,
+        src_peaks_at,
+    ) = row if row else (None, None, None, None, None, None, None)
+
+    eg_staging = int(eg_staging_raw) if eg_staging_raw is not None else None
+    src_eg = int(src_eg_raw) if src_eg_raw is not None else None
+    last_eg = int(last_egmid_raw) if last_egmid_raw is not None else None
+    lic_iso = src_lic_raw.isoformat() if src_lic_raw is not None else None
+
+    # UI «EGMID»: max(last_egmid, source_max_egmid) — полный прогон поднимает оба; при сбое после выгрузки
+    # сообщений source_max_egmid уже отражает последнюю выгрузку из FB, last_egmid — закоммиченный ватермарк.
+    eg_candidates: list[int] = []
+    if last_eg is not None:
+        eg_candidates.append(last_eg)
+    if src_eg is not None:
+        eg_candidates.append(src_eg)
+    eg_display = max(eg_candidates) if eg_candidates else eg_staging
+
     out: dict[str, Any] = {
         "sync_at": last_at.isoformat() if last_at else None,
         "log_id": int(lid_raw) if lid_raw is not None else None,
-        "egmid": int(eg_raw) if eg_raw is not None else None,
+        "last_egmid": last_eg,
+        "egmid": eg_display,
+        "egmid_staging_max": eg_staging,
+        "source_max_egmid": src_eg,
+        "licenses_modifydate": lic_iso,
+        "source_peaks_updated_at": src_peaks_at.isoformat() if src_peaks_at else None,
     }
     return out
 

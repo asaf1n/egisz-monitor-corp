@@ -6,7 +6,7 @@
 
 | Параметр | Где смотреть | Назначение |
 |----------|--------------|------------|
-| `etl.sync_window_days` | [`config/egisz_corp.yaml`](../config/egisz_corp.yaml), k8s ConfigMap, Config UI; приоритет: **`EGISZ_CORP_CONFIG`** | Окно по **`EXCHANGELOG.LOGDATE`** и по **`EGISZ_MESSAGES.CREATEDATE`** для staging исходящих. |
+| `etl.sync_window_days` | [`config/egisz_monitor.yaml`](../config/egisz_monitor.yaml), k8s ConfigMap, Config UI; приоритет: **`EGISZ_MONITOR_CONFIG`** | Окно по **`EXCHANGELOG.LOGDATE`** и по **`EGISZ_MESSAGES.CREATEDATE`** для staging исходящих. |
 | `etl.full_scan` | то же | **`true`**: курсор **`last_log_id`** в начале прогона сбрасывается в 0; перечитывается журнал **в рамках окна** по `LOGDATE`. |
 | `etl.batch_size` | то же | Размер страницы **по `LOGID`**; **не** меняет календарное окно. |
 | `etl.pipeline_name` | то же (по умолчанию `firebird_exchangelog`) | Ключ строки в **`etl_state`**. |
@@ -32,7 +32,7 @@ WHERE pipeline = 'firebird_exchangelog';
 ### Журнал `EXCHANGELOG`
 
 - В Firebird: запросы из [`sql/003_diagnostic_counts_firebird.sql`](../sql/003_diagnostic_counts_firebird.sql) — общее число строк в окне по `LOGDATE` и число строк **после курсора** (`LOGID > last_log_id` из шага 2).
-- В логах последнего **`egisz-corp sync`** или UI: **`fetched`**, **`facts_upserted`** (не равны числу строк журнала: часть строк не даёт факт, тестовые клиники отфильтрованы, ошибки в **`stg_parse_errors`**).
+- В логах последнего **`egisz-monitor sync`** или UI: **`fetched`**, **`facts_upserted`** (не равны числу строк журнала: часть строк не даёт факт, тестовые клиники отфильтрованы, ошибки в **`stg_parse_errors`**).
 
 **Интерпретация:** если COUNT в Firebird (с окном и курсором) существенно больше, чем ожидаемые обработанные строки, смотрите **`stg_parse_errors`**, фильтр тестовых МО и полноту парсинга.
 

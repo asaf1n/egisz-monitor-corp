@@ -13,4 +13,4 @@ RUN pip install --no-cache-dir -e /opt/egisz-monitor-corp
 #     && rm -rf /var/lib/apt/lists/*
 USER airflow
 COPY airflow/dags/*.py /opt/airflow/dags/
-ENV EGISZ_CORP_PROJECT_ROOT=/opt/egisz-monitor-corp
+ENV EGISZ_MONITOR_PROJECT_ROOT=/opt/egisz-monitor-corp

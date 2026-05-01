@@ -2,15 +2,25 @@
 
 Namespace по умолчанию: **`egisz-monitor`**. Контекст: **Docker Desktop Kubernetes** или **kind** (скрипт создаёт кластер `egisz-local`, если нет доступного API).
 
+## Важно: `reset-deploy` vs «чистый образ» conf-ui
+
+- **`apply-rebuild`** (или `apply` с `-DockerNoCache`): пересобирается образ **conf-ui** без кэша Docker, манифесты применяются, поды перезапускаются. **Namespace и PVC Postgres не удаляются** — данные витрины (`egisz_reports` и т.д.) **сохраняются**.
+- **`reset-deploy`**: сначала удаляется namespace **`egisz-monitor`** (вместе с StatefulSet Postgres и его **PVC**), затем выполняется полная цепочка как при первом `deploy`. Это **полный greenfield**: все данные в кластерном Postgres для этого namespace **теряются**, если заранее не сделан дамп.
+
+Перед **`reset-deploy`**, если витрина нужна: [scripts/backup-postgres.ps1](../scripts/backup-postgres.ps1), дамп из UI конфигурации (PostgreSQL: бэкап), или вручную `pg_dump` / `kubectl exec` (см. [DOCKER_GORDON_PROMPT.md](DOCKER_GORDON_PROMPT.md)).
+
+Комментарий в `start.ps1` про «витрина не трогается» относится только к тому, что при обычном **`deploy`** / **`reset-deploy`** не выполняется DROP витрины через скрипт — но при **`reset-deploy`** данные витрины **исчезают вместе с удалением namespace**, это не то же самое.
+
 ## Быстрая шпаргалка
 
 | Задача | Команда из корня репозитория |
 |--------|------------------------------|
 | Полный первый подъём стека + сброс БД приложения Metabase | `.\start.ps1 -Action deploy` |
-| Чистый namespace + образы без кэша | `.\start.ps1 -Action reset-deploy` |
+| Чистый namespace + образы без кэша (**PVC Postgres и витрина удаляются**) | `.\start.ps1 -Action reset-deploy` |
 | Только пересобрать образы | `.\start.ps1 -Action build` |
 | Правки **Config UI (Flask)** → образ + apply манифестов + **перезапуск обоих** web-служб | `.\start.ps1 -Action apply` |
 | То же, но **без** перезапуска Metabase (быстрее) | `.\start.ps1 -Action apply -SkipMetabaseRolloutRestart` |
+| Config UI: **полная** пересборка образа (`--no-cache`) + apply (**данные Postgres сохраняются**) | `.\start.ps1 -Action apply-rebuild` или `.\scripts\apply-local-rebuild.ps1` |
 | Перезапуск **только Metabase** (образ уже в Docker / в кластере) | `.\start.ps1 -Action restart-metabase` |
 | Перезапуск **только conf-ui** | `.\start.ps1 -Action restart-conf-ui` |
 | Перезапуск **Metabase + conf-ui** без `docker build` и без `kubectl apply` | `.\start.ps1 -Action restart-web` |
@@ -41,6 +51,18 @@ Namespace по умолчанию: **`egisz-monitor`**. Контекст: **Dock
 2. `kubectl apply` полного стека (как в deploy, **без** DROP/CREATE `metabase`).  
 3. По умолчанию **`rollout restart`** и Metabase, и conf-ui → холодный JVM Metabase; для правок только Flask используйте **`-SkipMetabaseRolloutRestart`** — тогда ожидание rollout только у conf-ui.  
 4. Smoke, verify, port-forward (опционально).
+
+### `apply-rebuild`
+
+Как **`apply`**, но образ **conf-ui** всегда собирается с **`--no-cache`** (эквивалент `.\start.ps1 -Action apply -DockerNoCache`). Из подкаталога: `.\scripts\apply-local-rebuild.ps1`.
+
+### `reset-deploy`
+
+1. Удаление namespace **`egisz-monitor`** (ожидание, пока ресурсы исчезнут).  
+2. **`build`** с **`--no-cache`** для **обоих** образов (conf-ui и Metabase).  
+3. Далее как **`deploy`**: загрузка в kind при необходимости, `kubectl apply`, DROP/CREATE БД **`metabase`**, rollout, smoke, **verify**, port-forward.
+
+Итог: **новый PVC Postgres** — витрина пустая до следующего ETL / restore из дампа.
 
 ### `restart-metabase` / `restart-conf-ui` / `restart-web`
 
@@ -108,6 +130,11 @@ kubectl -n egisz-monitor exec -it deploy/conf-ui -- egisz-monitor sync
 | `-SkipMetabaseRolloutRestart` | Только **`apply`**: не перезапускать Metabase, только conf-ui. |
 | `-SkipPostgresPortForward` | `web` / `forward`: не пробрасывать 5432 на хост. |
 | `-BackgroundPortForward:$false` | Отдельные окна PowerShell с `kubectl port-forward` вместо фоновых процессов. |
+
+## Проверка после `deploy`, `reset-deploy`, `apply` или `apply-rebuild`
+
+1. **`.\start.ps1 -Action verify`** — проверка витрины и дашбордов Metabase из пода (встроенная логика скрипта уже вызывает её в конце успешного deploy/reset/apply).  
+2. При необходимости вручную: **`.\scripts\smoke-post-gordon.ps1`** — краткий снимок `kubectl get` / `top`, запрос **`/healthz`** у conf-ui (нужен доступ к API кластера и при необходимости port-forward на 8080).
 
 ## Связанные документы
 

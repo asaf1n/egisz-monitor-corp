@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, Response, jsonify, render_template_string, request
 
 from egisz_monitor_corp.config_loader import (
     default_config_path,
@@ -17,8 +18,10 @@ from egisz_monitor_corp.config_loader import (
 )
 from egisz_monitor_corp.fb_client import fetch_all
 from egisz_monitor_corp.fb_client import fetch_firebird_source_peaks
+from egisz_monitor_corp.pg_cli_backup import pg_dump_custom_bytes, restore_upload_to_temp_and_run
 from egisz_monitor_corp.pg_warehouse import (
     connect_pg,
+    fetch_etl_source_peaks_from_pg,
     fetch_healthcheck_snapshot,
     fetch_pg_sync_snapshot,
     test_pg_connection,
@@ -29,17 +32,31 @@ PAGE = """
 <html lang="ru">
 <head>
   <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <meta name="color-scheme" content="dark"/>
   <title>FB2PG Sync Configuration</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     /* ~50px tall inputs; shell uses most of viewport width with a capped max for ultra-wide */
+    html { -webkit-text-size-adjust: 100%; }
     body { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
     .cfg-in {
+      box-sizing: border-box;
+      min-width: 0;
+      max-width: 100%;
       min-height: 3.125rem;
       padding-top: 0.625rem;
       padding-bottom: 0.625rem;
       padding-left: 0.8125rem;
       padding-right: 0.8125rem;
+      font-size: 1rem;
+      line-height: 1.4;
+    }
+    @media (min-width: 1024px) {
+      .cfg-in { font-size: 0.875rem; }
+    }
+    @media (max-width: 1023px) {
+      .cfg-in { min-height: 3.25rem; padding-top: 0.6875rem; padding-bottom: 0.6875rem; }
     }
     .fixed-scroll::-webkit-scrollbar, pre::-webkit-scrollbar { width: 8px; height: 8px; }
     .fixed-scroll::-webkit-scrollbar-track, pre::-webkit-scrollbar-track { background: #0F1522; }
@@ -77,17 +94,6 @@ PAGE = """
       from { opacity: 0.45; transform: translateX(-15%); }
       to { opacity: 1; transform: translateX(225%); }
     }
-    .snap-tab-btn {
-      border-color: #1B2940;
-      background: #0F1522;
-      color: #6B7280;
-    }
-    .snap-tab-btn.is-active {
-      border-color: #509EE3;
-      background: #1B2940;
-      color: #E5F6FF;
-    }
-    .snap-tab-panel.is-hidden { display: none; }
     .hc-row-red { color: #FECDD3; }
     .hc-row-yellow { color: #FDE68A; }
     .hc-row-green { color: #A7F3D0; }
@@ -104,100 +110,101 @@ PAGE = """
     .hc-bullet-green { background: rgba(16, 185, 129, 0.85); box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.3); }
   </style>
 </head>
-<body class="min-h-screen lg:h-screen bg-[#121826] text-white lg:overflow-hidden">
-  <div class="w-full max-w-[min(88rem,calc(100vw-2rem))] mx-auto px-[clamp(1rem,4vw,2.5rem)] py-3 sm:py-5 lg:h-screen lg:flex lg:flex-col lg:py-3">
-    <nav class="flex shrink-0 items-center justify-center gap-3 text-xs mb-3">
+<body class="min-h-[100dvh] min-h-screen bg-[#121826] text-white lg:h-screen lg:overflow-hidden pb-[env(safe-area-inset-bottom,0px)]">
+  <div class="mx-auto flex w-full min-h-[100dvh] min-w-0 max-w-[min(96rem,calc(100vw-1.5rem))] flex-col px-3 py-3 sm:px-[clamp(1rem,4vw,2.5rem)] sm:py-5 lg:min-h-0 lg:h-screen lg:flex-row lg:items-stretch lg:gap-4 lg:py-3">
+    <div class="flex min-h-0 min-w-0 flex-1 flex-col lg:min-h-0 lg:overflow-hidden">
+    <nav class="mb-3 flex min-h-[2.75rem] shrink-0 items-center justify-center gap-3 text-sm text-[#D1D5DB] lg:text-xs">
       <span class="text-[#509EE3]">FB2PG Sync</span>
       <span class="text-[#4B5563]">|</span>
       <a href="/" class="text-[#4B5563] transition hover:text-[#509EE3]">Обновить страницу</a>
     </nav>
 
-    <section class="rounded-xl bg-[#0F1522] px-4 py-4 sm:px-6 lg:px-8 sm:py-5 lg:py-4 shadow-lg border border-[#1B2940] lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
-      <div class="mb-4 lg:mb-3 border-b border-[#1B2940] pb-3 lg:pb-2 shrink-0">
-        <h1 class="text-base sm:text-lg font-semibold text-white">FB2PG Sync Configuration</h1>
-        <p class="mt-0.5 text-xs sm:text-sm text-[#9CA3AF]">
+    <section class="flex min-h-0 flex-1 flex-col rounded-xl border border-[#1B2940] bg-[#0F1522] px-4 py-4 shadow-lg sm:px-6 sm:py-5 lg:min-h-0 lg:flex-1 lg:px-8 lg:py-4 lg:flex lg:flex-col">
+      <div class="mb-4 shrink-0 border-b border-[#1B2940] pb-3 lg:mb-3 lg:pb-2">
+        <h1 class="text-lg font-semibold text-white sm:text-xl lg:text-lg">FB2PG Sync Configuration</h1>
+        <p class="mt-1 text-sm leading-relaxed text-[#9CA3AF] sm:text-sm lg:text-xs lg:leading-normal">
           Файл: <code class="text-[#509EE3]">{{ path }}</code><br/>
-          Переопределение: переменная окружения <code class="text-[#509EE3]">EGISZ_CORP_CONFIG</code> или <code class="text-[#509EE3]">CONFIG_WRITE_PATH</code>.
+          Переопределение: переменная окружения <code class="text-[#509EE3]">EGISZ_MONITOR_CONFIG</code> или <code class="text-[#509EE3]">CONFIG_WRITE_PATH</code>.
         </p>
       </div>
 
-      <form id="configForm" class="space-y-4 lg:space-y-0 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:gap-3" action="#" onsubmit="return false;">
+      <form id="configForm" class="flex min-h-0 flex-1 flex-col space-y-4 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:gap-3 lg:space-y-0" action="#" onsubmit="return false;">
 
         <div class="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-x-8 lg:gap-y-0 lg:items-start xl:gap-x-10 lg:shrink-0">
         <!-- Firebird Section -->
         <div class="min-w-0 lg:pr-6 lg:border-r lg:border-[#1B2940]">
           <div class="mb-2">
-            <h2 class="text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">Firebird Configuration</h2>
-            <p class="mt-0.5 text-[11px] sm:text-xs text-[#9CA3AF] leading-snug">TCP к серверу Firebird (как в DBeaver). Если в Docker — используйте <code class="text-white">host.docker.internal</code></p>
+            <h2 class="text-sm font-medium uppercase tracking-[0.12em] text-[#9CA3AF] lg:text-[11px] lg:font-normal lg:tracking-[0.16em] lg:text-[#4B5563]">Firebird Configuration</h2>
+            <p class="mt-1 text-xs leading-relaxed text-[#9CA3AF] sm:text-sm lg:mt-0.5 lg:text-xs lg:leading-snug">TCP к серверу Firebird (как в DBeaver). Если в Docker — используйте <code class="text-white">host.docker.internal</code></p>
           </div>
 
-          <div class="grid gap-2.5 grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(5.5rem,6rem)] md:items-end">
+          <div class="grid grid-cols-1 gap-2.5 md:grid-cols-[minmax(0,1fr)_minmax(5.5rem,6rem)] md:items-end lg:grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(5.5rem,6rem)]">
             <label class="block min-w-0">
-              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">host</span>
-              <input name="fb_host" value="{{ fb.host }}" required class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px] lg:tracking-[0.16em] lg:text-[#4B5563]">host</span>
+              <input name="fb_host" value="{{ fb.host }}" required class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
             <label class="block w-full md:w-full md:max-w-none md:justify-self-stretch">
-              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">port</span>
-              <input name="fb_port" type="number" value="{{ fb.port }}" required class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px] lg:tracking-[0.16em] lg:text-[#4B5563]">port</span>
+              <input name="fb_port" type="number" value="{{ fb.port }}" required class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
           </div>
-          <div class="mt-2.5 grid gap-2.5 grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,10rem)] md:items-end">
+          <div class="mt-2.5 grid grid-cols-1 gap-2.5 md:grid-cols-[minmax(0,1fr)_minmax(0,10rem)] md:items-end lg:grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(0,10rem)]">
             <label class="block min-w-0">
-              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">database</span>
-              <input name="fb_database" value="{{ fb.database }}" required class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px] lg:tracking-[0.16em] lg:text-[#4B5563]">database</span>
+              <input name="fb_database" value="{{ fb.database }}" required class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
             <label class="block w-full md:max-w-none md:justify-self-stretch">
-              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">charset</span>
-              <input name="fb_charset" value="{{ fb.charset }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px] lg:tracking-[0.16em] lg:text-[#4B5563]">charset</span>
+              <input name="fb_charset" value="{{ fb.charset }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
           </div>
-          <div class="mt-2.5 flex flex-col sm:flex-row flex-wrap justify-center items-stretch sm:items-end gap-3 sm:gap-4 w-full max-w-xl mx-auto">
-            <label class="block w-full sm:w-36 sm:flex-none shrink-0">
-              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">user</span>
-              <input name="fb_user" value="{{ fb.user }}" required class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+          <div class="mx-auto mt-2.5 flex w-full max-w-xl flex-col flex-wrap items-stretch justify-center gap-3 sm:flex-row sm:items-end sm:gap-4">
+            <label class="block w-full shrink-0 sm:w-36 sm:flex-none">
+              <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px] lg:tracking-[0.16em] lg:text-[#4B5563]">user</span>
+              <input name="fb_user" value="{{ fb.user }}" required class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
-            <label class="block w-full sm:flex-1 sm:min-w-[12rem] sm:max-w-md">
-              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">password</span>
-              <input name="fb_password" type="password" value="{{ fb.password }}" autocomplete="current-password" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+            <label class="block w-full sm:min-w-[12rem] sm:max-w-md sm:flex-1">
+              <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px] lg:tracking-[0.16em] lg:text-[#4B5563]">password</span>
+              <input name="fb_password" type="password" value="{{ fb.password }}" autocomplete="current-password" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
           </div>
         </div>
 
         <!-- PostgreSQL Section -->
-        <div class="min-w-0 pt-4 border-t border-[#1B2940] lg:pt-0 lg:pl-6 lg:border-0">
+        <div class="min-w-0 border-t border-[#1B2940] pt-4 lg:border-0 lg:pl-6 lg:pt-0">
           <div class="mb-2">
-            <h2 class="text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">PostgreSQL Configuration</h2>
-            <p class="mt-0.5 text-[11px] sm:text-xs text-[#9CA3AF] leading-snug">Из пода витрины обычно <code class="text-white">postgres.egisz-monitor.svc.cluster.local:5432</code></p>
+            <h2 class="text-sm font-medium uppercase tracking-[0.12em] text-[#9CA3AF] lg:text-[11px] lg:font-normal lg:tracking-[0.16em] lg:text-[#4B5563]">PostgreSQL Configuration</h2>
+            <p class="mt-1 text-xs leading-relaxed text-[#9CA3AF] sm:text-sm lg:mt-0.5 lg:text-xs lg:leading-snug">Из пода витрины обычно <code class="text-white">postgres.egisz-monitor.svc.cluster.local:5432</code></p>
           </div>
 
-          <div class="grid gap-2.5 grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(5.5rem,6rem)] md:items-end">
+          <div class="grid grid-cols-1 gap-2.5 md:grid-cols-[minmax(0,1fr)_minmax(5.5rem,6rem)] md:items-end lg:grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(5.5rem,6rem)]">
             <label class="block min-w-0">
-              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">host</span>
-              <input name="pg_host" value="{{ pg.host }}" required class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px] lg:tracking-[0.16em] lg:text-[#4B5563]">host</span>
+              <input name="pg_host" value="{{ pg.host }}" required class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
             <label class="block w-full md:max-w-none md:justify-self-stretch">
-              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">port</span>
-              <input name="pg_port" type="number" value="{{ pg.port }}" required class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px] lg:tracking-[0.16em] lg:text-[#4B5563]">port</span>
+              <input name="pg_port" type="number" value="{{ pg.port }}" required class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
           </div>
-          <div class="mt-2.5 grid gap-2.5 grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,10rem)] md:items-end">
+          <div class="mt-2.5 grid grid-cols-1 gap-2.5 md:grid-cols-[minmax(0,1fr)_minmax(0,10rem)] md:items-end lg:grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(0,10rem)]">
             <label class="block min-w-0">
-              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">database</span>
-              <input name="pg_database" value="{{ pg.database }}" required class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px] lg:tracking-[0.16em] lg:text-[#4B5563]">database</span>
+              <input name="pg_database" value="{{ pg.database }}" required class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
             <label class="block w-full md:max-w-none md:justify-self-stretch">
-              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">schema</span>
-              <input name="pg_schema" value="{{ pg.schema }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px] lg:tracking-[0.16em] lg:text-[#4B5563]">schema</span>
+              <input name="pg_schema" value="{{ pg.schema }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
           </div>
-          <div class="mt-2.5 grid gap-2.5 grid-cols-1 md:grid-cols-[minmax(0,11rem)_minmax(0,1fr)] md:items-end">
+          <div class="mt-2.5 grid grid-cols-1 gap-2.5 md:grid-cols-[minmax(0,11rem)_minmax(0,1fr)] md:items-end lg:grid-cols-1 xl:grid-cols-[minmax(0,11rem)_minmax(0,1fr)]">
             <label class="block w-full md:max-w-none md:justify-self-stretch">
-              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">user</span>
-              <input name="pg_user" value="{{ pg.user }}" required class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px] lg:tracking-[0.16em] lg:text-[#4B5563]">user</span>
+              <input name="pg_user" value="{{ pg.user }}" required class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
             <label class="block min-w-0">
-              <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">password</span>
-              <input name="pg_password" type="password" value="{{ pg.password }}" autocomplete="current-password" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px] lg:tracking-[0.16em] lg:text-[#4B5563]">password</span>
+              <input name="pg_password" type="password" value="{{ pg.password }}" autocomplete="current-password" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
             </label>
           </div>
         </div>
@@ -211,142 +218,202 @@ PAGE = """
           </div>
         </div>
 
-        <div class="pt-3 lg:pt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 border-t border-[#1B2940] lg:shrink-0">
-          <button type="button" id="btnSaveYaml" class="inline-flex min-h-[2.875rem] min-w-0 w-full sm:min-w-[140px] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3.5 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white">
+        <div class="pt-3 grid grid-cols-1 gap-3 border-t border-[#1B2940] sm:grid-cols-3 sm:gap-3 lg:shrink-0 lg:pt-2">
+          <button type="button" id="btnSaveYaml" class="inline-flex min-h-12 min-w-0 w-full items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3.5 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white sm:min-w-[140px] lg:min-h-[2.875rem]">
             Сохранить в YAML
           </button>
-          <button type="button" id="btnTestFb" class="inline-flex min-h-[2.875rem] min-w-0 w-full sm:min-w-[140px] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3.5 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white">
+          <button type="button" id="btnTestFb" class="inline-flex min-h-12 min-w-0 w-full items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3.5 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white sm:min-w-[140px] lg:min-h-[2.875rem]">
             Проверить Firebird
           </button>
-          <button type="button" id="btnTestPg" class="inline-flex min-h-[2.875rem] min-w-0 w-full sm:min-w-[140px] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3.5 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white">
+          <button type="button" id="btnTestPg" class="inline-flex min-h-12 min-w-0 w-full items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3.5 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#3E5A85] hover:bg-[#223555] hover:text-white sm:min-w-[140px] lg:min-h-[2.875rem]">
             Проверить PostgreSQL
           </button>
         </div>
 
-        <div class="pt-4 lg:pt-3 border-t border-[#1B2940] flex flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(18rem,22rem)_minmax(18rem,1fr)] lg:gap-4 lg:flex-1 lg:min-h-0">
+        <div class="mt-3 space-y-3 rounded-lg border border-[#2D3F5E] bg-[#121826] px-3 py-3 sm:px-4">
+          <h2 class="text-xs font-medium uppercase tracking-[0.12em] text-[#9CA3AF] lg:text-[10px]">PostgreSQL: бэкап и восстановление</h2>
+          <p class="text-xs leading-snug text-[#6B7280]">Клиент в образе: стандартный <code class="text-[#509EE3]">pg_dump</code> / <code class="text-[#509EE3]">pg_restore</code> (пакет <code class="text-[#509EE3]">postgresql-client</code>). Путь на диске задаётся только в диалоге сохранения браузера; на Windows удобно: <code class="text-[#509EE3]">I:\\DB\\egisz-monitor-backups\\</code></p>
+          <div class="flex flex-wrap gap-2">
+            <button type="button" id="btnPgBackup" class="inline-flex min-h-12 items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3.5 py-2.5 font-mono text-xs text-[#D1D5DB] transition hover:border-[#509EE3] hover:bg-[#223555] hover:text-white">
+              Скачать бэкап (-Fc)
+            </button>
+          </div>
+          <p class="text-xs leading-snug text-[#6B7280]">Восстановление: выберите файл <code class="text-[#509EE3]">.dump</code>. Режим фиксированный: <code class="text-[#509EE3]">pg_restore --data-only --no-owner --no-acl</code> (схема в БД уже должна совпадать, например после Job 001+002+005).</p>
+          <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
+            <label class="block min-w-0 text-xs text-[#9CA3AF]">Файл дампа
+              <input type="file" id="pgRestoreFile" accept=".dump,.backup,application/octet-stream" class="mt-1 block w-full max-w-md text-xs text-[#D1D5DB] file:mr-2 file:rounded file:border-0 file:bg-[#1B2940] file:px-2 file:py-1 file:text-[#509EE3]"/>
+            </label>
+            <button type="button" id="btnPgRestore" class="inline-flex min-h-12 shrink-0 items-center justify-center rounded-md border border-rose-700/70 bg-rose-950/40 px-3.5 py-2.5 font-mono text-xs text-rose-100 transition hover:bg-rose-900/50">
+              Восстановить из дампа
+            </button>
+          </div>
+        </div>
+
+        <div class="flex min-h-0 flex-1 flex-col gap-4 border-t border-[#1B2940] pt-4 lg:grid lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,22rem)_minmax(18rem,1fr)] lg:gap-4 lg:pt-3">
           <div class="flex min-w-0 flex-col gap-3 lg:min-h-0">
-            <button type="button" id="btnSync" class="inline-flex w-full min-h-[2.875rem] items-center justify-center rounded-md border border-[#F59F36] bg-[#F59F36] px-3.5 py-2.5 font-mono text-sm text-[#121826] transition hover:bg-[#FFB95D]">
+            <button type="button" id="btnSync" class="inline-flex w-full min-h-12 items-center justify-center rounded-md border border-[#F59F36] bg-[#F59F36] px-3.5 py-2.5 font-mono text-sm text-[#121826] transition hover:bg-[#FFB95D] lg:min-h-[2.875rem]">
               Запустить синхронизацию
             </button>
             <div class="min-w-0">
               <div class="mb-2">
-                <h2 class="text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">ETL Configuration</h2>
+                <h2 class="text-sm font-medium uppercase tracking-[0.12em] text-[#9CA3AF] lg:text-[11px] lg:font-normal lg:tracking-[0.16em] lg:text-[#4B5563]">ETL Configuration</h2>
               </div>
-              <p class="text-[11px] text-[#9CA3AF] leading-snug mb-3 max-w-2xl">Полный цикл Firebird → PostgreSQL в фоне. Не закрывайте вкладку до завершения.</p>
-              <div class="grid gap-3 grid-cols-1 sm:grid-cols-2 sm:items-end max-w-lg">
-                <label class="block w-full max-w-[8rem] sm:max-w-none">
-                  <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">batch_size</span>
-                  <input name="etl_batch" type="number" value="{{ etl.batch_size }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+              <p class="mb-3 max-w-2xl text-sm leading-relaxed text-[#9CA3AF] lg:text-[11px] lg:leading-snug">Полный цикл Firebird → PostgreSQL в фоне. Не закрывайте вкладку до завершения.</p>
+              <div class="grid max-w-lg grid-cols-1 gap-3 sm:grid-cols-2 sm:items-end">
+                <label class="block w-full max-w-none sm:max-w-[8rem]">
+                  <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px] lg:tracking-[0.16em] lg:text-[#4B5563]">batch_size</span>
+                  <input name="etl_batch" type="number" value="{{ etl.batch_size }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
                 </label>
-                <label class="block w-full max-w-[10rem] sm:max-w-none">
-                  <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-[#4B5563]">sync_window_days</span>
-                  <input name="etl_sync_days" type="number" value="{{ etl.sync_window_days }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+                <label class="block w-full max-w-none sm:max-w-[10rem]">
+                  <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px] lg:tracking-[0.16em] lg:text-[#4B5563]">sync_window_days</span>
+                  <input name="etl_sync_days" type="number" value="{{ etl.sync_window_days }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
                 </label>
               </div>
-              <div class="mt-3 flex items-center gap-2.5 w-full min-h-[2.75rem]">
-                <input type="checkbox" name="etl_full_scan" value="1" {{ 'checked' if etl.full_scan else '' }} class="h-4 w-4 shrink-0 rounded border-[#1B2940] bg-[#121826] text-[#509EE3] focus:ring-[#509EE3] focus:ring-offset-[#0F1522]"/>
-                <span class="text-xs text-[#9CA3AF]">Полный скан</span>
+              <div class="mt-3 flex min-h-[2.75rem] w-full items-center gap-3">
+                <input type="checkbox" name="etl_full_scan" value="1" {{ 'checked' if etl.full_scan else '' }} class="h-5 w-5 shrink-0 rounded border-[#1B2940] bg-[#121826] text-[#509EE3] focus:ring-[#509EE3] focus:ring-offset-[#0F1522]"/>
+                <span class="text-sm text-[#9CA3AF] lg:text-xs">Полный скан</span>
               </div>
             </div>
           </div>
 
-          <div class="w-full rounded-lg border border-[#2D3F5E] bg-[#121826] px-3 py-3 lg:py-2 flex shrink-0 flex-col gap-2 lg:gap-1.5 lg:h-full lg:max-h-none lg:min-h-0 lg:overflow-y-auto fixed-scroll">
-            <div class="flex items-center gap-1.5 shrink-0">
-              <button type="button" id="tabBtnSnapshot" class="snap-tab-btn flex-1 rounded-md border px-2 py-1 text-[10px] uppercase tracking-[0.14em] font-semibold transition" data-tab="snapshot">Snapshot</button>
-              <button type="button" id="tabBtnHealth" class="snap-tab-btn flex-1 rounded-md border px-2 py-1 text-[10px] uppercase tracking-[0.14em] font-semibold transition" data-tab="health">Healthcheck</button>
+          <div class="flex min-h-0 w-full shrink-0 flex-col gap-2 rounded-lg border border-[#2D3F5E] bg-[#121826] px-3 py-3 lg:h-full lg:max-h-none lg:min-h-0 lg:gap-1.5 lg:overflow-y-auto lg:py-2 fixed-scroll">
+            <div class="mb-1 shrink-0">
+              <h2 class="text-sm font-semibold tracking-tight text-[#D1D5DB] lg:text-sm">Последние значения синхронизации</h2>
             </div>
 
-            <section id="tabSnapshot" class="snap-tab-panel flex flex-col gap-2 lg:gap-1.5">
-              <p id="pgSnapshotHint" class="text-[11px] text-[#6B7280] leading-snug">Витрина и курсор в PostgreSQL; EGMID и MODIFYDATE лицензий — MAX() в Firebird по YAML (при сбое — см. текст).</p>
-              <div class="space-y-2 text-sm leading-relaxed">
-                <div class="flex items-baseline gap-2 min-w-0 py-0.5">
-                  <span class="text-[#9CA3AF] shrink-0 font-medium text-[11px]">Дата:</span>
-                  <code id="pgSnapSyncAt" class="min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-xs" data-raw="" title="">—</code>
-                  <button type="button" class="pg-snap-copy shrink-0 inline-flex items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-1 text-[#509EE3] hover:bg-[#1B2940]" data-copy="pgSnapSyncAt" title="Копировать" aria-label="Копировать">
+            <section id="tabSnapshot" class="flex flex-col gap-2.5">
+              <div class="space-y-2.5 text-sm leading-relaxed lg:text-sm">
+                <div class="flex min-w-0 items-baseline gap-2 py-0.5">
+                  <span class="shrink-0 text-xs font-medium text-[#9CA3AF] sm:text-sm lg:text-xs">Дата:</span>
+                  <code id="pgSnapSyncAt" class="snap-val min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-sm sm:text-[15px]" data-raw="" title="">—</code>
+                  <button type="button" class="pg-snap-copy inline-flex min-h-[2.5rem] min-w-[2.5rem] shrink-0 items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-2 text-[#509EE3] hover:bg-[#1B2940] sm:min-h-0 sm:min-w-0 sm:p-1" data-copy="pgSnapSyncAt" title="Копировать" aria-label="Копировать">
                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
                   </button>
                 </div>
-                <div class="flex items-baseline gap-2 min-w-0 py-0.5">
-                  <span class="text-[#9CA3AF] shrink-0 font-medium text-[11px]">LOGID:</span>
-                  <code id="pgSnapLogId" class="min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-xs" data-raw="" title="">—</code>
-                  <button type="button" class="pg-snap-copy shrink-0 inline-flex items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-1 text-[#509EE3] hover:bg-[#1B2940]" data-copy="pgSnapLogId" title="Копировать" aria-label="Копировать">
+                <div class="flex min-w-0 items-baseline gap-2 py-0.5">
+                  <span class="shrink-0 text-xs font-medium text-[#9CA3AF] sm:text-sm lg:text-xs">LOGID:</span>
+                  <code id="pgSnapLogId" class="snap-val min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-sm sm:text-[15px]" data-raw="" title="">—</code>
+                  <button type="button" class="pg-snap-copy inline-flex min-h-[2.5rem] min-w-[2.5rem] shrink-0 items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-2 text-[#509EE3] hover:bg-[#1B2940] sm:min-h-0 sm:min-w-0 sm:p-1" data-copy="pgSnapLogId" title="Копировать" aria-label="Копировать">
                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
                   </button>
                 </div>
-                <div class="flex items-baseline gap-2 min-w-0 py-0.5">
-                  <span class="text-[#9CA3AF] shrink-0 font-medium text-[11px]">EGMID:</span>
-                  <code id="pgSnapEgmid" class="min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-xs" data-raw="" title="">—</code>
-                  <button type="button" class="pg-snap-copy shrink-0 inline-flex items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-1 text-[#509EE3] hover:bg-[#1B2940]" data-copy="pgSnapEgmid" title="Копировать" aria-label="Копировать">
+                <div class="flex min-w-0 items-baseline gap-2 py-0.5">
+                  <span class="shrink-0 text-xs font-medium text-[#9CA3AF] sm:text-sm lg:text-xs">EGMID:</span>
+                  <code id="pgSnapEgmid" class="snap-val min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-sm sm:text-[15px]" data-raw="" title="">—</code>
+                  <button type="button" class="pg-snap-copy inline-flex min-h-[2.5rem] min-w-[2.5rem] shrink-0 items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-2 text-[#509EE3] hover:bg-[#1B2940] sm:min-h-0 sm:min-w-0 sm:p-1" data-copy="pgSnapEgmid" title="Копировать" aria-label="Копировать">
                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
                   </button>
                 </div>
-                <div class="flex items-baseline gap-2 min-w-0 py-0.5">
-                  <span class="text-[#9CA3AF] shrink-0 font-medium text-[11px]">LICENSES.MODIFYDATE:</span>
-                  <code id="pgSnapLicMd" class="min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-xs" data-raw="" title="">—</code>
-                  <button type="button" class="pg-snap-copy shrink-0 inline-flex items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-1 text-[#509EE3] hover:bg-[#1B2940]" data-copy="pgSnapLicMd" title="Копировать" aria-label="Копировать">
+                <div class="flex min-w-0 items-baseline gap-2 py-0.5">
+                  <span class="shrink-0 text-xs font-medium text-[#9CA3AF] sm:text-sm lg:text-xs">LICENSES.MODIFYDATE:</span>
+                  <code id="pgSnapLicMd" class="snap-val min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-sm sm:text-[15px]" data-raw="" title="">—</code>
+                  <button type="button" class="pg-snap-copy inline-flex min-h-[2.5rem] min-w-[2.5rem] shrink-0 items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-2 text-[#509EE3] hover:bg-[#1B2940] sm:min-h-0 sm:min-w-0 sm:p-1" data-copy="pgSnapLicMd" title="Копировать" aria-label="Копировать">
                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
                   </button>
                 </div>
               </div>
             </section>
+          </div>
 
-            <section id="tabHealth" class="snap-tab-panel hidden flex-col gap-2.5 lg:gap-2">
-              <p id="hcHint" class="text-[11px] text-[#6B7280] leading-snug">Сигналы по витрине + топ-3 проблемные клиники + сводка прокси-БД (см. <code class="text-[#509EE3]">v_health_signals</code>, <code class="text-[#509EE3]">v_health_by_clinic</code>).</p>
-              <div id="hcLevelSummary" class="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.14em]">
+          <div class="flex min-h-0 min-w-0 flex-1 flex-col rounded-md border border-[#1B2940] bg-[#0B1120] px-3 py-2 text-sm text-[#93A1B6] lg:flex lg:flex-1 lg:flex-col">
+            <div class="mb-1 flex min-w-0 items-center justify-between gap-2">
+              <div class="text-xs font-medium uppercase tracking-[0.12em] text-[#509EE3] lg:text-[10px] lg:font-normal lg:tracking-[0.16em]">system log</div>
+              <button type="button" class="pg-snap-copy inline-flex min-h-[2.5rem] min-w-[2.5rem] shrink-0 items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-2 text-[#509EE3] hover:bg-[#1B2940] sm:min-h-0 sm:min-w-0 sm:p-1" data-copy="syncStatus" title="Копировать лог" aria-label="Копировать лог">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
+              </button>
+            </div>
+            <pre id="syncStatus" class="max-h-48 min-h-[2.25rem] flex-1 overflow-y-auto whitespace-pre-wrap font-mono text-xs leading-relaxed text-[#D1D5DB] sm:max-h-56 lg:max-h-none lg:text-[11px]"></pre>
+          </div>
+        </div>
+      </form>
+    </section>
+    </div>
+
+    <aside class="mt-5 flex w-full min-h-0 flex-1 flex-col gap-3 border-t border-[#1B2940] pt-5 lg:mt-0 lg:h-full lg:max-w-[min(22rem,30vw)] lg:w-[22rem] lg:flex-none lg:shrink-0 lg:self-stretch lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
+      {% if metabase_site_url %}
+      <a href="{{ metabase_site_url }}" target="_blank" rel="noopener noreferrer" class="inline-flex min-h-12 w-full shrink-0 items-center justify-center rounded-md border border-[#509EE3]/90 bg-[#1B2940] px-3 py-3 text-center text-sm font-semibold uppercase tracking-[0.12em] text-[#E5F6FF] transition hover:border-[#60B5FF] hover:bg-[#223555] lg:min-h-0 lg:py-2.5 lg:text-[11px] lg:tracking-[0.14em]">
+        Metabase →
+      </a>
+      {% endif %}
+      <div class="flex min-h-[14rem] flex-1 flex-col overflow-hidden rounded-lg border border-[#2D3F5E] bg-[#121826] px-3 py-3 lg:min-h-0">
+        <h2 class="mb-2 shrink-0 text-sm font-medium uppercase tracking-[0.12em] text-[#9CA3AF] lg:text-[11px] lg:font-normal lg:tracking-[0.16em] lg:text-[#4B5563]">Healthcheck</h2>
+        <div class="fixed-scroll flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-0.5 lg:gap-2">
+              <p id="hcHint" class="text-xs leading-snug text-[#6B7280] lg:text-[11px]">Сигналы по витрине + топ-3 проблемные клиники + сводка прокси-БД (см. <code class="text-[#509EE3]">v_health_signals</code>, <code class="text-[#509EE3]">v_health_by_clinic</code>).</p>
+              <div id="hcLevelSummary" class="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.12em] lg:gap-1.5 lg:text-[10px] lg:tracking-[0.14em]">
                 <span class="rounded-full px-2 py-0.5 border border-rose-700/60 bg-rose-900/20 text-rose-200" data-level="red">red <span data-count="red">0</span></span>
                 <span class="rounded-full px-2 py-0.5 border border-amber-600/60 bg-amber-900/20 text-amber-200" data-level="yellow">yellow <span data-count="yellow">0</span></span>
                 <span class="rounded-full px-2 py-0.5 border border-emerald-700/60 bg-emerald-900/20 text-emerald-300" data-level="green">green <span data-count="green">0</span></span>
               </div>
               <div>
-                <h3 class="text-[10px] uppercase tracking-[0.14em] text-[#509EE3] mb-1">Сигналы</h3>
-                <ul id="hcSignals" class="space-y-1.5 text-[11px] leading-snug"></ul>
+                <h3 class="mb-1 text-xs font-medium uppercase tracking-[0.12em] text-[#509EE3] lg:text-[10px] lg:font-normal lg:tracking-[0.14em]">Сигналы</h3>
+                <ul id="hcSignals" class="space-y-2 text-sm leading-snug lg:space-y-1.5 lg:text-[11px]"></ul>
               </div>
               <div>
-                <h3 class="text-[10px] uppercase tracking-[0.14em] text-[#509EE3] mb-1">Топ клиник по проблемам</h3>
-                <ul id="hcClinics" class="space-y-1.5 text-[11px] leading-snug"></ul>
+                <h3 class="mb-1 text-xs font-medium uppercase tracking-[0.12em] text-[#509EE3] lg:text-[10px] lg:font-normal lg:tracking-[0.14em]">Топ клиник по проблемам</h3>
+                <ul id="hcClinics" class="space-y-2 text-sm leading-snug lg:space-y-1.5 lg:text-[11px]"></ul>
               </div>
               <div>
-                <h3 class="text-[10px] uppercase tracking-[0.14em] text-[#509EE3] mb-1">Прокси-БД и курсор</h3>
-                <ul id="hcProxyDb" class="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] leading-snug"></ul>
+                <h3 class="mb-1 text-xs font-medium uppercase tracking-[0.12em] text-[#509EE3] lg:text-[10px] lg:font-normal lg:tracking-[0.14em]">Прокси-БД и курсор</h3>
+                <ul id="hcProxyDb" class="grid grid-cols-1 gap-x-3 gap-y-2 text-sm leading-snug sm:grid-cols-2 lg:gap-y-1 lg:text-[11px]"></ul>
               </div>
-            </section>
-          </div>
-
-          <div class="rounded-md bg-[#0B1120] px-3 py-2 text-sm text-[#93A1B6] border border-[#1B2940] min-h-0 min-w-0 lg:flex lg:flex-1 lg:flex-col">
-            <div class="mb-1 flex items-center justify-between gap-2 min-w-0">
-              <div class="text-[10px] uppercase tracking-[0.16em] text-[#509EE3]">system log</div>
-              <button type="button" class="pg-snap-copy shrink-0 inline-flex items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-1 text-[#509EE3] hover:bg-[#1B2940]" data-copy="syncStatus" title="Копировать лог" aria-label="Копировать лог">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
-              </button>
-            </div>
-            <pre id="syncStatus" class="whitespace-pre-wrap font-mono text-[11px] text-[#D1D5DB] min-h-[2.25rem] max-h-28 lg:max-h-none lg:flex-1 overflow-y-auto leading-relaxed"></pre>
-          </div>
         </div>
-      </form>
-    </section>
+      </div>
+    </aside>
   </div>
 
   <script>
   let lastSyncJson = { running: false, error: null, message: '', last_stats: null };
+  let lastLiveEgmidFromProgress = null;
+  /** Не даём полоске синхронизации откатываться назад при смене фазы (напр. после EGISZ_MESSAGES → EXCHANGELOG). */
+  let syncProgressCarry = 0;
   let lastUiMessage = { ok: true, text: '' };
   const STRIP_BASE =
     'relative rounded-md border min-h-[2.75rem] lg:h-[2.75rem] overflow-hidden text-xs sm:text-sm font-mono transition-[background-color,border-color,color] duration-150';
-  function syncProgressPercent(p) {
+  function rawEtlProgressPercent(p) {
     if (!p || typeof p !== 'object') return null;
-    const phase = p.phase || '';
+    const phase = String(p.phase || '');
     if (phase === 'outbound_fetch' || phase === 'outbound_parse' || phase === 'outbound_postgres' || phase === 'outbound_done') {
       const total = Number(p.outbound_total) || 0;
       const loaded = Number(p.outbound_loaded) || 0;
       if (phase === 'outbound_done' || (phase === 'outbound_postgres' && total === 0)) return 100;
-      if (total > 0) return Math.min(100, Math.round((loaded / total) * 100));
-      return 0;
+      if (total > 0) return 88 + Math.min(12, Math.round((loaded / total) * 12));
+      return 88;
     }
-    if (phase === 'counting') return 14;
+    if (phase === 'enrichment_firebird') return 5;
+    if (phase === 'counting' || phase === 'messages_counting') return 12;
+    if (phase === 'messages_incremental') {
+      const lo = Number(p.loaded_rows) || 0;
+      const tot = Number(p.total_rows) || 0;
+      if (tot > 0) return Math.min(34, Math.round(12 + (lo / tot) * 22));
+      const pg = Number(p.page) || 0;
+      if (pg <= 0 && lo <= 0) return 12;
+      const loPart = Math.min(12, Math.log10(1 + lo / 80.0) * 4.2);
+      const pgPart = Math.min(6, Math.sqrt(pg) * 1.35);
+      return Math.min(34, Math.floor(12 + loPart + pgPart));
+    }
+    if (phase === 'exchangelog_ready') {
+      const tr = Number(p.total_rows);
+      if (Number.isFinite(tr) && tr === 0) return 88;
+      return 36;
+    }
+    if (phase === 'exchangelog_done') return 100;
     const totalRows = Number(p.total_rows);
     const loadedRows = Number(p.loaded_rows) || 0;
-    if (Number.isFinite(totalRows) && totalRows > 0) return Math.min(100, Math.round((loadedRows / totalRows) * 100));
-    if (Number.isFinite(totalRows) && totalRows === 0) return phase === 'exchangelog_done' ? 100 : 0;
-    return null;
+    if (Number.isFinite(totalRows) && totalRows > 0) {
+      return Math.min(87, Math.round(36 + (loadedRows / totalRows) * 51));
+    }
+    if (Number.isFinite(totalRows) && totalRows === 0) {
+      return 87;
+    }
+    return 36;
+  }
+  function syncProgressPercent(p) {
+    const raw = rawEtlProgressPercent(p);
+    if (raw == null || !Number.isFinite(raw)) {
+      return syncProgressCarry > 0 ? syncProgressCarry : null;
+    }
+    syncProgressCarry = Math.max(syncProgressCarry, raw);
+    return syncProgressCarry;
   }
   function refreshConnStatusStrip() {
     const wrap = document.getElementById('connStatusStrip');
@@ -366,7 +433,7 @@ PAGE = """
       const pct = syncProgressPercent(p);
       wrap.classList.add('border-[#509EE3]/85', 'bg-[#0C4A6E]/60', 'text-[#E5F6FF]');
       fill.style.width = pct == null ? '32%' : pct + '%';
-      textEl.textContent = 'Синхронизация' + (phase ? ': ' + (PHASE_RU[phase] || phase) : ': подготовка');
+      textEl.textContent = 'Синхронизация';
       pctEl.className = 'shrink-0 font-mono tabular-nums text-inherit min-w-[3rem] text-right';
       pctEl.textContent = pct == null ? '…' : pct + '%';
       return;
@@ -396,9 +463,13 @@ PAGE = """
     textEl.textContent = 'Готов к работе';
   }
   const PHASE_RU = {
+    enrichment_firebird: 'Справочники: EGISZ_LICENSES (JOIN JPERSONS) из Firebird…',
+    messages_incremental: 'Выгрузка EGISZ_MESSAGES из Firebird по курсору EGMID…',
+    messages_counting: 'Подсчёт строк EGISZ_MESSAGES в Firebird (для прогресса)…',
     counting: 'Подсчёт строк журнала EXCHANGELOG в Firebird (для прогресса)…',
     exchangelog_ready: 'К журналу EXCHANGELOG: подготовка пагинации',
-    fetch_page: 'Загрузка страницы EXCHANGELOG из Firebird…',
+    exchangelog_export: 'Выгрузка страницы EXCHANGELOG из Firebird (LOGID)…',
+    exchangelog_parse: 'Парсинг SOAP/MSGTEXT и сопоставление с EGISZ_MESSAGES по MSGID…',
     parsing: 'Парсинг SOAP/MSGTEXT и обогащение журнала…',
     page_done: 'UPSERT фактов и измерений в PostgreSQL — страница сохранена',
     exchangelog_done: 'Журнал обработан, курсор LOGID обновлён',
@@ -408,6 +479,40 @@ PAGE = """
     outbound_postgres: 'Исходящие: запись stg_egisz_outbound_documents в PostgreSQL…',
     outbound_done: 'Исходящие: snapshot staging обновлён',
   };
+  function buildRunningStatusDetail(j) {
+    if (!j.running || !j.progress || typeof j.progress !== 'object') return '';
+    const p = j.progress;
+    const ph = String(p.phase || '');
+    const ru = PHASE_RU[ph] || ph || 'работа';
+    if (ph === 'messages_incremental') {
+      const bits = [ru];
+      bits.push('загружено ' + (Number(p.loaded_rows) || 0) + ' строк');
+      const tmsg = Number(p.total_rows);
+      if (Number.isFinite(tmsg) && tmsg > 0) bits.push('из ' + tmsg);
+      if (Number(p.page) > 0) bits.push('пакет ' + p.page);
+      if (p.messages_cursor_egmid !== undefined && p.messages_cursor_egmid !== null)
+        bits.push('курсор EGMID ' + p.messages_cursor_egmid);
+      return bits.join(' · ');
+    }
+    if (ph === 'counting' || ph === 'messages_counting') return ru + ' (ожидание ответа Firebird)';
+    if (ph === 'enrichment_firebird') return ru;
+    if (ph === 'exchangelog_ready' || ph === 'exchangelog_export' || ph === 'exchangelog_parse' || ph === 'parsing' || ph === 'page_done' || ph === 'exchangelog_done') {
+      const tr = Number(p.total_rows);
+      const lo = Number(p.loaded_rows) || 0;
+      const bits = [ru];
+      if (Number.isFinite(tr) && tr > 0) bits.push('журнал ' + lo + ' / ' + tr);
+      else if (Number.isFinite(tr) && tr === 0) bits.push('журнал: новых строк нет');
+      return bits.join(' · ');
+    }
+    if (ph === 'outbound_firebird' || ph === 'outbound_fetch' || ph === 'outbound_parse' || ph === 'outbound_postgres' || ph === 'outbound_done') {
+      const bits = [ru];
+      const otot = Number(p.outbound_total);
+      const olo = Number(p.outbound_loaded) || 0;
+      if (Number.isFinite(otot) && otot > 0) bits.push('исходящие ' + olo + ' / ' + otot);
+      return bits.join(' · ');
+    }
+    return ru;
+  }
   const SYNC_BANNER_BASE = 'relative mt-2 lg:mt-0 overflow-hidden rounded-lg border transition-[border-color,background-color] duration-200 lg:shrink-0 ';
   const SYNC_FILL_CURRENT = 'absolute inset-y-0 left-0 top-0 rounded-l-lg transition-[width] duration-300 ease-out';
   const SYNC_TITLE_BLUE = 'text-[11px] uppercase tracking-[0.16em] font-semibold text-[#509EE3]';
@@ -498,6 +603,7 @@ PAGE = """
 
     const phase = p.phase || '';
     const phaseTitle = (PHASE_RU[phase] || phase || 'прогресс').toUpperCase();
+    const barPct = syncProgressPercent(p);
 
     function totalRowsState(pp) {
       if (!Object.prototype.hasOwnProperty.call(pp, 'total_rows') || pp.total_rows === null || pp.total_rows === undefined) {
@@ -513,6 +619,59 @@ PAGE = """
       const jf = Number(pp.journal_facts);
       if (Number.isFinite(jf) && jf >= 0) return jf;
       return Number(pp.parsed_facts) || 0;
+    }
+
+    if (phase === 'enrichment_firebird') {
+      setProgressTheme(banner, 'blue');
+      titleEl.className = SYNC_TITLE_BLUE;
+      setBarIndeterminate(fill, false);
+      const ep = barPct != null ? barPct : 8;
+      fill.style.width = ep + '%';
+      pctEl.textContent = ep + '%';
+      meta.className = SYNC_META_BASE + 'text-[#9CA3AF]';
+      meta.textContent =
+        phaseTitle +
+        String.fromCharCode(10) +
+        'Загрузка EGISZ_LICENSES с полями JPERSONS (один запрос к Firebird)…';
+      return;
+    }
+
+    if (phase === 'messages_incremental') {
+      setProgressTheme(banner, 'blue');
+      titleEl.className = SYNC_TITLE_BLUE;
+      setBarIndeterminate(fill, false);
+      const lo = Number(p.loaded_rows) || 0;
+      const tot = Number(p.total_rows) || 0;
+      const pg = Number(p.page) || 0;
+      let mpct = 12;
+      if (tot > 0) {
+        mpct = Math.min(34, Math.round(12 + (lo / tot) * 22));
+      } else if (pg <= 0 && lo <= 0) {
+        mpct = 12;
+      } else {
+        const loPart = Math.min(12, Math.log10(1 + lo / 80.0) * 4.2);
+        const pgPart = Math.min(6, Math.sqrt(pg) * 1.35);
+        mpct = Math.min(34, Math.floor(12 + loPart + pgPart));
+      }
+      const disp = barPct != null ? barPct : mpct;
+      fill.style.width = disp + '%';
+      pctEl.textContent = disp + '%';
+      meta.className = SYNC_META_BASE + 'text-[#9CA3AF]';
+      const egm =
+        p.messages_cursor_egmid !== undefined && p.messages_cursor_egmid !== null
+          ? String(p.messages_cursor_egmid)
+          : '—';
+      meta.textContent =
+        phaseTitle +
+        String.fromCharCode(10) +
+        'Строк загружено: ' +
+        lo +
+        (tot > 0 ? ' / ' + tot : '') +
+        (pg > 0 ? ' · пакет ' + pg : '') +
+        String.fromCharCode(10) +
+        'Курсор EGMID: ' +
+        egm;
+      return;
     }
 
     if (phase === 'outbound_firebird') {
@@ -577,20 +736,24 @@ PAGE = """
       if (phase === 'counting') {
         lineA =
           'Выполняется подсчёт строк EXCHANGELOG в Firebird (на большой базе это может занять время)…';
-        pct = 14;
+        pct = 12;
+      } else if (phase === 'messages_counting') {
+        lineA =
+          'Выполняется подсчёт строк EGISZ_MESSAGES в окне sync_window_days (на большой базе это может занять время)…';
+        pct = 12;
       } else if (tr.kind === 'positive') {
-        pct = Math.min(100, Math.round((lo / tr.n) * 100));
+        pct = Math.min(87, Math.round(36 + (lo / tr.n) * 51));
         lineA = 'Загружено из журнала: ' + lo + ' / ' + tr.n + ' строк';
       } else if (tr.kind === 'zero') {
-        pct = phase === 'exchangelog_done' ? 100 : Math.min(100, lo > 0 ? 50 : 100);
-        if (phase === 'exchangelog_ready' || phase === 'fetch_page' || phase === 'parsing') {
-          lineA = 'Новых строк журнала нет (0 к обработке по курсору и окну sync_window_days).';
+        pct = phase === 'exchangelog_done' ? 100 : 87;
+        if (phase === 'exchangelog_ready' || phase === 'exchangelog_export' || phase === 'exchangelog_parse' || phase === 'parsing') {
+          lineA = 'Новых строк журнала нет (0 к обработке по курсору LOGID).';
         } else {
           lineA = 'Строк журнала к загрузке: 0.';
         }
       } else {
         lineA = 'Объём журнала пока не передан сервером (редкий переход между фазами).';
-        pct = 12;
+        pct = 36;
       }
 
       lineB =
@@ -601,8 +764,9 @@ PAGE = """
       if (p.page) lineB += ' · страница ' + p.page;
     }
 
-    fill.style.width = pct + '%';
-    pctEl.textContent = pct + '%';
+    const fillPct = barPct != null ? barPct : pct;
+    fill.style.width = fillPct + '%';
+    pctEl.textContent = fillPct + '%';
     meta.textContent = phaseTitle + String.fromCharCode(10) + lineA + String.fromCharCode(10) + lineB;
   }
   const PG_SNAP_MONTHS_RU = [
@@ -619,13 +783,32 @@ PAGE = """
     const mm = String(d.getUTCMinutes()).padStart(2, '0');
     return day + ' ' + mon + ' ' + hh + ':' + mm;
   }
+  function applySnapshotLiveEgmidOverlay() {
+    const egEl = document.getElementById('pgSnapEgmid');
+    if (!egEl) return;
+    const sj = lastSyncJson;
+    if (!sj || !sj.running) {
+      lastLiveEgmidFromProgress = null;
+      return;
+    }
+    const p = sj.progress;
+    if (p && typeof p === 'object' && p.messages_cursor_egmid != null && p.messages_cursor_egmid !== '') {
+      lastLiveEgmidFromProgress = p.messages_cursor_egmid;
+    }
+    if (lastLiveEgmidFromProgress == null) return;
+    const raw = String(lastLiveEgmidFromProgress);
+    const n = Number(raw);
+    const disp = Number.isFinite(n) ? n.toLocaleString('ru-RU') : raw;
+    egEl.textContent = disp;
+    egEl.setAttribute('data-raw', raw);
+    egEl.title = raw;
+  }
   async function pollPgSnapshot() {
-    const hint = document.getElementById('pgSnapshotHint');
     const syncEl = document.getElementById('pgSnapSyncAt');
     const logEl = document.getElementById('pgSnapLogId');
     const egEl = document.getElementById('pgSnapEgmid');
     const licEl = document.getElementById('pgSnapLicMd');
-    if (!hint || !syncEl || !logEl || !egEl || !licEl) return;
+    if (!syncEl || !logEl || !egEl || !licEl) return;
     function clearSnap() {
       syncEl.textContent = '—';
       syncEl.setAttribute('data-raw', '');
@@ -646,17 +829,10 @@ PAGE = """
       const j = await r.json();
       POLL_FAIL.snap = 0;
       if (!j.ok) {
-        hint.textContent = j.error || 'Не удалось прочитать PostgreSQL';
-        hint.classList.add('text-orange-300');
         clearSnap();
+        applySnapshotLiveEgmidOverlay();
         return;
       }
-      let hintBase = 'Витрина и курсор в PostgreSQL; EGMID и MODIFYDATE лицензий — MAX() в Firebird по YAML.';
-      if (j.firebird_peaks_error) {
-        hintBase += ' Firebird: ' + j.firebird_peaks_error + ' (EGMID при необходимости из staging: ' + (j.egmid_staging_max != null ? String(j.egmid_staging_max) : '—') + ').';
-      }
-      hint.textContent = hintBase;
-      hint.classList.remove('text-orange-300');
       const ds = j.sync_at != null && String(j.sync_at).trim() !== '' ? String(j.sync_at) : null;
       if (ds) {
         syncEl.textContent = formatPgSyncAtRu(ds);
@@ -671,7 +847,8 @@ PAGE = """
       logEl.textContent = logStr || '—';
       logEl.setAttribute('data-raw', logStr || '');
       logEl.title = logStr || '';
-      const egStr = j.egmid != null ? String(j.egmid) : null;
+      const egPrimary = (j.egmid != null) ? j.egmid : j.egmid_staging_max;
+      const egStr = egPrimary != null ? String(egPrimary) : null;
       egEl.textContent = egStr || '—';
       egEl.setAttribute('data-raw', egStr || '');
       egEl.title = egStr || '';
@@ -687,39 +864,14 @@ PAGE = """
         licEl.setAttribute('data-raw', '');
         licEl.title = '';
       }
+      applySnapshotLiveEgmidOverlay();
     } catch (e) {
       POLL_FAIL.snap += 1;
       if (POLL_FAIL.snap <= 2) return;
-      const transport = isFetchTransportError(e);
-      hint.textContent = transport
-        ? 'Снимок недоступен: conf-ui не отвечает. Повтор автоматический.'
-        : String(e && e.message ? e.message : e);
-      hint.classList.add('text-orange-300');
       clearSnap();
+      applySnapshotLiveEgmidOverlay();
     }
   }
-  let activeSnapTab = 'snapshot';
-  function setSnapTab(tab) {
-    activeSnapTab = (tab === 'health') ? 'health' : 'snapshot';
-    document.querySelectorAll('.snap-tab-btn').forEach(function (btn) {
-      const tabAttr = btn.getAttribute('data-tab');
-      if (tabAttr === activeSnapTab) btn.classList.add('is-active');
-      else btn.classList.remove('is-active');
-    });
-    const snapPanel = document.getElementById('tabSnapshot');
-    const healthPanel = document.getElementById('tabHealth');
-    if (snapPanel) snapPanel.classList.toggle('hidden', activeSnapTab !== 'snapshot');
-    if (healthPanel) healthPanel.classList.toggle('hidden', activeSnapTab !== 'health');
-  }
-  document.querySelectorAll('.snap-tab-btn').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      const tabAttr = btn.getAttribute('data-tab') || 'snapshot';
-      setSnapTab(tabAttr);
-      if (tabAttr === 'health') pollHealthcheck();
-    });
-  });
-  setSnapTab('snapshot');
-
   function fmtPctOrNum(value, unit) {
     if (value == null || Number.isNaN(Number(value))) return '—';
     if (unit === '%') return Number(value).toFixed(1) + '%';
@@ -904,13 +1056,28 @@ PAGE = """
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const j = await r.json();
       POLL_FAIL.sync = 0;
+      const wasRunning = lastSyncJson && lastSyncJson.running;
+      if (!j.running) {
+        syncProgressCarry = 0;
+      } else if (!wasRunning) {
+        syncProgressCarry = 0;
+      }
       lastSyncJson = j;
       renderProgress(j);
       refreshConnStatusStrip();
       const parts = [];
       const msg = j.message != null ? String(j.message).trim() : '';
       if (msg) parts.push(msg);
-      parts.push(j.running ? 'Статус: выполняется' : 'Статус: ожидание');
+      if (j.running) {
+        const det = buildRunningStatusDetail(j);
+        parts.push('Статус: ' + (det || 'выполняется'));
+      } else if (j.error) {
+        parts.push('Статус: ошибка');
+      } else if (j.last_stats) {
+        parts.push('Статус: выполнено');
+      } else {
+        parts.push('Статус: ожидание');
+      }
       if (j.error) {
         const errStr = String(j.error);
         const already = msg && msg.indexOf(errStr) >= 0;
@@ -918,6 +1085,7 @@ PAGE = """
       }
       if (j.last_stats) parts.push(JSON.stringify(j.last_stats, null, 2));
       el.textContent = parts.filter(Boolean).join(String.fromCharCode(10));
+      applySnapshotLiveEgmidOverlay();
     } catch (e) {
       POLL_FAIL.sync += 1;
       // Один-два пропущенных тика во время rollout/port-forward — нормальное явление, не шумим.
@@ -973,12 +1141,108 @@ PAGE = """
       showCfgMessage(false, String(e));
     }
   };
+  document.getElementById('btnPgBackup').onclick = async function () {
+    const fd = new FormData(document.getElementById('configForm'));
+    let r;
+    try {
+      r = await fetch('/api/pg/backup', {
+        method: 'POST',
+        body: fd,
+        credentials: 'same-origin',
+      });
+    } catch (e) {
+      showCfgMessage(false, String(e));
+      return;
+    }
+    if (!r.ok) {
+      const raw = await r.text();
+      let j;
+      try {
+        j = JSON.parse(raw);
+      } catch (e2) {
+        showCfgMessage(false, 'Бэкап: код ' + r.status + '. ' + raw.slice(0, 400));
+        return;
+      }
+      showCfgMessage(false, (j && j.message) || raw.slice(0, 400));
+      return;
+    }
+    const blob = await r.blob();
+    const cd = r.headers.get('Content-Disposition') || '';
+    let name = 'egisz_pg.dump';
+    const m = cd.match(/filename="([^"]+)"/i);
+    if (m && m[1]) {
+      try {
+        name = decodeURIComponent(m[1].replace(/\"/g, '').trim());
+      } catch (e3) {
+        name = m[1].replace(/\"/g, '').trim() || name;
+      }
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showCfgMessage(true, 'Файл бэкапа скачан (сохраните в нужную папку, например I:\\\\DB\\\\egisz-monitor-backups\\\\).');
+  };
+  document.getElementById('btnPgRestore').onclick = async function () {
+    const inp = document.getElementById('pgRestoreFile');
+    if (!inp.files || !inp.files[0]) {
+      showCfgMessage(false, 'Выберите файл дампа.');
+      return;
+    }
+    if (!confirm('ВНИМАНИЕ: pg_restore перезапишет данные в целевой БД (data-only). Продолжить?')) return;
+    const fd = new FormData(document.getElementById('configForm'));
+    fd.append('dump', inp.files[0], inp.files[0].name || 'backup.dump');
+    let r;
+    try {
+      r = await fetch('/api/pg/restore', {
+        method: 'POST',
+        body: fd,
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+      });
+    } catch (e) {
+      showCfgMessage(false, String(e));
+      return;
+    }
+    const raw = await r.text();
+    let j;
+    try {
+      j = JSON.parse(raw);
+    } catch (e2) {
+      showCfgMessage(false, 'Ответ сервера не JSON (код ' + r.status + '). ' + raw.slice(0, 400));
+      return;
+    }
+    showCfgMessage(!!j.ok, j.message || (j.ok ? 'OK' : 'Ошибка'));
+  };
   document.getElementById('btnSync').onclick = async function() {
     const el = document.getElementById('syncStatus');
     el.textContent = 'Запрос...';
-    const r = await fetch('/api/sync/start', { method: 'POST' });
-    const j = await r.json();
-    el.textContent = j.message || JSON.stringify(j);
+    const fd = new FormData(document.getElementById('configForm'));
+    let r;
+    try {
+      r = await fetch('/api/sync/start', {
+        method: 'POST',
+        body: fd,
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+      });
+    } catch (e) {
+      el.textContent = String(e);
+      return;
+    }
+    const raw = await r.text();
+    let j;
+    try {
+      j = JSON.parse(raw);
+    } catch (e2) {
+      el.textContent = 'Ответ сервера не JSON (код ' + r.status + '). ' + raw.slice(0, 400);
+      return;
+    }
+    el.textContent = j.message || j.error || JSON.stringify(j);
     await pollSync();
   };
   // Опрос только пока вкладка видима. Скрытая вкладка через 5–10 минут sleep'а
@@ -1002,19 +1266,23 @@ PAGE = """
     if (fastTimer != null) { clearInterval(fastTimer); fastTimer = null; }
     if (slowTimer != null) { clearInterval(slowTimer); slowTimer = null; }
   }
-  function kickAllPolls() {
-    pollSync();
-    pollPgSnapshot();
-    pollHealthcheck();
-  }
   startPolling();
-  kickAllPolls();
+  pollSync();
   refreshConnStatusStrip();
-  window.addEventListener('pageshow', kickAllPolls);
+  setTimeout(function () { pollPgSnapshot(); }, 40);
+  setTimeout(function () { pollHealthcheck(); }, 120);
+  window.addEventListener('pageshow', function () {
+    pollSync();
+    refreshConnStatusStrip();
+    setTimeout(function () { pollPgSnapshot(); }, 40);
+    setTimeout(function () { pollHealthcheck(); }, 120);
+  });
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'visible') {
       startPolling();
-      kickAllPolls();
+      pollSync();
+      setTimeout(function () { pollPgSnapshot(); }, 40);
+      setTimeout(function () { pollHealthcheck(); }, 120);
     } else {
       stopPolling();
     }
@@ -1069,6 +1337,7 @@ def _merged_yaml_dict_from_form(p: Path, form: Mapping[str, Any]) -> dict[str, A
 
 def create_app() -> Flask:
     app = Flask(__name__)
+    app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024  # pg_restore uploads (multipart)
     try:
         app.json.ensure_ascii = False  # type: ignore[attr-defined]
     except Exception:
@@ -1086,16 +1355,26 @@ def create_app() -> Flask:
         if not p.is_file():
             return (
                 f"<p>Нет файла конфигурации: <code>{logical_config_path()}</code>. Скопируйте "
-                f"<code>config/egisz_corp.example.yaml</code> → <code>config/egisz_corp.yaml</code>.</p>",
+                f"<code>config/egisz_monitor.example.yaml</code> → <code>config/egisz_monitor.yaml</code>.</p>",
                 404,
             )
         cfg = load_corp_config(p)
+        mb_url = ""
+        if isinstance(cfg.metabase, dict):
+            u = cfg.metabase.get("site_url")
+            if isinstance(u, str) and u.strip():
+                mb_url = u.strip()
+        if not mb_url:
+            env_u = (os.environ.get("EGISZ_METABASE_SITE_URL") or "").strip()
+            if env_u:
+                mb_url = env_u
         return render_template_string(
             PAGE,
             path=str(logical_config_path()),
             fb=cfg.firebird,
             pg=cfg.postgres,
             etl=cfg.etl,
+            metabase_site_url=mb_url,
         )
 
     @app.post("/save")
@@ -1124,7 +1403,7 @@ def create_app() -> Flask:
                     ),
                 }
             )
-        os.environ["EGISZ_CORP_CONFIG"] = str(logical_config_path())
+        os.environ["EGISZ_MONITOR_CONFIG"] = str(logical_config_path())
         try:
             parse_corp_config_dict(merged)
         except Exception as e:
@@ -1157,6 +1436,45 @@ def create_app() -> Flask:
             return jsonify({"ok": False, "message": f"PostgreSQL: {e}"})
         return jsonify({"ok": True, "message": "PostgreSQL: OK"})
 
+    @app.post("/api/pg/backup")
+    def api_pg_backup():  # type: ignore[no-untyped-def]
+        """Download custom-format pg_dump (-Fc) for current form Postgres settings."""
+        p = config_path()
+        if not p.is_file():
+            return jsonify({"ok": False, "message": "Нет файла конфигурации на сервере."}), 400
+        try:
+            merged = _merged_yaml_dict_from_form(p, request.form)
+            cfg = parse_corp_config_dict(merged, use_yaml_postgres_only=True)
+            blob = pg_dump_custom_bytes(cfg.postgres)
+        except Exception as e:  # pragma: no cover
+            return jsonify({"ok": False, "message": f"pg_dump: {e}"}), 500
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        db = "".join(c if c.isalnum() or c in "._-" else "_" for c in (cfg.postgres.database or "db"))
+        fn = f"egisz_pg_{db}_{ts}.dump"
+        return Response(
+            blob,
+            mimetype="application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="{fn}"'},
+        )
+
+    @app.post("/api/pg/restore")
+    def api_pg_restore():  # type: ignore[no-untyped-def]
+        """Restore from uploaded custom-format dump (data-only, fixed flags)."""
+        p = config_path()
+        if not p.is_file():
+            return jsonify({"ok": False, "message": "Нет файла конфигурации на сервере."})
+        f = request.files.get("dump")
+        if f is None or not getattr(f, "filename", None):
+            return jsonify({"ok": False, "message": "Выберите файл дампа (.dump)."})
+        try:
+            data = f.read()
+            merged = _merged_yaml_dict_from_form(p, request.form)
+            cfg = parse_corp_config_dict(merged, use_yaml_postgres_only=True)
+            msg = restore_upload_to_temp_and_run(cfg.postgres, data)
+        except Exception as e:  # pragma: no cover
+            return jsonify({"ok": False, "message": f"pg_restore: {e}"})
+        return jsonify({"ok": True, "message": msg[:8000]})
+
     @app.get("/healthz")
     def healthz():  # type: ignore[no-untyped-def]
         """Лёгкий пробник для k8s readiness/liveness — без обращения к БД и без файлового I/O.
@@ -1169,6 +1487,7 @@ def create_app() -> Flask:
 
     @app.get("/api/pg/sync-snapshot")
     def api_pg_sync_snapshot():  # type: ignore[no-untyped-def]
+        """Только PostgreSQL: etl_state + витрина. Без Firebird — иначе UI блокируется на десятки секунд при опросе 1.5s."""
         p = config_path()
         if not p.is_file():
             return jsonify({"ok": False, "error": "Нет файла конфигурации на сервере."})
@@ -1179,43 +1498,6 @@ def create_app() -> Flask:
                 snap = fetch_pg_sync_snapshot(con, cfg.etl.pipeline_name)
             finally:
                 con.close()
-            staging_egmid = snap.get("egmid")
-
-            # Зависший Firebird блокировал /api/pg/sync-snapshot и через бэкап TCP-сокетов в воркере
-            # давал TypeError: Failed to fetch в браузере. Watchdog зеркалит подход /api/healthcheck.
-            from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutureTimeout
-
-            fb_peaks: dict[str, Any] = {
-                "max_egmid": None,
-                "max_licenses_modifydate": None,
-                "error": None,
-            }
-            ex = ThreadPoolExecutor(max_workers=1)
-            try:
-                fut = ex.submit(fetch_firebird_source_peaks, cfg.firebird)
-                try:
-                    fb_peaks = fut.result(timeout=4.0)
-                except _FutureTimeout:
-                    fb_peaks = {
-                        "max_egmid": None,
-                        "max_licenses_modifydate": None,
-                        "error": "timeout",
-                    }
-                except Exception as e:  # pragma: no cover - сеть/драйвер
-                    fb_peaks = {
-                        "max_egmid": None,
-                        "max_licenses_modifydate": None,
-                        "error": str(e),
-                    }
-            finally:
-                ex.shutdown(wait=False, cancel_futures=True)
-
-            if fb_peaks.get("max_egmid") is not None:
-                snap["egmid"] = fb_peaks["max_egmid"]
-            snap["licenses_modifydate"] = fb_peaks.get("max_licenses_modifydate")
-            snap["egmid_staging_max"] = staging_egmid
-            if fb_peaks.get("error"):
-                snap["firebird_peaks_error"] = fb_peaks["error"]
             return jsonify({"ok": True, **snap})
         except Exception as e:  # pragma: no cover
             return jsonify({"ok": False, "error": str(e)})
@@ -1249,8 +1531,13 @@ def create_app() -> Flask:
             result["errors"].append(f"PostgreSQL недоступен: {e}")
             return jsonify(result)
 
+        pg_cached_peaks: dict[str, Any] = {}
         try:
             snap = fetch_healthcheck_snapshot(con)
+            try:
+                pg_cached_peaks = fetch_etl_source_peaks_from_pg(con, cfg.etl.pipeline_name)
+            except Exception:
+                pg_cached_peaks = {}
         except Exception as e:  # pragma: no cover
             result["ok"] = False
             result["errors"].append(str(e))
@@ -1262,8 +1549,7 @@ def create_app() -> Flask:
         if snap.get("errors"):
             result["ok"] = False
 
-        # Опрос Firebird — с wall-clock timeout, чтобы недоступный источник не блокировал /api/healthcheck.
-        # Используем явный shutdown(wait=False, cancel_futures=True), иначе `with` ждёт зависший TCP-connect.
+        # Опрос Firebird — timeout; при неудаче подставляем source_max_* из etl_state (последний успешный ETL).
         from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutureTimeout
 
         fb_peaks: dict[str, Any] = {"max_egmid": None, "max_licenses_modifydate": None, "error": None}
@@ -1271,13 +1557,24 @@ def create_app() -> Flask:
         try:
             fut = ex.submit(fetch_firebird_source_peaks, cfg.firebird)
             try:
-                fb_peaks = fut.result(timeout=5.0)
+                fb_peaks = fut.result(timeout=20.0)
             except _FutureTimeout:
                 fb_peaks = {"max_egmid": None, "max_licenses_modifydate": None, "error": "timeout"}
             except Exception as e:  # pragma: no cover
                 fb_peaks = {"max_egmid": None, "max_licenses_modifydate": None, "error": str(e)}
         finally:
             ex.shutdown(wait=False, cancel_futures=True)
+
+        if fb_peaks.get("max_egmid") is None and pg_cached_peaks.get("source_max_egmid") is not None:
+            fb_peaks["max_egmid"] = pg_cached_peaks["source_max_egmid"]
+        if fb_peaks.get("max_licenses_modifydate") is None and pg_cached_peaks.get(
+            "source_max_licenses_modifydate"
+        ):
+            fb_peaks["max_licenses_modifydate"] = pg_cached_peaks["source_max_licenses_modifydate"]
+
+        peaks_resolved = fb_peaks.get("max_egmid") is not None or bool(
+            fb_peaks.get("max_licenses_modifydate")
+        )
 
         proxy_db = result.get("proxy_db") or {}
         if fb_peaks.get("max_egmid") is not None:
@@ -1287,7 +1584,7 @@ def create_app() -> Flask:
                 proxy_db["egmid_lag"] = max(0, fb_peaks["max_egmid"] - staging_max)
         if fb_peaks.get("max_licenses_modifydate"):
             proxy_db["fb_max_licenses_modifydate"] = fb_peaks["max_licenses_modifydate"]
-        if fb_peaks.get("error"):
+        if fb_peaks.get("error") and not peaks_resolved:
             result.setdefault("errors", []).append(f"Firebird peaks: {fb_peaks['error']}")
         result["proxy_db"] = proxy_db
 
@@ -1295,7 +1592,7 @@ def create_app() -> Flask:
 
     from egisz_monitor_corp.sync_routes import register_sync_routes
 
-    register_sync_routes(app, config_path)
+    register_sync_routes(app, config_path, _merged_yaml_dict_from_form)
 
     return app
 

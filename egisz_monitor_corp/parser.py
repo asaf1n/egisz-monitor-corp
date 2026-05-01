@@ -4,6 +4,8 @@ Parse EGISZ SOAP callback fragments from EXCHANGELOG.MSGTEXT (XML body).
 LOGTEXT typically holds the clinic endpoint URL (gost-…); MSGTEXT holds the SOAP/XML payload.
 Namespace (canonical): ns2 = http://egisz.rosminzdrav.ru/iehr/emdr/callback/
 Tags may use any prefix; matching uses local-name (Clark notation).
+
+Парсинг MSGTEXT: `defusedxml.ElementTree` (запрет DTD/внешних сущностей, см. docs/GORDON2_XML_PROMPT.md).
 """
 
 from __future__ import annotations
@@ -13,6 +15,9 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping
+
+from defusedxml.ElementTree import fromstring as _xml_fromstring
+from defusedxml.common import DefusedXmlException
 
 from egisz_monitor_corp.semd_dictionary import get_semd_name
 
@@ -53,9 +58,13 @@ def _soap_xml_source(msg_text: str | None) -> str | None:
 def _extract_embedded_xml(raw: str) -> str:
     """MSGTEXT may prefix transport lines before the SOAP document."""
     markers = ("<?xml", "<soap:", "<SOAP:", "<soap ", "<SOAP ", "<s:Envelope", "<S:Envelope")
-    positions = [raw.find(m) for m in markers if raw.find(m) != -1]
-    if positions:
-        return raw[min(positions) :]
+    start = -1
+    for m in markers:
+        i = raw.find(m)
+        if i != -1 and (start == -1 or i < start):
+            start = i
+    if start != -1:
+        return raw[start:]
     idx = raw.find("<")
     return raw[idx:] if idx != -1 else raw
 
@@ -163,17 +172,17 @@ class EgiszMonitorParser:
         if not xml_string or "<" not in xml_string:
             return None
 
-        lowered = xml_string.lower()
-        if "registerdocumentresult" not in lowered and "relatestomessage" not in lowered:
+        # Без полного .lower() по крупному BLOB: один проход регистронезависимого поиска.
+        if re.search(r"registerdocumentresult|relatestomessage", xml_string, re.IGNORECASE) is None:
             return None
 
         payload = _extract_embedded_xml(xml_string)
         try:
-            root = ET.fromstring(payload)
-        except ET.ParseError:
+            root = _xml_fromstring(payload)
+        except (ET.ParseError, DefusedXmlException):
             try:
-                root = ET.fromstring(f"<root>{payload}</root>")
-            except ET.ParseError:
+                root = _xml_fromstring(f"<root>{payload}</root>")
+            except (ET.ParseError, DefusedXmlException):
                 return None
 
         relates: str | None = None

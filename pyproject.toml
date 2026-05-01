@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "PyYAML>=6.0",
+    "defusedxml>=0.7.1",
     "firebird-driver>=1.10",
     "psycopg2-binary>=2.9",
     "Flask>=3.0",

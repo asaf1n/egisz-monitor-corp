@@ -33,6 +33,7 @@
 | Очередь **без ответа** | `v_rpt_documents_no_response_ui` | Исходящий `DOCUMENTID` есть в staging, в факте **нет** строки с тем же **`local_uid_semd`** — нет callback; возможен сбой шлюза, задержка ЕГИСЗ или разрыв окна ETL. |
 | **`stg_parse_errors`** | таблица + дашборд «Ошибки и разбор» | Не удалось извлечь `relates_to_id` или XML непригоден — проблема **канала данных/ETL**, а не обязательно МИС. |
 | **`etl_state.last_log_id`** | служебно | Водяной знак по **`LOGID`**, не метрика качества интеграции. |
+| **`etl_state.last_egmid`** | служебно | Водяной знак по **`EGISZ_MESSAGES.EGMID`** для постраничной загрузки сообщений. |
 
 ---
 
@@ -121,7 +122,7 @@
 
 `run_sync` берёт session-level **`pg_try_advisory_lock(hash(pipeline_name))`** в начале и освобождает в `finally`. Это устраняет гонку между:
 
-- **CronJob `egisz-corp-sync`** (`k8s/etl-cron.yaml`, `*/15 * * * *`, `concurrencyPolicy: Forbid`, тот же образ что conf-ui),
+- **CronJob `egisz-monitor-sync`** (`k8s/etl-cron.yaml`, `*/15 * * * *`, `concurrencyPolicy: Forbid`, тот же образ что conf-ui),
 - **UI-кнопкой «Синхронизировать сейчас»** в Config UI (`sync_routes._state` единый процесс под gunicorn).
 
 Если оба стартуют одновременно — второй получает `PipelineLockBusyError`:
@@ -133,9 +134,11 @@ Lock — **session-level**: автоматически снимается при
 
 `run_sync` для тестируемости разнесён на:
 
-- `_load_enrichment_cache(cfg)` → `EnrichmentCache` (Firebird `EGISZ_LICENSES`+`JPERSONS`);
+- `_export_egisz_licenses_full(cfg)` → `EnrichmentCache` (полный SELECT `EGISZ_LICENSES` + `LEFT JOIN JPERSONS`; окно `MODIFYDATE` в Python);
 - `_count_exchangelog_total(cfg, base_sql, …)` → `int` (для прогрес-бара UI);
-- `_process_exchangelog_pages(...)` → `_PageStats` (пагинация по `LOGID`, парсинг, UPSERT факта/измерений);
+- `_export_egisz_messages_by_egmid(cfg, last_egmid, …)` → словарь MSGID + курсор EGMID (только SELECT из FB);
+- `_export_exchangelog_page(cfg, base_sql, …)` → одна страница `EXCHANGELOG` из FB;
+- `_process_exchangelog_pages(...)` → `_PageStats` (на страницу: выгрузка страницы журнала, затем склейка MSGID с кэшем `EGISZ_MESSAGES`, сопоставление REPLYTO→лицензия в Python, парсинг, UPSERT факта/измерений);
 - `_refresh_outbound_documents(cfg, pg, …)` (снимок `stg_egisz_outbound_documents`).
 
 Юнит-тесты — `tests/test_etl_helpers.py` (без живого Firebird/Postgres, с mock-fetch и FakeConn для advisory lock).

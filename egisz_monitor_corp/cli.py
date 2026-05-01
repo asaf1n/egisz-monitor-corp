@@ -20,7 +20,7 @@ from egisz_monitor_corp.pg_warehouse import (
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="egisz-monitor")
-    p.add_argument("--config", type=str, default=None, help="Path to egisz_corp.yaml (or EGISZ_CORP_CONFIG)")
+    p.add_argument("--config", type=str, default=None, help="Path to egisz_monitor.yaml (or EGISZ_MONITOR_CONFIG)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("sync", help="Run Firebird -> Postgres ETL")
@@ -35,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
 
     args = p.parse_args(argv)
     if args.config:
-        os.environ["EGISZ_CORP_CONFIG"] = args.config
+        os.environ["EGISZ_MONITOR_CONFIG"] = args.config
 
     if args.cmd == "sync":
         cfg = load_corp_config()

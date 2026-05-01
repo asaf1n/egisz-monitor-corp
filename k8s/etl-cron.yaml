@@ -11,10 +11,10 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: egisz-corp-sync
+  name: egisz-monitor-sync
   namespace: egisz-monitor
   labels:
-    app.kubernetes.io/name: egisz-corp-sync
+    app.kubernetes.io/name: egisz-monitor-sync
     app.kubernetes.io/component: etl
 spec:
   schedule: "*/15 * * * *"
@@ -31,7 +31,7 @@ spec:
       template:
         metadata:
           labels:
-            app.kubernetes.io/name: egisz-corp-sync
+            app.kubernetes.io/name: egisz-monitor-sync
             app.kubernetes.io/component: etl
         spec:
           restartPolicy: OnFailure
@@ -52,7 +52,7 @@ spec:
               command:
                 - sh
                 - -c
-                - "set -e; cp /seed/egisz_corp.yaml /work/egisz_corp.yaml; chmod 0660 /work/egisz_corp.yaml"
+                - "set -e; cp /seed/egisz_monitor.yaml /work/egisz_monitor.yaml; chmod 0660 /work/egisz_monitor.yaml"
               volumeMounts:
                 - name: cfg-secret
                   mountPath: /seed
@@ -73,11 +73,11 @@ spec:
                   value: "1"
                 - name: PYTHONUNBUFFERED
                   value: "1"
-                - name: EGISZ_CORP_CONFIG
-                  value: /app/config/egisz_corp.yaml
+                - name: EGISZ_MONITOR_CONFIG
+                  value: /app/config/egisz_monitor.yaml
                 - name: FB_CLIENT_LIBRARY
                   value: "/usr/local/lib/libfbclient.so"
-                - name: EGISZ_CORP_SQL_DIR
+                - name: EGISZ_MONITOR_SQL_DIR
                   value: "/app/sql"
               volumeMounts:
                 - name: cfg-work
