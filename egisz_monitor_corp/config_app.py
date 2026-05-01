@@ -252,8 +252,6 @@ PAGE = """
                 </label>
               </div>
               <div class="mt-3 flex min-h-[2.75rem] w-full flex-wrap items-center gap-3">
-                <input type="checkbox" name="etl_full_scan" value="1" {{ 'checked' if etl.full_scan else '' }} class="h-5 w-5 shrink-0 rounded border-[#1B2940] bg-[#121826] text-[#509EE3] focus:ring-[#509EE3] focus:ring-offset-[#0F1522]"/>
-                <span class="text-sm text-[#9CA3AF] lg:text-xs">Полный скан</span>
               </div>
             </div>
           </div>
@@ -486,9 +484,9 @@ PAGE = """
     const ru = PHASE_RU[ph] || ph || 'работа';
     if (ph === 'messages_incremental') {
       const bits = [ru];
-      bits.push('загружено ' + (Number(p.loaded_rows) || 0) + ' строк');
+      bits.push('накопительно из FB ' + (Number(p.loaded_rows) || 0) + ' строк');
       const tmsg = Number(p.total_rows);
-      if (Number.isFinite(tmsg) && tmsg > 0) bits.push('из ' + tmsg);
+      if (Number.isFinite(tmsg) && tmsg > 0) bits.push('оценка всего ' + tmsg);
       if (Number(p.page) > 0) bits.push('пакет ' + p.page);
       if (p.messages_cursor_egmid !== undefined && p.messages_cursor_egmid !== null)
         bits.push('курсор EGMID ' + p.messages_cursor_egmid);
@@ -1339,7 +1337,6 @@ def _merged_yaml_dict_from_form(p: Path, form: Mapping[str, Any]) -> dict[str, A
 
     old["etl"]["batch_size"] = int(form.get("etl_batch") or 500)
     old["etl"]["sync_window_days"] = int(form.get("etl_sync_days") or 30)
-    old["etl"]["full_scan"] = bool(form.get("etl_full_scan"))
     return old
 
 

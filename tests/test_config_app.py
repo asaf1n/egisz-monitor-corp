@@ -37,7 +37,6 @@ etl:
   batch_size: 500
   pipeline_name: firebird_exchangelog
   sync_window_days: 30
-  full_scan: false
   source_query: null
 metabase:
   site_url: http://127.0.0.1:3000

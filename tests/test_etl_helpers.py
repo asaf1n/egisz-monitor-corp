@@ -51,7 +51,6 @@ def _cfg(sync_window_days: int = 30, source_query: str | None = None) -> CorpApp
             batch_size=500,
             pipeline_name="firebird_exchangelog",
             sync_window_days=sync_window_days,
-            full_scan=False,
             source_query=source_query,
         ),
         metabase={},
@@ -59,24 +58,28 @@ def _cfg(sync_window_days: int = 30, source_query: str | None = None) -> CorpApp
 
 
 def test_export_egisz_licenses_full_builds_mo_uid_and_jname_maps() -> None:
-    licenses = [
+    licenses_only = [
         {
             "jid": 12,
             "mo_uid": "1.2.3",
-            "jname": "Клиника A полное",
-            "jinn": "1234567890",
-            "fir_oid": "1.2.3.4",
             "egisz_licenses_kind": "12",
             "id": 1,
             "mo_domen": "clinic.example",
         },
-        {"jid": 7, "mo_uid": "4.5.6", "jname": None, "jinn": None, "fir_oid": None, "egisz_licenses_kind": "31", "id": 2, "mo_domen": "b.example"},
-        {"jid": None, "mo_uid": "x", "jname": "skip", "id": 3, "mo_domen": None},
+        {"jid": 7, "mo_uid": "4.5.6", "egisz_licenses_kind": "31", "id": 2, "mo_domen": "b.example"},
+        {"jid": None, "mo_uid": "x", "id": 3, "mo_domen": None},
+    ]
+    jp_rows = [
+        {"jid": 12, "jname": "Клиника A полное", "jinn": "1234567890", "fir_oid": "1.2.3.4"},
+        {"jid": 7, "jname": None, "jinn": None, "fir_oid": None},
     ]
 
     def fake_fetch(_cfg: Any, sql: str, *_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
-        if "EGISZ_LICENSES" in sql.upper() and "JOIN JPERSONS" in sql.upper():
-            return licenses
+        s = sql.upper()
+        if "FROM JPERSONS" in s:
+            return jp_rows
+        if "FROM EGISZ_LICENSES" in s and "JOIN" not in s:
+            return licenses_only
         return []
 
     with patch("egisz_monitor_corp.etl.fetch_all", side_effect=fake_fetch):

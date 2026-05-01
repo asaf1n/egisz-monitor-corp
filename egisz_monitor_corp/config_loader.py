@@ -74,7 +74,6 @@ class EtlConfig:
     batch_size: int = 500
     pipeline_name: str = "firebird_exchangelog"
     sync_window_days: int = 30
-    full_scan: bool = False
     source_query: str | None = None
     # None / не задано — без лимита. UTF-8 размер MSGTEXT; при превышении строка журнала пропускается (staging MSGTEXT_TOO_LARGE).
     max_msgtext_bytes: int | None = None
@@ -202,7 +201,6 @@ def parse_corp_config_dict(
             batch_size=_int(etl.get("batch_size"), 500),
             pipeline_name=_str(etl.get("pipeline_name"), "firebird_exchangelog"),
             sync_window_days=_int(etl.get("sync_window_days"), 30),
-            full_scan=_bool(etl.get("full_scan"), False),
             source_query=_str(etl.get("source_query"), "") or None,
             max_msgtext_bytes=max_msgtext_bytes,
             firebird_query_timeout_sec=_fb_to,

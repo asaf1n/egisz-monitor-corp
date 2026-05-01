@@ -6,8 +6,9 @@ JPERSONS (JNAME, JINN VARCHAR(12), FIR_OID VARCHAR(255) — как MO UID для
 KIND exists only in EGISZ_LICENSES — not on EGISZ_MESSAGES. Строка EGISZ_LICENSES: REPLYTO matches MO_DOMEN.
 localUid в SOAP ↔ DOCUMENTID; клиника: gost- сначала в MSGTEXT (разбор текста сообщения), затем LOGTEXT, иначе REPLYTO → MO_DOMEN → JID → JPERSONS.
 
-Инкремент журнала по EXCHANGELOG.LOGID; сообщения EGISZ_MESSAGES — постранично по EGMID выше курсора; лицензии — полная выгрузка EGISZ_LICENSES с LEFT JOIN JPERSONS без отбора на стороне Firebird, очистка и merge в dim_clinics в PostgreSQL; сопоставление с журналом по MSGID и REPLYTO→лицензия после выгрузки.
+Инкремент журнала по EXCHANGELOG.LOGID; сообщения EGISZ_MESSAGES — постранично по EGMID выше курсора; лицензии — полная выгрузка EGISZ_LICENSES без JOIN (JPERSONS отдельным SELECT в начале ETL), merge в dim_clinics в PostgreSQL; сопоставление с журналом по MSGID и REPLYTO→лицензия после выгрузки.
 """
+
 
 from __future__ import annotations
 
@@ -34,8 +35,35 @@ WHERE 1=1
 """.strip()
 
 
+def jpersons_all_sql() -> str:
+    """Все юрлица для сшивки с лицензиями в Python (до выгрузки EGISZ_LICENSES)."""
+    return """
+SELECT
+    jp.JID AS JID,
+    jp.JNAME AS JNAME,
+    jp.JINN AS JINN,
+    jp.FIR_OID AS FIR_OID
+FROM JPERSONS jp
+WHERE jp.JID IS NOT NULL
+""".strip()
+
+
+def enrichment_egisz_licenses_only_sql() -> str:
+    """Полная выгрузка EGISZ_LICENSES без JOIN; JNAME/JINN/FIR_OID подставляются из кэша JPERSONS в ETL."""
+    return """
+SELECT
+    l.ID AS ID,
+    l.JID AS JID,
+    l.MO_UID AS MO_UID,
+    l.MO_DOMEN AS MO_DOMEN,
+    l.MODIFYDATE AS MODIFYDATE,
+    l.KIND AS EGISZ_LICENSES_KIND
+FROM EGISZ_LICENSES l
+""".strip()
+
+
 def enrichment_egisz_licenses_sql() -> str:
-    """Полная выгрузка EGISZ_LICENSES с LEFT JOIN JPERSONS; фильтрация пустых строк — в PostgreSQL после staging."""
+    """Обратная совместимость: один SQL с JOIN (устарело — ETL использует JPERSONS + EGISZ_LICENSES по отдельности)."""
     return """
 SELECT
     l.ID AS ID,
@@ -72,7 +100,7 @@ ORDER BY m.EGMID DESC
 def egisz_messages_incremental_sql(*, last_egmid: int, limit: int) -> str:
     """Страница EGISZ_MESSAGES: только EGMID выше курсора (инкремент без окна по дате)."""
     last = int(last_egmid)
-    lim = max(1, min(int(limit), 50_000))
+    lim = max(1, min(int(limit), 65_000))
     return f"""
 SELECT FIRST {lim}
     m.EGMID AS EGMID,
@@ -96,10 +124,24 @@ WHERE e.LOGID > {lid}
 """.strip()
 
 
+def egisz_messages_by_msgids_sql(placeholders: str) -> str:
+    """SELECT по списку MSGID; placeholders — строка вида '?,?,?' (длина = число MSGID)."""
+    return f"""
+SELECT
+    m.EGMID AS EGMID,
+    m.MSGID AS MSGID,
+    m.REPLYTO AS REPLYTO,
+    TRIM(m.DOCUMENTID) AS DOCUMENTID,
+    m.CREATEDATE AS MSG_CREATED_AT
+FROM EGISZ_MESSAGES m
+WHERE m.MSGID IN ({placeholders})
+""".strip()
+
+
 def paginated_exchangelog_sql(inner_select: str, *, last_log_id: int, limit: int) -> str:
     """Firebird: FIRST n rows with LOGID > cursor, ordered by LOGID (incremental, not MODIFYDATE)."""
     lid = int(last_log_id)
-    lim = max(1, min(int(limit), 50_000))
+    lim = max(1, min(int(limit), 65_000))
     base = inner_select.strip().rstrip(";")
     return f"""
 SELECT FIRST {lim} src.*

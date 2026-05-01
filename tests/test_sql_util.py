@@ -1,9 +1,12 @@
 from egisz_monitor_corp.sql_util import (
     default_exchangelog_select,
+    egisz_messages_by_msgids_sql,
     egisz_messages_incremental_sql,
+    enrichment_egisz_licenses_only_sql,
     enrichment_egisz_licenses_sql,
     exchangelog_count_after_cursor,
     exchangelog_count_logid_after_cursor,
+    jpersons_all_sql,
     outbound_documents_staging_select,
     paginated_exchangelog_sql,
 )
@@ -25,7 +28,25 @@ def test_count_wraps_inner_and_filters_logid() -> None:
     assert "LOGID > 42" in sql
 
 
-def test_enrichment_licenses_sql_full_scan_no_modifydate_predicate() -> None:
+def test_enrichment_licenses_only_sql_no_join() -> None:
+    s = enrichment_egisz_licenses_only_sql()
+    assert "FROM EGISZ_LICENSES" in s
+    assert "JOIN" not in s.upper()
+    assert "DATEADD" not in s
+
+
+def test_jpersons_all_sql_selects_jid() -> None:
+    s = jpersons_all_sql()
+    assert "FROM JPERSONS" in s.upper()
+    assert "JID IS NOT NULL" in s
+
+
+def test_egisz_messages_by_msgids_uses_placeholders() -> None:
+    s = egisz_messages_by_msgids_sql("?,?")
+    assert "IN (?,?)" in s.replace("\n", " ")
+
+
+def test_enrichment_licenses_sql_join_still_available() -> None:
     s = enrichment_egisz_licenses_sql()
     assert "FROM EGISZ_LICENSES" in s
     assert "JOIN JPERSONS" in s.upper()

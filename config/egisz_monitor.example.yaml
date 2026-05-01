@@ -31,7 +31,6 @@ etl:
   pipeline_name: "firebird_exchangelog"
   # Поле сохраняется в YAML/UI для совместимости; текущий ETL не использует его в SQL к Firebird (сообщения и outbound — по EGMID).
   sync_window_days: 30
-  full_scan: false
   # Игнорируется пайплайном: журнал всегда строится из встроенного SELECT по EXCHANGELOG.LOGID.
   source_query: null
   # Таймаут (сек.) каждого SELECT к Firebird в ETL (не настраивается в Config UI; задайте здесь или через CI/Secret).
