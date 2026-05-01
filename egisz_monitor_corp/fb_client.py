@@ -94,7 +94,7 @@ def fetch_all(
     params: Sequence[Any] | Mapping[str, Any] | None = None,
     timeout_sec: int = 300,
 ) -> list[dict[str, Any]]:
-    """Run SELECT with timeout protection. Default 5 min (300s) — see run_sync fetch'es can be long.
+    """Run SELECT with timeout protection. Default 5 min (300s) for ad-hoc callers; ETL uses etl.firebird_query_timeout_sec via _etl_fb_fetch.
 
     Таймаут оборачивает весь запрос (connect + execute + fetchall) в ThreadPoolExecutor и прерывается
     если Firebird зависает. Исключение TimeoutError переводится в RuntimeError для совместимости.
@@ -106,7 +106,7 @@ def fetch_all(
         except FutureTimeoutError as e:
             raise RuntimeError(
                 f"Firebird query timeout after {timeout_sec}s (SQL length {len(sql)} chars). "
-                "Check EXCHANGELOG volume, Firebird performance, or increase timeout."
+                "For ETL: raise etl.firebird_query_timeout_sec in YAML; check indexes and sync_window_days."
             ) from e
 
 

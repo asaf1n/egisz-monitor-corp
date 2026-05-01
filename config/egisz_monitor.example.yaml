@@ -32,6 +32,10 @@ etl:
   sync_window_days: 30
   full_scan: false
   source_query: null
+  # Таймаут (сек.) каждого SELECT к Firebird в ETL. COUNT по EGISZ_MESSAGES на большой базе часто > 300 с — по умолчанию 900.
+  # firebird_query_timeout_sec: 1200
+  # Не вызывать COUNT(*) для прогресс-бара (журнал/сообщения) — быстрее старт фазы, в UI нет процента.
+  # skip_firebird_progress_count: false
   # Опционально: макс. размер MSGTEXT в байтах UTF-8; больше — строка журнала пропускается (stg_parse_errors: MSGTEXT_TOO_LARGE). null = без лимита.
   # max_msgtext_bytes: 4194304
 

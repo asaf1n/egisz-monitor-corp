@@ -241,7 +241,7 @@ PAGE = """
                 <h2 class="text-sm font-medium uppercase tracking-[0.12em] text-[#9CA3AF] lg:text-[11px] lg:font-normal lg:tracking-[0.16em] lg:text-[#4B5563]">ETL Configuration</h2>
               </div>
               <p class="mb-3 max-w-2xl text-sm leading-relaxed text-[#9CA3AF] lg:text-[11px] lg:leading-snug">Полный цикл Firebird → PostgreSQL в фоне. Не закрывайте вкладку до завершения.</p>
-              <div class="grid max-w-lg grid-cols-1 gap-3 sm:grid-cols-2 sm:items-end">
+              <div class="grid max-w-lg grid-cols-1 gap-3 sm:grid-cols-2 sm:items-end lg:grid-cols-3">
                 <label class="block w-full max-w-none sm:max-w-[8rem]">
                   <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px] lg:tracking-[0.16em] lg:text-[#4B5563]">batch_size</span>
                   <input name="etl_batch" type="number" value="{{ etl.batch_size }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
@@ -250,10 +250,16 @@ PAGE = """
                   <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px] lg:tracking-[0.16em] lg:text-[#4B5563]">sync_window_days</span>
                   <input name="etl_sync_days" type="number" value="{{ etl.sync_window_days }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
                 </label>
+                <label class="block w-full max-w-none sm:max-w-[10rem]">
+                  <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px] lg:tracking-[0.16em] lg:text-[#4B5563]">firebird_query_timeout_sec</span>
+                  <input name="etl_fb_timeout" type="number" value="{{ etl.firebird_query_timeout_sec }}" min="30" max="7200" title="Таймаут каждого SELECT к Firebird в ETL (COUNT и выгрузки)" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+                </label>
               </div>
-              <div class="mt-3 flex min-h-[2.75rem] w-full items-center gap-3">
+              <div class="mt-3 flex min-h-[2.75rem] w-full flex-wrap items-center gap-3">
                 <input type="checkbox" name="etl_full_scan" value="1" {{ 'checked' if etl.full_scan else '' }} class="h-5 w-5 shrink-0 rounded border-[#1B2940] bg-[#121826] text-[#509EE3] focus:ring-[#509EE3] focus:ring-offset-[#0F1522]"/>
                 <span class="text-sm text-[#9CA3AF] lg:text-xs">Полный скан</span>
+                <input type="checkbox" name="etl_skip_fb_count" value="1" {{ 'checked' if etl.skip_firebird_progress_count else '' }} class="h-5 w-5 shrink-0 rounded border-[#1B2940] bg-[#121826] text-[#509EE3] focus:ring-[#509EE3] focus:ring-offset-[#0F1522]"/>
+                <span class="text-sm text-[#9CA3AF] lg:text-xs">Без COUNT в Firebird (прогресс без %)</span>
               </div>
             </div>
           </div>
@@ -1339,7 +1345,10 @@ def _merged_yaml_dict_from_form(p: Path, form: Mapping[str, Any]) -> dict[str, A
 
     old["etl"]["batch_size"] = int(form.get("etl_batch") or 500)
     old["etl"]["sync_window_days"] = int(form.get("etl_sync_days") or 30)
+    _t = int(form.get("etl_fb_timeout") or 900)
+    old["etl"]["firebird_query_timeout_sec"] = max(30, min(_t, 7200))
     old["etl"]["full_scan"] = bool(form.get("etl_full_scan"))
+    old["etl"]["skip_firebird_progress_count"] = bool(form.get("etl_skip_fb_count"))
     return old
 
 

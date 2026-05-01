@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Sequence, TypedDict
+from typing import Any, Callable, Mapping, Sequence, TypedDict
 
 from egisz_monitor_corp.config_loader import CorpAppConfig, load_corp_config
 from egisz_monitor_corp.fb_client import fetch_all
@@ -53,6 +53,20 @@ from egisz_monitor_corp.sql_util import (
     outbound_documents_staging_select,
     paginated_exchangelog_sql,
 )
+
+
+def _etl_fb_fetch(
+    cfg: CorpAppConfig,
+    sql: str,
+    params: Sequence[Any] | Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """SELECT к Firebird с таймаутом из конфига (COUNT и постраничные выгрузки)."""
+    return fetch_all(
+        cfg.firebird,
+        sql,
+        params,
+        timeout_sec=cfg.etl.firebird_query_timeout_sec,
+    )
 
 
 @dataclass
@@ -206,7 +220,7 @@ def _export_egisz_licenses_full(cfg: CorpAppConfig, log: Callable[[str], None]) 
     """Полная выгрузка EGISZ_LICENSES из Firebird с LEFT JOIN JPERSONS; отбор по MODIFYDATE в окне sync_window_days — в Python."""
     log("Firebird: выгрузка EGISZ_LICENSES (JOIN JPERSONS), фильтр по MODIFYDATE в процессе…")
     sd = cfg.etl.sync_window_days
-    all_lic = fetch_all(cfg.firebird, enrichment_egisz_licenses_sql())
+    all_lic = _etl_fb_fetch(cfg, enrichment_egisz_licenses_sql())
     egisz_licenses_rows = [r for r in all_lic if _license_modifydate_in_window(r.get("modifydate"), sd)]
     if len(all_lic) != len(egisz_licenses_rows):
         log(
@@ -279,12 +293,15 @@ def _count_exchangelog_total(
     log: Callable[[str], None],
 ) -> int:
     """COUNT для прогресс-бара. Падение запроса не должно ломать sync — отдаём 0 и логируем."""
+    if cfg.etl.skip_firebird_progress_count:
+        log("Пропуск COUNT EXCHANGELOG (etl.skip_firebird_progress_count=true) — без процента в прогрессе.")
+        return 0
     try:
         if has_custom_query:
             cnt_sql = exchangelog_count_after_cursor(base_sql, last_log_id=last_id)
         else:
             cnt_sql = exchangelog_count_logid_after_cursor(last_log_id=last_id)
-        cnt_rows = fetch_all(cfg.firebird, cnt_sql)
+        cnt_rows = _etl_fb_fetch(cfg, cnt_sql)
         if cnt_rows:
             raw = cnt_rows[0].get("cnt")
             if raw is not None:
@@ -298,17 +315,25 @@ def _count_egisz_messages_window(
     cfg: CorpAppConfig, last_egmid: int, *, log: Callable[[str], None]
 ) -> int:
     """COUNT EGISZ_MESSAGES с теми же условиями, что постраничная выгрузка (для total_rows в UI)."""
+    if cfg.etl.skip_firebird_progress_count:
+        log("Пропуск COUNT EGISZ_MESSAGES (etl.skip_firebird_progress_count=true) — без процента в прогрессе.")
+        return 0
     try:
         sql = egisz_messages_count_sql(
             last_egmid=last_egmid, sync_window_days=cfg.etl.sync_window_days
         )
-        cnt_rows = fetch_all(cfg.firebird, sql)
+        cnt_rows = _etl_fb_fetch(cfg, sql)
         if cnt_rows:
             raw = cnt_rows[0].get("cnt")
             if raw is not None:
                 return int(raw)
     except Exception as ex:  # pragma: no cover - сеть/FB
-        log(f"Предупреждение: не удалось COUNT для EGISZ_MESSAGES ({ex}).")
+        log(
+            f"Предупреждение: не удалось COUNT для EGISZ_MESSAGES ({ex}). "
+            "Увеличьте etl.firebird_query_timeout_sec (сек.), сузьте sync_window_days, "
+            "или задайте etl.skip_firebird_progress_count: true (прогресс без процента). "
+            "На стороне Firebird ускоряет индекс по полям условия (например CREATEDATE, EGMID)."
+        )
     return 0
 
 
@@ -363,7 +388,7 @@ def _export_egisz_messages_by_egmid(
             limit=batch,
             sync_window_days=cfg.etl.sync_window_days,
         )
-        rows = fetch_all(cfg.firebird, sql)
+        rows = _etl_fb_fetch(cfg, sql)
         if not rows:
             break
         total += len(rows)
@@ -415,7 +440,7 @@ def _export_exchangelog_page(
 ) -> list[dict[str, Any]]:
     """Одна страница EXCHANGELOG из Firebird по LOGID (только SELECT, без парсинга)."""
     sql = paginated_exchangelog_sql(base_sql, last_log_id=last_log_id, limit=limit)
-    return fetch_all(cfg.firebird, sql)
+    return _etl_fb_fetch(cfg, sql)
 
 
 @dataclass
@@ -661,7 +686,7 @@ def _refresh_outbound_documents(
     }
     detail({"phase": "outbound_firebird", **base_progress})  # type: ignore[arg-type]
 
-    omsg = fetch_all(cfg.firebird, outbound_documents_staging_select(cfg.etl.sync_window_days))
+    omsg = _etl_fb_fetch(cfg, outbound_documents_staging_select(cfg.etl.sync_window_days))
     # SQL уже ORDER BY m.EGMID DESC: при монотонном EGMID первая строка на DOCUMENTID — самая новая.
     omsg_sorted = omsg
     outbound_n = len(omsg_sorted)

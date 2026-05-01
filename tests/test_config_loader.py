@@ -59,6 +59,29 @@ def test_etl_max_msgtext_bytes_from_yaml(tmp_path: Path) -> None:
     assert cfg.etl.max_msgtext_bytes == 2048
 
 
+def test_etl_firebird_query_timeout_defaults_and_clamp() -> None:
+    cfg = parse_corp_config_dict(
+        {
+            "firebird": {"host": "h", "port": 1, "database": "d", "user": "u", "password": "p"},
+            "postgres": {"host": "h", "port": 2, "database": "d", "user": "u", "password": "p"},
+            "etl": {},
+        },
+        use_yaml_postgres_only=True,
+    )
+    assert cfg.etl.firebird_query_timeout_sec == 900
+    assert cfg.etl.skip_firebird_progress_count is False
+    hi = parse_corp_config_dict(
+        {
+            "firebird": {"host": "h", "port": 1, "database": "d", "user": "u", "password": "p"},
+            "postgres": {"host": "h", "port": 2, "database": "d", "user": "u", "password": "p"},
+            "etl": {"firebird_query_timeout_sec": 99999, "skip_firebird_progress_count": True},
+        },
+        use_yaml_postgres_only=True,
+    )
+    assert hi.etl.firebird_query_timeout_sec == 7200
+    assert hi.etl.skip_firebird_progress_count is True
+
+
 def test_etl_max_msgtext_bytes_zero_means_disabled() -> None:
     cfg = parse_corp_config_dict(
         {

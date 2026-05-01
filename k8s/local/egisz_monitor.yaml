@@ -28,6 +28,8 @@ etl:
   sync_window_days: 30
   full_scan: false
   source_query: null
+  # Таймаут SELECT к Firebird (сек.); COUNT EGISZ_MESSAGES при необходимости увеличьте (см. config/egisz_monitor.example.yaml).
+  firebird_query_timeout_sec: 900
 
 metabase:
   # С ПК при port-forward Metabase на localhost:3000 (см. .\start.ps1 -Action web). Вход в Metabase: admin@egisz.local / egisz.

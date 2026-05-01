@@ -75,7 +75,7 @@ def test_export_egisz_licenses_full_builds_mo_uid_and_jname_maps() -> None:
         {"jid": None, "mo_uid": "x", "jname": "skip", "id": 3, "mo_domen": None},
     ]
 
-    def fake_fetch(_cfg: Any, sql: str) -> list[dict[str, Any]]:
+    def fake_fetch(_cfg: Any, sql: str, *_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
         if "EGISZ_LICENSES" in sql.upper() and "JOIN JPERSONS" in sql.upper():
             return licenses
         return []
@@ -93,7 +93,7 @@ def test_export_egisz_licenses_full_builds_mo_uid_and_jname_maps() -> None:
 
 
 def test_count_exchangelog_total_returns_int_or_zero_on_failure() -> None:
-    def ok_fetch(_cfg: Any, sql: str) -> list[dict[str, Any]]:
+    def ok_fetch(_cfg: Any, sql: str, *_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
         assert "COUNT(*)" in sql
         return [{"cnt": 1234}]
 
@@ -102,7 +102,7 @@ def test_count_exchangelog_total_returns_int_or_zero_on_failure() -> None:
             _cfg(), "SELECT 1 FROM x", has_custom_query=False, last_id=0, log=lambda _m: None
         ) == 1234
 
-    def bad_fetch(_cfg: Any, _sql: str) -> list[dict[str, Any]]:
+    def bad_fetch(_cfg: Any, _sql: str, *_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
         raise RuntimeError("FB down")
 
     captured: list[str] = []
@@ -256,7 +256,7 @@ def test_process_exchangelog_pages_msgtext_too_large_staging_only() -> None:
     """Полная страница без сдвига EGMID → выходим из цикла (иначе бесконечный опрос FB)."""
     calls = {"n": 0}
 
-    def fake_fetch(_cfg: Any, sql: str) -> list[dict[str, Any]]:
+    def fake_fetch(_cfg: Any, sql: str, *_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
         calls["n"] += 1
         if "COUNT(*)" in sql.upper():
             return [{"cnt": 999}]
