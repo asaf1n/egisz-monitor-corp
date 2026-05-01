@@ -4,12 +4,8 @@ FROM metabase/metabase:v0.60.2.5@sha256:e6fb150fad339ae05d4b77c31de077fa3ff62e89
 
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 
-# build-deps как virtual: apk index, кеш и .apk файлы убираются в одном RUN — не остаются в финальном слое.
-# tini не ставим: базовый metabase/metabase:* уже использует /app/run_metabase.sh + JRE wrapper, кастомный
-# entrypoint.sh ловит SIGTERM и пробрасывает в JVM. Минимум для provision/verify: jq, curl, bash, psql.
-# Virtual package set: apk index, кеш и .apk-файлы убираются в одном RUN — не остаются в финальном
-# слое. tini не ставим: базовый metabase/metabase:* уже использует /app/run_metabase.sh + JRE wrapper,
-# кастомный entrypoint.sh ловит SIGTERM. Минимум для provision/verify: jq, curl, bash, psql.
+# Virtual apk deps в одном RUN — индекс/кеш не остаются в финальном слое. Базовый образ уже даёт run_metabase.sh + JRE;
+# кастомный entrypoint.sh ловит SIGTERM. Для provision/verify: jq, curl, bash, psql.
 # В базовом образе нет user metabase — он запускается под root и сам не делает privilege drop.
 # Создаём UID 1500 «metabase» с правами на /app и /tmp; HEALTHCHECK + non-root.
 RUN apk add --no-cache --virtual .corp-runtime-deps jq curl postgresql-client bash shadow \

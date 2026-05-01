@@ -264,13 +264,6 @@ PAGE = """
             <section id="tabSnapshot" class="flex flex-col gap-2.5">
               <div class="space-y-2.5 text-sm leading-relaxed lg:text-sm">
                 <div class="flex min-w-0 items-baseline gap-2 py-0.5">
-                  <span class="shrink-0 text-xs font-medium text-[#9CA3AF] sm:text-sm lg:text-xs">Дата:</span>
-                  <code id="pgSnapSyncAt" class="snap-val min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-sm sm:text-[15px]" data-raw="" title="">—</code>
-                  <button type="button" class="pg-snap-copy inline-flex min-h-[2.5rem] min-w-[2.5rem] shrink-0 items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-2 text-[#509EE3] hover:bg-[#1B2940] sm:min-h-0 sm:min-w-0 sm:p-1" data-copy="pgSnapSyncAt" title="Копировать" aria-label="Копировать">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
-                  </button>
-                </div>
-                <div class="flex min-w-0 items-baseline gap-2 py-0.5">
                   <span class="shrink-0 text-xs font-medium text-[#9CA3AF] sm:text-sm lg:text-xs">LOGID:</span>
                   <code id="pgSnapLogId" class="snap-val min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-sm sm:text-[15px]" data-raw="" title="">—</code>
                   <button type="button" class="pg-snap-copy inline-flex min-h-[2.5rem] min-w-[2.5rem] shrink-0 items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-2 text-[#509EE3] hover:bg-[#1B2940] sm:min-h-0 sm:min-w-0 sm:p-1" data-copy="pgSnapLogId" title="Копировать" aria-label="Копировать">
@@ -354,7 +347,6 @@ PAGE = """
 
   <script>
   let lastSyncJson = { running: false, error: null, message: '', last_stats: null };
-  let lastLiveEgmidFromProgress = null;
   /** Не даём полоске синхронизации откатываться назад при смене фазы (напр. после EGISZ_MESSAGES → EXCHANGELOG). */
   let syncProgressCarry = 0;
   let lastUiMessage = { ok: true, text: '' };
@@ -460,56 +452,53 @@ PAGE = """
     wrap.classList.add('border-transparent', 'bg-transparent', 'text-[#9CA3AF]');
     textEl.textContent = 'Готов к работе';
   }
-  const PHASE_RU = {
-    enrichment_firebird: 'Справочники: EGISZ_LICENSES (JOIN JPERSONS) из Firebird…',
-    messages_incremental: 'Выгрузка EGISZ_MESSAGES из Firebird по курсору EGMID…',
-    messages_counting: 'Подготовка к выгрузке сообщений…',
-    counting: 'Подготовка к журналу EXCHANGELOG…',
-    exchangelog_ready: 'К журналу EXCHANGELOG: подготовка пагинации',
-    exchangelog_export: 'Страница журнала EXCHANGELOG (LOGID): выгрузка из Firebird…',
-    exchangelog_parse: 'Страница журнала EXCHANGELOG: выгрузка из Firebird и разбор SOAP/MSGTEXT…',
-    parsing: 'Парсинг SOAP/MSGTEXT и обогащение журнала…',
-    page_done: 'UPSERT фактов и измерений в PostgreSQL — страница сохранена',
-    exchangelog_done: 'Журнал обработан, курсор LOGID обновлён',
-    outbound_firebird: 'Исходящие EGISZ_MESSAGES: чтение из Firebird…',
-    outbound_fetch: 'Исходящие сообщения (EGISZ_MESSAGES): выборка по EGMID выше курсора…',
-    outbound_parse: 'Разбор исходящих: дедуп DOCUMENTID, фильтр тестовых клиник…',
-    outbound_postgres: 'Исходящие: запись stg_egisz_outbound_documents в PostgreSQL…',
-    outbound_done: 'Исходящие: snapshot staging обновлён',
-  };
-  function buildRunningStatusDetail(j) {
-    if (!j.running || !j.progress || typeof j.progress !== 'object') return '';
-    const p = j.progress;
-    const ph = String(p.phase || '');
-    const ru = PHASE_RU[ph] || ph || 'работа';
-    if (ph === 'messages_incremental') {
-      const bits = [ru];
-      bits.push('накопительно из FB ' + (Number(p.loaded_rows) || 0) + ' строк');
-      const tmsg = Number(p.total_rows);
-      if (Number.isFinite(tmsg) && tmsg > 0) bits.push('оценка всего ' + tmsg);
-      if (Number(p.page) > 0) bits.push('пакет ' + p.page);
-      if (p.messages_cursor_egmid !== undefined && p.messages_cursor_egmid !== null)
-        bits.push('курсор EGMID ' + p.messages_cursor_egmid);
-      return bits.join(' · ');
+  const PG_SNAP_MONTHS_RU = [
+    'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+    'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
+  ];
+  function formatPgSyncAtRu(isoStr) {
+    if (!isoStr) return '—';
+    const d = new Date(isoStr);
+    if (Number.isNaN(d.getTime())) return isoStr;
+    const day = d.getUTCDate();
+    const mon = PG_SNAP_MONTHS_RU[d.getUTCMonth()];
+    const hh = String(d.getUTCHours()).padStart(2, '0');
+    const mm = String(d.getUTCMinutes()).padStart(2, '0');
+    return day + ' ' + mon + ' ' + hh + ':' + mm;
+  }
+  function syncMetricsLines(j) {
+    const logEl = document.getElementById('pgSnapLogId');
+    const egEl = document.getElementById('pgSnapEgmid');
+    const licEl = document.getElementById('pgSnapLicMd');
+    function rawFrom(el) {
+      if (!el) return '—';
+      const a = el.getAttribute('data-raw');
+      if (a != null && String(a).trim() !== '') return String(a).trim();
+      const t = el.textContent ? el.textContent.trim() : '';
+      return t || '—';
     }
-    if (ph === 'counting' || ph === 'messages_counting') return ru + ' (ожидание ответа Firebird)';
-    if (ph === 'enrichment_firebird') return ru;
-    if (ph === 'exchangelog_ready' || ph === 'exchangelog_export' || ph === 'exchangelog_parse' || ph === 'parsing' || ph === 'page_done' || ph === 'exchangelog_done') {
-      const tr = Number(p.total_rows);
-      const lo = Number(p.loaded_rows) || 0;
-      const bits = [ru];
-      if (Number.isFinite(tr) && tr > 0) bits.push('журнал ' + lo + ' / ' + tr);
-      else if (Number.isFinite(tr) && tr === 0) bits.push('журнал: новых строк нет');
-      return bits.join(' · ');
+    let logV = rawFrom(logEl);
+    let egV = rawFrom(egEl);
+    let licV = rawFrom(licEl);
+    const p = j && j.progress && typeof j.progress === 'object' ? j.progress : null;
+    if (p) {
+      if (p.cursor_log_id != null && p.cursor_log_id !== '') logV = String(p.cursor_log_id);
+      if (p.messages_cursor_egmid != null && p.messages_cursor_egmid !== '') egV = String(p.messages_cursor_egmid);
+      if (p.licenses_modifydate_iso != null && String(p.licenses_modifydate_iso).trim() !== '') {
+        const iso = String(p.licenses_modifydate_iso).trim();
+        licV = Number.isNaN(Date.parse(iso)) ? iso : formatPgSyncAtRu(iso);
+      }
     }
-    if (ph === 'outbound_firebird' || ph === 'outbound_fetch' || ph === 'outbound_parse' || ph === 'outbound_postgres' || ph === 'outbound_done') {
-      const bits = [ru];
-      const otot = Number(p.outbound_total);
-      const olo = Number(p.outbound_loaded) || 0;
-      if (Number.isFinite(otot) && otot > 0) bits.push('исходящие ' + olo + ' / ' + otot);
-      return bits.join(' · ');
+    function fmtNum(s) {
+      if (s === '—') return '—';
+      const n = Number(String(s).replace(/\\s/g, '').replace(/\\u00a0/g, ''));
+      return Number.isFinite(n) ? n.toLocaleString('ru-RU') : String(s);
     }
-    return ru;
+    return [
+      'LOGID: ' + fmtNum(logV),
+      'EGMID: ' + fmtNum(egV),
+      'LICENSES.MODIFYDATE: ' + licV,
+    ];
   }
   const SYNC_BANNER_BASE = 'relative mt-2 lg:mt-0 overflow-hidden rounded-lg border transition-[border-color,background-color] duration-200 lg:shrink-0 ';
   const SYNC_FILL_CURRENT = 'absolute inset-y-0 left-0 top-0 rounded-l-lg transition-[width] duration-300 ease-out';
@@ -579,245 +568,54 @@ PAGE = """
       return;
     }
 
-    setProgressTheme(banner, 'blue');
-    titleEl.className = SYNC_TITLE_BLUE;
+    const phase = p && typeof p === 'object' ? String(p.phase || '') : '';
+    const outboundPhase =
+      phase === 'outbound_firebird' ||
+      phase === 'outbound_fetch' ||
+      phase === 'outbound_parse' ||
+      phase === 'outbound_postgres' ||
+      phase === 'outbound_done';
+    if (outboundPhase) {
+      setProgressTheme(banner, 'orange');
+      titleEl.className = SYNC_TITLE_ORANGE;
+    } else {
+      setProgressTheme(banner, 'blue');
+      titleEl.className = SYNC_TITLE_BLUE;
+    }
     titleEl.textContent = 'Синхронизация';
     meta.className = SYNC_META_BASE + 'text-[#9CA3AF]';
 
     if (!p || typeof p !== 'object') {
-      setProgressTheme(banner, 'orange');
-      titleEl.className = SYNC_TITLE_ORANGE;
       fill.style.width = '';
       setBarIndeterminate(fill, true);
       pctEl.textContent = '…';
-      meta.textContent =
-        'ПОДГОТОВКА' +
-        String.fromCharCode(10) +
-        'Запуск пайплайна: конфигурация, курсор ETL, справочники из Firebird…' +
-        String.fromCharCode(10) +
-        'Детальный прогресс появится после подсчёта объёма журнала.';
+      meta.textContent = syncMetricsLines(j).join(String.fromCharCode(10));
       return;
     }
 
-    const phase = p.phase || '';
-    const phaseTitle = (PHASE_RU[phase] || phase || 'прогресс').toUpperCase();
     const barPct = syncProgressPercent(p);
-
-    function totalRowsState(pp) {
-      if (!Object.prototype.hasOwnProperty.call(pp, 'total_rows') || pp.total_rows === null || pp.total_rows === undefined) {
-        return { kind: 'absent' };
-      }
-      const n = Number(pp.total_rows);
-      if (!Number.isFinite(n)) return { kind: 'absent' };
-      if (n > 0) return { kind: 'positive', n };
-      return { kind: 'zero' };
-    }
-
-    function journalFacts(pp) {
-      const jf = Number(pp.journal_facts);
-      if (Number.isFinite(jf) && jf >= 0) return jf;
-      return Number(pp.parsed_facts) || 0;
-    }
-
-    if (phase === 'enrichment_firebird') {
-      setProgressTheme(banner, 'blue');
-      titleEl.className = SYNC_TITLE_BLUE;
+    const indet =
+      phase === 'counting' ||
+      phase === 'messages_counting' ||
+      phase === 'outbound_firebird';
+    if (indet) {
+      fill.style.width = '';
+      setBarIndeterminate(fill, true);
+      pctEl.textContent = '…';
+    } else {
       setBarIndeterminate(fill, false);
-      const ep = barPct != null ? barPct : 8;
-      fill.style.width = ep + '%';
-      pctEl.textContent = ep + '%';
-      meta.className = SYNC_META_BASE + 'text-[#9CA3AF]';
-      meta.textContent =
-        phaseTitle +
-        String.fromCharCode(10) +
-        'Загрузка EGISZ_LICENSES с полями JPERSONS (один запрос к Firebird)…';
-      return;
-    }
-
-    if (phase === 'messages_incremental') {
-      setProgressTheme(banner, 'blue');
-      titleEl.className = SYNC_TITLE_BLUE;
-      setBarIndeterminate(fill, false);
-      const lo = Number(p.loaded_rows) || 0;
-      const tot = Number(p.total_rows) || 0;
-      const pg = Number(p.page) || 0;
-      let mpct = 12;
-      if (tot > 0) {
-        mpct = Math.min(34, Math.round(12 + (lo / tot) * 22));
-      } else if (pg <= 0 && lo <= 0) {
-        mpct = 12;
-      } else {
-        const loPart = Math.min(12, Math.log10(1 + lo / 80.0) * 4.2);
-        const pgPart = Math.min(6, Math.sqrt(pg) * 1.35);
-        mpct = Math.min(34, Math.floor(12 + loPart + pgPart));
-      }
-      const disp = barPct != null ? barPct : mpct;
+      const disp = barPct != null && Number.isFinite(barPct) ? barPct : 32;
       fill.style.width = disp + '%';
       pctEl.textContent = disp + '%';
-      meta.className = SYNC_META_BASE + 'text-[#9CA3AF]';
-      const egm =
-        p.messages_cursor_egmid !== undefined && p.messages_cursor_egmid !== null
-          ? String(p.messages_cursor_egmid)
-          : '—';
-      meta.textContent =
-        phaseTitle +
-        String.fromCharCode(10) +
-        'Строк загружено: ' +
-        lo +
-        (tot > 0 ? ' / ' + tot : '') +
-        (pg > 0 ? ' · пакет ' + pg : '') +
-        String.fromCharCode(10) +
-        'Курсор EGMID: ' +
-        egm;
-      return;
     }
-
-    if (phase === 'counting' || phase === 'messages_counting') {
-      setProgressTheme(banner, 'blue');
-      titleEl.className = SYNC_TITLE_BLUE;
-      fill.style.width = '';
-      setBarIndeterminate(fill, true);
-      pctEl.textContent = '…';
-      meta.className = SYNC_META_BASE + 'text-[#9CA3AF]';
-      const waitLine =
-        phase === 'counting'
-          ? 'COUNT в Firebird для журнала не выполняется (прогресс без общего числа строк).'
-          : 'COUNT в Firebird не используется.';
-      meta.textContent = phaseTitle + String.fromCharCode(10) + waitLine;
-      return;
-    }
-
-    if (phase === 'outbound_firebird') {
-      setProgressTheme(banner, 'orange');
-      titleEl.className = SYNC_TITLE_ORANGE;
-      fill.style.width = '';
-      setBarIndeterminate(fill, true);
-      pctEl.textContent = '…';
-      const tr = totalRowsState(p);
-      const jlo = Number(p.loaded_rows) || 0;
-      let lineA = 'Чтение EGISZ_MESSAGES из Firebird (инкремент по EGMID). Пока идёт запрос, факты журнала уже в витрине.';
-      let lineB = 'Фактов в fact_egisz_transactions: ' + journalFacts(p) + ' · staging ошибок (журнал): ' + (Number(p.staging_errors) || 0);
-      if (tr.kind === 'positive') lineB += ' · журнал: ' + jlo + ' / ' + tr.n + ' строк';
-      else if (tr.kind === 'zero') lineB += ' · журнал: новых строк не было';
-      meta.textContent = phaseTitle + String.fromCharCode(10) + lineA + String.fromCharCode(10) + lineB;
-      return;
-    }
-
-    setBarIndeterminate(fill, false);
-
-    let pct = 0;
-    let lineA = '';
-    let lineB = '';
-
-    if (phase === 'outbound_fetch' || phase === 'outbound_parse' || phase === 'outbound_postgres' || phase === 'outbound_done') {
-      const otot = Number(p.outbound_total) || 0;
-      const olo = Number(p.outbound_loaded) || 0;
-      if (phase === 'outbound_postgres' && otot === 0) {
-        pct = 100;
-        lineA = 'Запись stg_egisz_outbound_documents: нет строк для вставки.';
-      } else if (otot > 0) {
-        pct = Math.min(100, Math.round((olo / otot) * 100));
-        if (phase === 'outbound_fetch') lineA = 'Исходящие: выборка из Firebird, подготовка списка…';
-        else if (phase === 'outbound_parse') lineA = 'Исходящие: разбор ' + olo + ' / ' + otot + ' строк выборки';
-        else if (phase === 'outbound_postgres') lineA = 'Исходящие: запись staging в PostgreSQL…';
-        else lineA = 'Исходящие: staging обновлён (' + olo + ' строк).';
-      } else {
-        if (phase === 'outbound_done') {
-          pct = 100;
-          lineA = 'Исходящие: обновление staging завершено (строк для вставки не было).';
-        } else {
-          pct = 0;
-          lineA = 'Исходящие: в окне нет строк EGISZ_MESSAGES.';
-        }
-      }
-      const tr = totalRowsState(p);
-      const jlo = Number(p.loaded_rows) || 0;
-      const stgOut = Number(p.parsed_facts) || 0;
-      lineB =
-        'Фактов в витрине (журнал): ' +
-        journalFacts(p) +
-        ' · staging исходящих (строк): ' +
-        stgOut +
-        ' · staging ошибок (журнал): ' +
-        (Number(p.staging_errors) || 0);
-      if (tr.kind === 'positive') lineB += ' · журнал EXCHANGELOG: ' + jlo + ' / ' + tr.n + ' строк';
-      else if (tr.kind === 'zero') lineB += ' · журнал: 0 строк к загрузке';
-    } else {
-      const tr = totalRowsState(p);
-      const lo = Number(p.loaded_rows) || 0;
-
-      if (tr.kind === 'positive') {
-        pct = Math.min(87, Math.round(36 + (lo / tr.n) * 51));
-        lineA = 'Загружено из журнала: ' + lo + ' / ' + tr.n + ' строк';
-      } else if (tr.kind === 'zero') {
-        pct = phase === 'exchangelog_done' ? 100 : 87;
-        if (phase === 'exchangelog_ready' || phase === 'exchangelog_export' || phase === 'exchangelog_parse' || phase === 'parsing') {
-          lineA = 'Новых строк журнала нет (0 к обработке по курсору LOGID).';
-        } else {
-          lineA = 'Строк журнала к загрузке: 0.';
-        }
-      } else {
-        lineA = 'Объём журнала пока не передан сервером (редкий переход между фазами).';
-        pct = 36;
-      }
-
-      lineB =
-        'Фактов в витрине (после парсинга журнала): ' +
-        journalFacts(p) +
-        ' · staging ошибок: ' +
-        (Number(p.staging_errors) || 0);
-      if (p.page) lineB += ' · страница ' + p.page;
-    }
-
-    const fillPct = barPct != null ? barPct : pct;
-    fill.style.width = fillPct + '%';
-    pctEl.textContent = fillPct + '%';
-    meta.textContent = phaseTitle + String.fromCharCode(10) + lineA + String.fromCharCode(10) + lineB;
-  }
-  const PG_SNAP_MONTHS_RU = [
-    'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
-    'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
-  ];
-  function formatPgSyncAtRu(isoStr) {
-    if (!isoStr) return '—';
-    const d = new Date(isoStr);
-    if (Number.isNaN(d.getTime())) return isoStr;
-    const day = d.getUTCDate();
-    const mon = PG_SNAP_MONTHS_RU[d.getUTCMonth()];
-    const hh = String(d.getUTCHours()).padStart(2, '0');
-    const mm = String(d.getUTCMinutes()).padStart(2, '0');
-    return day + ' ' + mon + ' ' + hh + ':' + mm;
-  }
-  function applySnapshotLiveEgmidOverlay() {
-    const egEl = document.getElementById('pgSnapEgmid');
-    if (!egEl) return;
-    const sj = lastSyncJson;
-    if (!sj || !sj.running) {
-      lastLiveEgmidFromProgress = null;
-      return;
-    }
-    const p = sj.progress;
-    if (p && typeof p === 'object' && p.messages_cursor_egmid != null && p.messages_cursor_egmid !== '') {
-      lastLiveEgmidFromProgress = p.messages_cursor_egmid;
-    }
-    if (lastLiveEgmidFromProgress == null) return;
-    const raw = String(lastLiveEgmidFromProgress);
-    const n = Number(raw);
-    const disp = Number.isFinite(n) ? n.toLocaleString('ru-RU') : raw;
-    egEl.textContent = disp;
-    egEl.setAttribute('data-raw', raw);
-    egEl.title = raw;
+    meta.textContent = syncMetricsLines(j).join(String.fromCharCode(10));
   }
   async function pollPgSnapshot() {
-    const syncEl = document.getElementById('pgSnapSyncAt');
     const logEl = document.getElementById('pgSnapLogId');
     const egEl = document.getElementById('pgSnapEgmid');
     const licEl = document.getElementById('pgSnapLicMd');
-    if (!syncEl || !logEl || !egEl || !licEl) return;
+    if (!logEl || !egEl || !licEl) return;
     function clearSnap() {
-      syncEl.textContent = '—';
-      syncEl.setAttribute('data-raw', '');
-      syncEl.title = '';
       logEl.textContent = '—';
       logEl.setAttribute('data-raw', '');
       logEl.title = '';
@@ -835,28 +633,30 @@ PAGE = """
       POLL_FAIL.snap = 0;
       if (!j.ok) {
         clearSnap();
-        applySnapshotLiveEgmidOverlay();
         return;
       }
-      const ds = j.sync_at != null && String(j.sync_at).trim() !== '' ? String(j.sync_at) : null;
-      if (ds) {
-        syncEl.textContent = formatPgSyncAtRu(ds);
-        syncEl.setAttribute('data-raw', ds);
-        syncEl.title = ds;
-      } else {
-        syncEl.textContent = '—';
-        syncEl.setAttribute('data-raw', '');
-        syncEl.title = '';
-      }
       const logStr = j.log_id != null ? String(j.log_id) : null;
-      logEl.textContent = logStr || '—';
-      logEl.setAttribute('data-raw', logStr || '');
-      logEl.title = logStr || '';
-      const egPrimary = (j.egmid != null) ? j.egmid : j.egmid_staging_max;
-      const egStr = egPrimary != null ? String(egPrimary) : null;
-      egEl.textContent = egStr || '—';
-      egEl.setAttribute('data-raw', egStr || '');
-      egEl.title = egStr || '';
+      if (logStr != null && logStr !== '') {
+        const ln = Number(logStr);
+        logEl.textContent = Number.isFinite(ln) ? ln.toLocaleString('ru-RU') : logStr;
+        logEl.setAttribute('data-raw', logStr);
+        logEl.title = logStr;
+      } else {
+        logEl.textContent = '—';
+        logEl.setAttribute('data-raw', '');
+        logEl.title = '';
+      }
+      const egStr = j.egmid != null ? String(j.egmid) : null;
+      if (egStr != null && egStr !== '') {
+        const en = Number(egStr);
+        egEl.textContent = Number.isFinite(en) ? en.toLocaleString('ru-RU') : egStr;
+        egEl.setAttribute('data-raw', egStr);
+        egEl.title = egStr;
+      } else {
+        egEl.textContent = '—';
+        egEl.setAttribute('data-raw', '');
+        egEl.title = '';
+      }
       const licRaw = j.licenses_modifydate != null && String(j.licenses_modifydate).trim() !== '' ? String(j.licenses_modifydate) : null;
       if (licRaw) {
         const d = new Date(licRaw);
@@ -869,12 +669,10 @@ PAGE = """
         licEl.setAttribute('data-raw', '');
         licEl.title = '';
       }
-      applySnapshotLiveEgmidOverlay();
     } catch (e) {
       POLL_FAIL.snap += 1;
       if (POLL_FAIL.snap <= 2) return;
       clearSnap();
-      applySnapshotLiveEgmidOverlay();
     }
   }
   function fmtPctOrNum(value, unit) {
@@ -1072,16 +870,18 @@ PAGE = """
       refreshConnStatusStrip();
       const parts = [];
       const msg = j.message != null ? String(j.message).trim() : '';
-      if (msg) parts.push(msg);
       if (j.running) {
-        const det = buildRunningStatusDetail(j);
-        parts.push('Статус: ' + (det || 'выполняется'));
-      } else if (j.error) {
-        parts.push('Статус: ошибка');
-      } else if (j.last_stats) {
-        parts.push('Статус: выполнено');
+        parts.push(syncMetricsLines(j).join(String.fromCharCode(10)));
+        if (msg && /Предупреждение/i.test(msg)) parts.push(msg);
       } else {
-        parts.push('Статус: ожидание');
+        if (msg) parts.push(msg);
+        if (j.error) {
+          parts.push('Статус: ошибка');
+        } else if (j.last_stats) {
+          parts.push('Статус: выполнено');
+        } else {
+          parts.push('Статус: ожидание');
+        }
       }
       if (j.error) {
         const errStr = String(j.error);
@@ -1090,7 +890,6 @@ PAGE = """
       }
       if (j.last_stats) parts.push(JSON.stringify(j.last_stats, null, 2));
       el.textContent = parts.filter(Boolean).join(String.fromCharCode(10));
-      applySnapshotLiveEgmidOverlay();
     } catch (e) {
       POLL_FAIL.sync += 1;
       // Один-два пропущенных тика во время rollout/port-forward — нормальное явление, не шумим.

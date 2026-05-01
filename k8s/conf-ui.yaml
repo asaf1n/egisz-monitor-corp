@@ -1,17 +1,19 @@
 # Config UI (Flask): редактирование YAML конфигурации EGISZ Monitor.
-# NodePort — доступ с хоста Windows без kubectl port-forward (Docker Desktop / kind).
-# Рабочая копия YAML в emptyDir (запись из UI); при новом поде init снова копирует из Secret. Другие Job’ы читают Secret — обновляйте его при необходимости (deploy / kubectl apply).
+# Service conf-ui: LoadBalancer — доступ с хоста без port-forward при поддерживаемом LB (Docker Desktop и т.п.).
+# Рабочая копия YAML в emptyDir (запись из UI); при новом поде init снова копирует из Secret. Другие Job'ы читают Secret — обновляйте его при необходимости (deploy / kubectl apply).
 apiVersion: v1
 kind: Service
 metadata:
   name: conf-ui
   namespace: egisz-monitor
+  labels:
+    app.kubernetes.io/name: conf-ui
+  finalizers: []
 spec:
-  type: NodePort
+  type: LoadBalancer
   ports:
     - port: 8080
       targetPort: 8080
-      nodePort: 30808
       name: http
   selector:
     app.kubernetes.io/name: conf-ui

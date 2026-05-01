@@ -1,6 +1,6 @@
 #!/usr/bin/env pwsh
 # Post-Gordon smoke: kubectl get/top, /healthz, conf-ui logs (FB timeout -> RuntimeError in logs).
-# Requires: kubectl + namespace egisz-monitor; healthz: port-forward or NodePort 30808.
+# Requires: kubectl + namespace egisz-monitor; healthz: port-forward или LoadBalancer на :8080.
 
 param(
     [string]$Namespace = "egisz-monitor",
@@ -29,7 +29,7 @@ try {
     $r = Invoke-WebRequest -Uri "$ConfUiUrl/healthz" -UseBasicParsing -TimeoutSec 5
     Write-Host "Status:" $r.StatusCode $r.Content
 } catch {
-    Write-Warning "healthz failed: start port-forward or use NodePort 30808. $($_.Exception.Message)"
+    Write-Warning "healthz failed: run .\start.ps1 -Action web or open Config UI via LoadBalancer. $($_.Exception.Message)"
 }
 
 Write-Host "`n=== kubectl logs deploy/conf-ui (tail 40; look for Firebird query timeout) ===" -ForegroundColor Cyan

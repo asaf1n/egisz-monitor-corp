@@ -8,24 +8,7 @@ metadata:
   namespace: egisz-monitor
   labels:
     app.kubernetes.io/name: metabase
-spec:
-  type: NodePort
-  ports:
-    - port: 3000
-      targetPort: 3000
-      nodePort: 30300
-      name: http
-  selector:
-    app.kubernetes.io/name: metabase
----
-# Docker Desktop / k8s: внешний порт 3000 на 127.0.0.1 (бес kubectl port-forward). Если 3000 занят на хосте — порт-форвард: sm. docs/METABASE.md
-apiVersion: v1
-kind: Service
-metadata:
-  name: metabase-lb
-  namespace: egisz-monitor
-  labels:
-    app.kubernetes.io/name: metabase
+  finalizers: []
 spec:
   type: LoadBalancer
   ports:
@@ -70,17 +53,12 @@ spec:
           # Сборка: docker build -f metabase/Dockerfile -t egisz-monitor-metabase:latest . && docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:local
           # IfNotPresent: Docker Desktop подставляет образ из локального Docker Engine (см. docs.docker.com/desktop/kubernetes).
           # Тег :k8s-v15 (не :local): bump при изменении Dockerfile/скриптов/дашбордов — иначе kubelet Docker Desktop держит старый digest для имени тега.
-          # v15: provision.sh идемпотентен (METABASE_FORCE_PROVISION=auto/true/false) — dashboards id не меняются при rollout restart;
-          #      Dockerfile с --virtual + USER metabase + HEALTHCHECK; livenessProbe + JAVA_TOOL_OPTIONS для G1GC и MaxRAMPercentage.
-          # v14: фикс verify-corp-stack.sh + smoke-metabase-ui.sh — теперь учитывают namespaced is_personal collection.
           image: egisz-monitor-metabase:k8s-v15
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000
               name: http
-              # Без hostPort: иначе на однонодовом кластере под часто зависает в Pending (порт 3000 занят
-              # прошлым подом / процессом на хосте). Доступ: Service metabase-lb (Docker Desktop → :3000),
-              # NodePort 30300, либо port-forward из start.ps1.
+              # Service metabase (LoadBalancer); на Docker Desktop часто :3000 на localhost — иначе port-forward из start.ps1.
           env:
             - name: LANG
               value: "C.UTF-8"
