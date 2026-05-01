@@ -496,7 +496,7 @@ PAGE = """
     if (head) parts.push(head);
     if (msg) parts.push(msg);
     if (facts) parts.push(facts);
-    let s = parts.join('\n');
+    let s = parts.join('\\n');
     if (s.length > 1200) s = s.slice(0, 1197) + '…';
     return s || 'Синхронизация';
   }
