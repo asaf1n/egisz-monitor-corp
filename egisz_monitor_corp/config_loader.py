@@ -74,6 +74,8 @@ class EtlConfig:
     batch_size: int = 500
     pipeline_name: str = "firebird_exchangelog"
     sync_window_days: int = 30
+    # Размер страницы FIRST n при чередовании EGISZ_MESSAGES / EXCHANGELOG в Firebird (верхняя граница 65000).
+    interleave_page_rows: int = 8192
     source_query: str | None = None
     # None / не задано — без лимита. UTF-8 размер MSGTEXT; при превышении строка журнала пропускается (staging MSGTEXT_TOO_LARGE).
     max_msgtext_bytes: int | None = None
@@ -88,11 +90,21 @@ class EtlConfig:
 
 
 @dataclass
+class AutoSyncConfig:
+    """Параметры автосинхронизации в YAML; фактический запуск — CronJob в Kubernetes (spec.suspend)."""
+
+    enabled: bool = False
+    schedule_cron: str = "*/15 * * * *"
+    timezone: str = "Etc/UTC"
+
+
+@dataclass
 class CorpAppConfig:
     firebird: FirebirdConfig
     postgres: PostgresConfig
     etl: EtlConfig
     metabase: dict[str, Any]
+    auto_sync: AutoSyncConfig
 
 
 def _str(v: Any, default: str | None = None) -> str:
@@ -155,8 +167,11 @@ def parse_corp_config_dict(
     pg = raw.get("postgres") or {}
     etl = raw.get("etl") or {}
     mb = raw.get("metabase") or {}
+    as_raw = raw.get("auto_sync") or {}
     if not isinstance(fb, dict) or not isinstance(pg, dict) or not isinstance(etl, dict):
         raise ValueError("firebird, postgres, and etl must be mappings")
+    if not isinstance(as_raw, dict):
+        raise ValueError("auto_sync must be a mapping when present")
 
     _raw_mmb = etl.get("max_msgtext_bytes")
     if _raw_mmb is None or _raw_mmb == "":
@@ -195,6 +210,12 @@ def parse_corp_config_dict(
     else:
         pg_upsert_statement_timeout_sec = 120
 
+    _inter = _int(etl.get("interleave_page_rows"), 8192)
+    _inter = max(500, min(_inter, 65_000))
+
+    _sch = _str(as_raw.get("schedule_cron"), "*/15 * * * *").strip() or "*/15 * * * *"
+    _tz = _str(as_raw.get("timezone"), "Etc/UTC").strip() or "Etc/UTC"
+
     return CorpAppConfig(
         firebird=FirebirdConfig(
             host=_str(fb.get("host")),
@@ -223,8 +244,14 @@ def parse_corp_config_dict(
             skip_firebird_progress_count=_bool(etl.get("skip_firebird_progress_count"), False),
             facts_upsert_chunk_size=_fchunk,
             pg_upsert_statement_timeout_sec=pg_upsert_statement_timeout_sec,
+            interleave_page_rows=_inter,
         ),
         metabase=dict(mb) if isinstance(mb, dict) else {},
+        auto_sync=AutoSyncConfig(
+            enabled=_bool(as_raw.get("enabled"), False),
+            schedule_cron=_sch,
+            timezone=_tz,
+        ),
     )
 
 

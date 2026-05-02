@@ -139,6 +139,23 @@ def test_fetch_healthcheck_snapshot_aggregates_levels_and_top_clinics() -> None:
     assert proxy["staging_max_egmid"] == 29261989
 
 
+def test_fetch_healthcheck_snapshot_fact_fallback_when_staging_empty() -> None:
+    """Если outbound staging пуст, подмешиваем агрегаты из fact_egisz_transactions."""
+    signals_rows: list[Any] = []
+    by_clinic_rows: list[Any] = []
+    proxy_empty = (0, 0, 0, None, None, 0, 0, 0, 0, None, None)
+    fact_agg = [(1646, 12, 29261980)]
+
+    con = _FakeConn([signals_rows, by_clinic_rows, [proxy_empty], fact_agg])
+    out = fetch_healthcheck_snapshot(con, top_clinics=2)
+
+    proxy = out["proxy_db"]
+    assert proxy["stg_outbound_total"] == 0
+    assert proxy["fact_rows"] == 1646
+    assert proxy["fact_without_egmid"] == 12
+    assert proxy["fact_max_egmid"] == 29261980
+
+
 def test_fetch_healthcheck_snapshot_records_errors_per_view() -> None:
     """Если v_health_signals недоступна (например, схема не применена), снимок остаётся валидным."""
     import psycopg2

@@ -21,9 +21,9 @@ def _run_sync_job(config_path: str, merged_dict: dict[str, Any] | None = None) -
         with _state_lock:
             _state["message"] = m
 
-    def boot_progress(phase: str) -> None:
+    def boot_progress(phase: str, **extra: Any) -> None:
         with _state_lock:
-            _state["progress"] = {"phase": phase}
+            _state["progress"] = {"phase": phase, **extra}
 
     log("Синхронизация: фоновый поток стартовал; загрузка модулей и конфигурации…")
     boot_progress("pipeline_bootstrap")
@@ -39,6 +39,8 @@ def _run_sync_job(config_path: str, merged_dict: dict[str, Any] | None = None) -
             cfg = parse_corp_config_dict(merged_dict)
         else:
             cfg = load_corp_config()
+
+        boot_progress("etl_config_ready")
 
         def on_progress_detail(payload: dict[str, Any]) -> None:
             with _state_lock:

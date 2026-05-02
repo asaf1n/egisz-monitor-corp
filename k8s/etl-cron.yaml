@@ -1,13 +1,5 @@
-# CronJob: периодический sync Firebird → Postgres каждые 15 минут.
-# Использует тот же образ что conf-ui (egisz-conf-ui:corp-web), CLI `egisz-monitor sync`,
-# конфиг — Secret egisz-monitor-conf-ui-config (через init-container, как в Deployment).
-#
-# Single-flight: pg_try_advisory_lock(hash(pipeline_name)) в run_sync блокирует
-# параллельный запуск из UI-кнопки. Если CronJob тикнул во время ручного запуска —
-# CLI выйдет с кодом 75 (sync_skipped), Job будет Failed, но без двойной записи в PG.
-#
-# concurrencyPolicy: Forbid — даже без advisory lock'а Kubernetes не запустит второй pod,
-# пока предыдущий не завершился (защита от долгого Firebird, перекрывающего следующий слот).
+# Периодический sync Firebird → Postgres. Образ и Secret — как у Deployment conf-ui.
+# suspend: true — по умолчанию выключено; расписание и intent см. auto_sync в egisz_monitor.yaml.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -17,17 +9,19 @@ metadata:
     app.kubernetes.io/name: egisz-monitor-sync
     app.kubernetes.io/component: etl
 spec:
+  suspend: true
   schedule: "*/15 * * * *"
   timeZone: "Etc/UTC"
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 600
-  successfulJobsHistoryLimit: 3
-  failedJobsHistoryLimit: 5
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
       backoffLimit: 1
       ttlSecondsAfterFinished: 3600
-      activeDeadlineSeconds: 1800
+      # Полный цикл на реальной FB/PG часто >30 мин; 1800 с убивал pod до UPSERT фактов → витрина 0, Metabase пустой.
+      activeDeadlineSeconds: 21600
       template:
         metadata:
           labels:
@@ -61,7 +55,7 @@ spec:
                   mountPath: /work
           containers:
             - name: sync
-              image: egisz-conf-ui:corp-web
+              image: egisz-conf-ui:sync-web
               imagePullPolicy: IfNotPresent
               command: ["egisz-monitor", "sync"]
               env:

@@ -82,8 +82,8 @@ spec:
               mountPath: /work
       containers:
         - name: conf-ui
-          # Тег corp-web пересобирается из latest в start.ps1 (Invoke-DockerBuild), чтобы Docker Desktop K8s подхватывал новый digest.
-          image: egisz-conf-ui:corp-web
+          # Тег sync-web пересобирается из latest в start.ps1 (Invoke-DockerBuild), чтобы Docker Desktop K8s подхватывал новый digest.
+          image: egisz-conf-ui:sync-web
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080

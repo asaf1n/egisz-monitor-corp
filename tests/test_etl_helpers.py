@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 import pytest
 
 from egisz_monitor_corp.config_loader import (
+    AutoSyncConfig,
     CorpAppConfig,
     EtlConfig,
     FirebirdConfig,
@@ -54,6 +55,7 @@ def _cfg(sync_window_days: int = 30, source_query: str | None = None) -> CorpApp
             source_query=source_query,
         ),
         metabase={},
+        auto_sync=AutoSyncConfig(),
     )
 
 

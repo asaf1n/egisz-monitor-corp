@@ -120,6 +120,8 @@ GROUP BY 1;
 
 **Требуется** после `POST /api/database/:id/sync_schema` в скрипте, чтобы `resolve_field_id` нашёл `field_name`. Если сопоставление не сработает, в логе provижнинга будет: `metabase-field-filters: field not found`.
 
+**Сводный справочник** (какой `dwh_date` к какой таблице/колонке на каком дашборде, плюс текстовые `top_semd` / `top_clinic` / `err_parse_code`): `metabase_dashboards/field_filter_defaults.yaml` — обновляйте вместе с JSON при смене SQL или параметров.
+
 ## Деплой и обновление карточек (GitHub Actions / CI)
 
 JSON из `metabase_dashboards/` попадают в Metabase **только** когда в поде выполняется **`/app/setup-dashboards.sh`** (его вызывает **`metabase/provision.sh`** при старте контейнера Metabase).

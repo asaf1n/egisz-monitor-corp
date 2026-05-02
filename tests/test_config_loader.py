@@ -109,6 +109,35 @@ def test_etl_max_msgtext_bytes_zero_means_disabled() -> None:
     assert cfg.etl.max_msgtext_bytes is None
 
 
+def test_auto_sync_and_interleave_defaults_from_minimal_yaml(tmp_path: Path) -> None:
+    p = tmp_path / "cfg.yaml"
+    p.write_text(
+        _minimal_yaml_text(None).replace("etl: {}", "etl:\n  interleave_page_rows: 4000\n"),
+        encoding="utf-8",
+    )
+    cfg = load_corp_config(p)
+    assert cfg.auto_sync.enabled is False
+    assert cfg.auto_sync.schedule_cron == "*/15 * * * *"
+    assert cfg.auto_sync.timezone == "Etc/UTC"
+    assert cfg.etl.interleave_page_rows == 4000
+
+
+def test_auto_sync_from_yaml_and_interleave_clamp() -> None:
+    cfg = parse_corp_config_dict(
+        {
+            "firebird": {"host": "h", "port": 1, "database": "d", "user": "u", "password": "p"},
+            "postgres": {"host": "h", "port": 2, "database": "d", "user": "u", "password": "p"},
+            "etl": {"interleave_page_rows": 999999},
+            "auto_sync": {"enabled": True, "schedule_cron": "0 * * * *", "timezone": "Europe/Moscow"},
+        },
+        use_yaml_postgres_only=True,
+    )
+    assert cfg.etl.interleave_page_rows == 65_000
+    assert cfg.auto_sync.enabled is True
+    assert cfg.auto_sync.schedule_cron == "0 * * * *"
+    assert cfg.auto_sync.timezone == "Europe/Moscow"
+
+
 def test_logical_config_path_strips_k8s_secret_timestamp_dir(monkeypatch) -> None:
     """EGISZ_MONITOR_CONFIG may contain resolved K8s Secret path; UI shows mount dir + file."""
     monkeypatch.delenv("CONFIG_WRITE_PATH", raising=False)

@@ -156,6 +156,16 @@ def test_index_html_uses_null_safe_bind_click(cfg_yaml: Path) -> None:
     assert "function bindClick" in html
     assert "bindClick('btnSaveYaml'" in html
     assert "bindClick('btnSync'" in html
+    assert 'id="rightAsideShell"' in html
+    assert 'id="btnRightAsideToggle"' in html
+    assert "function formatSyncStatusBlock" in html
+    assert "function loadPgSyncSnapshotOnce" in html
+    assert "function etlStatusOneLine" in html
+    assert "function statusLinePhrase" in html
+    assert "function connStatusStripState" in html
+    assert "function buildSystemLogText" in html
+    assert 'name="etl_interleave_page_rows"' in html
+    assert "auto_sync_schedule_cron" in html
     assert "document.getElementById('btnSaveYaml').onclick" not in html
     assert "document.getElementById('btnPgBackup').onclick" not in html
 

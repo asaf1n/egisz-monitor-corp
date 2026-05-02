@@ -114,10 +114,14 @@ PAGE = """
 <body class="min-h-[100dvh] min-h-screen bg-[#121826] text-white lg:h-screen lg:overflow-hidden pb-[env(safe-area-inset-bottom,0px)]">
   <div class="mx-auto flex w-full min-h-[100dvh] min-w-0 max-w-[min(96rem,calc(100vw-1.5rem))] flex-col px-3 py-3 sm:px-[clamp(1rem,4vw,2.5rem)] sm:py-5 lg:min-h-0 lg:h-screen lg:flex-row lg:items-stretch lg:gap-4 lg:py-3">
     <div class="flex min-h-0 min-w-0 flex-1 flex-col lg:min-h-0 lg:overflow-y-auto lg:overflow-x-hidden lg:overscroll-y-contain">
-    <nav class="mb-3 flex min-h-[2.75rem] shrink-0 items-center justify-center gap-3 text-sm text-[#D1D5DB] lg:text-xs">
+    <nav class="mb-3 flex min-h-[2.75rem] shrink-0 flex-wrap items-center justify-center gap-3 text-sm text-[#D1D5DB] lg:text-xs">
       <span class="text-[#509EE3]">FB2PG Sync</span>
       <span class="text-[#4B5563]">|</span>
       <a href="/" class="text-[#4B5563] transition hover:text-[#509EE3]">Обновить страницу</a>
+      <span class="hidden text-[#4B5563] lg:inline">|</span>
+      <button type="button" id="btnRightAsideToggle" class="hidden rounded border border-[#2D3F5E] bg-[#1B2940] px-2.5 py-1.5 font-mono text-[11px] text-[#D1D5DB] transition hover:border-[#509EE3] hover:text-white lg:inline-flex">
+        Скрыть панель
+      </button>
     </nav>
 
     <section class="flex min-h-0 flex-1 flex-col rounded-xl border border-[#1B2940] bg-[#0F1522] px-4 py-4 shadow-lg sm:px-6 sm:py-5 lg:min-h-0 lg:flex-1 lg:px-8 lg:py-4 lg:flex lg:flex-col">
@@ -212,10 +216,10 @@ PAGE = """
         </div>
 
         <div id="connStatusStrip" class="relative rounded-md border border-transparent bg-transparent min-h-[2.75rem] overflow-hidden text-xs sm:text-sm font-mono transition-[background-color,border-color,color] duration-150" role="status" aria-live="polite">
-          <div id="connStatusProgressFill" class="absolute inset-y-0 left-0 top-0 transition-[width] duration-300 ease-out" style="width:0%"></div>
-          <div class="relative z-[1] flex min-h-[2.75rem] w-full items-start justify-start gap-3 px-3 py-2 text-left lg:min-h-[2.75rem]">
-            <span id="connStatusText" class="min-w-0 flex-1 whitespace-pre-line text-inherit leading-snug break-words"></span>
-            <span id="connStatusPct" class="hidden shrink-0 font-mono tabular-nums text-inherit min-w-[3rem] text-right"></span>
+          <div id="connStatusProgressFill" class="absolute inset-y-0 left-0 top-0 z-0 transition-[width] duration-300 ease-out" style="width:0%"></div>
+          <div class="relative z-[1] flex min-h-[2.75rem] w-full items-center justify-center px-8 py-2 pr-12 text-center lg:min-h-[2.75rem]">
+            <span id="connStatusText" class="pointer-events-none block w-full min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-center text-inherit leading-tight" title=""></span>
+            <span id="connStatusPct" class="hidden absolute right-2.5 top-1/2 z-[2] -translate-y-1/2 font-mono tabular-nums text-inherit" aria-hidden="true"></span>
           </div>
         </div>
 
@@ -241,7 +245,7 @@ PAGE = """
                 <h2 class="text-sm font-medium uppercase tracking-[0.12em] text-[#9CA3AF] lg:text-[11px] lg:font-normal lg:tracking-[0.16em] lg:text-[#4B5563]">ETL Configuration</h2>
               </div>
               <p class="mb-3 max-w-2xl text-sm leading-relaxed text-[#9CA3AF] lg:text-[11px] lg:leading-snug">Полный цикл Firebird → PostgreSQL в фоне. Не закрывайте вкладку до завершения.</p>
-              <div class="grid max-w-lg grid-cols-1 gap-3 sm:grid-cols-2 sm:items-end lg:grid-cols-2">
+              <div class="grid max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2 sm:items-end lg:grid-cols-3">
                 <label class="block w-full max-w-none sm:max-w-[8rem]">
                   <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px] lg:tracking-[0.16em] lg:text-[#4B5563]">batch_size</span>
                   <input name="etl_batch" type="number" value="{{ etl.batch_size }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
@@ -250,6 +254,29 @@ PAGE = """
                   <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px] lg:tracking-[0.16em] lg:text-[#4B5563]">sync_window_days</span>
                   <input name="etl_sync_days" type="number" value="{{ etl.sync_window_days }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
                 </label>
+                <label class="block w-full max-w-none sm:max-w-[10rem] lg:max-w-none">
+                  <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px] lg:tracking-[0.16em] lg:text-[#4B5563]">interleave_page_rows</span>
+                  <input name="etl_interleave_page_rows" type="number" min="1" max="65000" value="{{ etl.interleave_page_rows }}" title="Размер страницы FIRST n при чередовании EGISZ_MESSAGES / EXCHANGELOG в Firebird (верхняя граница 65000)." class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+                </label>
+              </div>
+              <div class="mt-4 max-w-2xl rounded-lg border border-[#1B2940] bg-[#121826]/80 px-3 py-3 lg:py-2.5">
+                <div class="mb-2 text-[11px] font-medium uppercase tracking-[0.14em] text-[#509EE3]">Автосинхронизация (YAML)</div>
+                <p class="mb-2 text-xs leading-relaxed text-[#9CA3AF]">Эти поля попадают в YAML при нажатии «Сохранить в YAML» (и дальше в Secret для подов). Порядок: задайте расписание и таймзону → сохраните → в кластере для CronJob <code class="text-[#E5E7EB]">egisz-monitor-sync</code> выставьте <code class="text-[#E5E7EB]">suspend: false</code>, когда нужен автозапуск; <code class="text-[#E5E7EB]">enabled</code> в файле — ваше намерение в конфиге, оно не переключает k8s само по себе.</p>
+                <p class="mb-3 text-[10px] leading-relaxed text-[#6B7280]">Cron: ровно <strong class="text-[#9CA3AF]">5 полей</strong> через пробел: <code class="text-[#C4D4E8]">минута час день(месяца) месяц день(недели)</code>. Примеры: <code class="text-[#C4D4E8]">*/15 * * * *</code> — каждые 15&nbsp;мин; <code class="text-[#C4D4E8]">0 3 * * *</code> — 03:00 (в zone из timezone). IANA: <code class="text-[#C4D4E8]">Europe/Moscow</code>, <code class="text-[#C4D4E8]">Etc/UTC</code>.</p>
+                <label class="flex cursor-pointer items-center gap-2 text-sm text-[#D1D5DB]">
+                  <input type="checkbox" name="auto_sync_enabled" value="1" class="h-4 w-4 shrink-0 rounded border-[#2D3F5E] bg-[#0F1522] text-[#509EE3] focus:ring-[#509EE3]" {% if auto_sync.enabled %}checked{% endif %}/>
+                  <span class="font-mono text-xs uppercase tracking-[0.12em] text-[#9CA3AF]">auto_sync.enabled</span>
+                </label>
+                <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <label class="block min-w-0">
+                    <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px]">schedule_cron (5 полей)</span>
+                    <input name="auto_sync_schedule_cron" value="{{ auto_sync.schedule_cron|default('*/15 * * * *', true) }}" pattern="\\S+(?:\\s+\\S+){4}" maxlength="120" placeholder="*/15 * * * *" spellcheck="false" title="5 полей через пробел: минута час день месяц день_недели. Разрешены *, /, числа, имёна (MON…)." class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+                  </label>
+                  <label class="block min-w-0">
+                    <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px]">timezone (IANA)</span>
+                    <input name="auto_sync_timezone" value="{{ auto_sync.timezone|default('Etc/UTC', true) }}" maxlength="80" placeholder="Etc/UTC" spellcheck="false" title="Имя зоны IANA, как в Kubernetes: Europe/Moscow, Asia/Yekaterinburg, …" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+                  </label>
+                </div>
               </div>
               <div class="mt-3 flex min-h-[2.75rem] w-full flex-wrap items-center gap-3">
               </div>
@@ -259,7 +286,7 @@ PAGE = """
           <div class="flex min-h-0 w-full shrink-0 flex-col gap-2 rounded-lg border border-[#2D3F5E] bg-[#121826] px-3 py-3 lg:h-full lg:max-h-none lg:min-h-0 lg:gap-1.5 lg:overflow-y-auto lg:py-2 fixed-scroll">
             <div class="mb-1 shrink-0">
               <h2 class="text-sm font-semibold tracking-tight text-[#D1D5DB] lg:text-sm">Последние значения синхронизации</h2>
-              <p id="pgSnapHint" class="mt-1 hidden text-[10px] leading-snug text-[#6B7280] lg:text-[10px]">Пока идёт синк: LOGID и EGMID ниже подменяются значениями из текущего прогона ETL (payload), это не обязательно уже зафиксированные в PostgreSQL курсоры.</p>
+              <p id="pgSnapHint" class="mt-1 hidden text-[10px] leading-snug text-[#6B7280] lg:text-[10px]">Пока идёт синк: LOGID и EGMID ниже подменяются значениями из текущего прогона ETL (payload), это не обязательно уже зафиксированные в PostgreSQL курсоры. Снимок из БД обновляется каждые ~10&nbsp;с и сразу после завершения синхронизации.</p>
             </div>
 
             <section id="tabSnapshot" class="flex flex-col gap-2.5">
@@ -296,14 +323,14 @@ PAGE = """
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
               </button>
             </div>
-            <pre id="syncStatus" class="max-h-48 min-h-[2.25rem] flex-1 overflow-y-auto whitespace-pre-wrap font-mono text-xs leading-relaxed text-[#D1D5DB] sm:max-h-56 lg:max-h-none lg:text-[11px]"></pre>
+            <pre id="syncStatus" data-raw="" class="max-h-48 min-h-[6rem] flex-1 overflow-y-auto whitespace-pre-wrap font-mono text-xs leading-relaxed text-[#D1D5DB] sm:max-h-56 lg:max-h-none lg:min-h-[8rem] lg:text-[11px]"></pre>
           </div>
         </div>
       </form>
     </section>
     </div>
 
-    <aside class="mt-5 flex w-full min-h-0 flex-1 flex-col gap-3 border-t border-[#1B2940] pt-5 lg:mt-0 lg:h-full lg:w-[min(30rem,38vw)] lg:max-w-[min(34rem,44vw)] lg:flex-none lg:shrink-0 lg:self-stretch lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
+    <aside id="rightAsideShell" class="mt-5 flex w-full min-h-0 flex-1 flex-col gap-3 border-t border-[#1B2940] pt-5 lg:mt-0 lg:h-full lg:w-[min(30rem,38vw)] lg:max-w-[min(34rem,44vw)] lg:flex-none lg:shrink-0 lg:self-stretch lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
       {% if metabase_site_url %}
       <a href="{{ metabase_site_url }}" target="_blank" rel="noopener noreferrer" class="inline-flex min-h-12 w-full shrink-0 items-center justify-center rounded-md border border-[#509EE3]/90 bg-[#1B2940] px-3 py-3 text-center text-sm font-semibold uppercase tracking-[0.12em] text-[#E5F6FF] transition hover:border-[#60B5FF] hover:bg-[#223555] lg:min-h-0 lg:py-2.5 lg:text-[11px] lg:tracking-[0.14em]">
         Metabase →
@@ -348,7 +375,8 @@ PAGE = """
 
   <script>
   let lastSyncJson = { running: false, error: null, message: '', last_stats: null };
-  let lastUiMessage = { ok: true, text: '' };
+  let wasSyncRunning = false;
+  let lastUiMessage = { ok: true, strip: '', logBody: '' };
   const STRIP_BASE =
     'relative rounded-md border min-h-[2.75rem] overflow-hidden text-xs sm:text-sm font-mono transition-[background-color,border-color,color] duration-150';
   function etlPhaseLabelRu(phase) {
@@ -485,20 +513,42 @@ PAGE = """
     }
     return { indeterminate: true, pct: null, label: '…' };
   }
-  function connStatusMainText(j) {
-    const msg = j && j.message != null ? String(j.message).trim() : '';
-    const p = j && j.progress && typeof j.progress === 'object' ? j.progress : null;
-    const phase = p ? String(p.phase || '') : '';
-    const head = phase ? etlPhaseLabelRu(phase) : '';
-    const facts = p ? etlProgressFactsLine(p) : '';
-    if (!j || !j.running) return msg;
-    const parts = [];
-    if (head) parts.push(head);
-    if (msg) parts.push(msg);
-    if (facts) parts.push(facts);
-    let s = parts.join('\\n');
-    if (s.length > 1200) s = s.slice(0, 1197) + '…';
-    return s || 'Синхронизация';
+  /** Один визуальный ряд для system log. */
+  function etlStatusOneLine(s) {
+    return String(s)
+      .replace(/\\r\\n|\\r|\\n/g, ' ')
+      .replace(/\\s+/g, ' ')
+      .trim();
+  }
+  /** Одна короткая фраза в строке состояния (без второго предложения и длинного текста). */
+  function statusLinePhrase(raw, maxLen) {
+    if (raw == null) return '';
+    const t = etlStatusOneLine(String(raw));
+    if (!t) return '';
+    const lim = maxLen != null ? maxLen : 42;
+    let u = t.split(/[;]|\\s+—\\s+|[.]{3,}/)[0].trim();
+    if (u.length > lim) u = u.slice(0, Math.max(0, lim - 1)) + '…';
+    return u;
+  }
+  /** Порядок: идёт синк → ошибка ETL → сообщение с кнопок (проверка/сейв) → завершённый синк → готов. */
+  function connStatusStripState(j, ui) {
+    const m = (ui && ui.strip) ? String(ui.strip).trim() : '';
+    const logHint = 'См. system log';
+    if (j && j.running) {
+      return { key: 'sync', title: 'Синхронизация', hint: logHint, classBar: 'border-[#509EE3]/85 bg-[#0C4A6E]/60 text-[#E5F6FF]' };
+    }
+    if (j && j.error) {
+      return { key: 'sync_err', title: 'Ошибка синхронизации', hint: logHint, classBar: 'border-orange-700/80 bg-orange-900/40 text-orange-100' };
+    }
+    if (m) {
+      return ui && ui.ok
+        ? { key: 'db_ok', title: statusLinePhrase(m, 40) || 'Готово', hint: logHint, classBar: 'border-emerald-800/80 bg-emerald-900/25 text-emerald-300' }
+        : { key: 'db_err', title: statusLinePhrase(m, 40) || 'Ошибка', hint: logHint, classBar: 'border-rose-800/80 bg-rose-900/30 text-rose-200' };
+    }
+    if (j && j.last_stats) {
+      return { key: 'sync_done', title: 'Синхронизация завершена', hint: logHint, classBar: 'border-emerald-800/80 bg-emerald-900/25 text-emerald-300' };
+    }
+    return { key: 'idle', title: 'Готов к работе', hint: logHint, classBar: 'border-transparent bg-transparent text-[#9CA3AF]' };
   }
   function syncProgressMetaBlock(j) {
     const p = j && j.progress && typeof j.progress === 'object' ? j.progress : null;
@@ -528,17 +578,20 @@ PAGE = """
     const pctEl = document.getElementById('connStatusPct');
     if (!wrap || !textEl || !fill || !pctEl) return;
     const j = lastSyncJson;
+    const ui = lastUiMessage;
+    const st = connStatusStripState(j, ui);
     wrap.className = STRIP_BASE;
+    if (st.classBar) {
+      st.classBar.split(/\\s+/).forEach(function (c) { if (c) wrap.classList.add(c); });
+    }
     fill.classList.remove('sync-progress-indeterminate');
     fill.style.width = '0%';
-    pctEl.className = 'hidden shrink-0 font-mono tabular-nums text-inherit min-w-[3rem] text-right';
-    pctEl.textContent = '';
-    if (j.running) {
+    textEl.textContent = statusLinePhrase(st.title, 40);
+    textEl.setAttribute('title', st.hint && String(st.hint).trim() ? String(st.hint) : st.title);
+    if (j && j.running) {
       const p = j.progress;
       const bar = etlBarVisual(p && typeof p === 'object' ? p : null);
-      wrap.classList.add('border-[#509EE3]/85', 'bg-[#0C4A6E]/60', 'text-[#E5F6FF]');
-      textEl.textContent = connStatusMainText(j);
-      pctEl.className = 'shrink-0 font-mono tabular-nums text-inherit min-w-[3rem] text-right';
+      pctEl.className = 'absolute right-2.5 top-1/2 z-[2] -translate-y-1/2 font-mono tabular-nums text-inherit';
       pctEl.textContent = bar.label;
       if (bar.indeterminate) {
         fill.classList.add('sync-progress-indeterminate');
@@ -546,31 +599,13 @@ PAGE = """
       } else {
         fill.style.width = (bar.pct != null ? bar.pct : 0) + '%';
       }
-      return;
-    }
-    if (j.error) {
-      wrap.classList.add('border-orange-700/80', 'bg-orange-900/30', 'text-orange-200');
-      textEl.textContent = 'Ошибка синхронизации ETL: ' + String(j.error);
-      pctEl.className = 'shrink-0 font-mono tabular-nums text-inherit min-w-[3rem] text-right';
+    } else if (j && j.error) {
+      pctEl.className = 'absolute right-2.5 top-1/2 z-[2] -translate-y-1/2 font-mono tabular-nums text-inherit';
       pctEl.textContent = '!';
-      return;
+    } else {
+      pctEl.className = 'hidden';
+      pctEl.textContent = '';
     }
-    if (lastUiMessage.text) {
-      if (lastUiMessage.ok) {
-        wrap.classList.add('border-emerald-800/80', 'bg-emerald-900/25', 'text-emerald-400');
-      } else {
-        wrap.classList.add('border-rose-800/80', 'bg-rose-900/30', 'text-rose-300');
-      }
-      textEl.textContent = lastUiMessage.text;
-      return;
-    }
-    if (j.last_stats) {
-      wrap.classList.add('border-emerald-800/80', 'bg-emerald-900/25', 'text-emerald-400');
-      textEl.textContent = (j.message && String(j.message).trim()) ? String(j.message).trim() : 'Синхронизация завершена.';
-      return;
-    }
-    wrap.classList.add('border-transparent', 'bg-transparent', 'text-[#9CA3AF]');
-    textEl.textContent = 'Готов к работе';
   }
   const PG_SNAP_MONTHS_RU = [
     'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
@@ -620,112 +655,68 @@ PAGE = """
       'LICENSES.MODIFYDATE: ' + licV,
     ];
   }
-  const SYNC_BANNER_BASE = 'relative mt-2 lg:mt-0 overflow-hidden rounded-lg border transition-[border-color,background-color] duration-200 lg:shrink-0 ';
-  const SYNC_FILL_CURRENT = 'absolute inset-y-0 left-0 top-0 rounded-l-lg transition-[width] duration-300 ease-out';
-  const SYNC_TITLE_BLUE = 'text-[11px] uppercase tracking-[0.16em] font-semibold text-[#509EE3]';
-  const SYNC_TITLE_GREEN = 'text-[11px] uppercase tracking-[0.16em] font-semibold text-emerald-200';
-  const SYNC_TITLE_RED = 'text-[11px] uppercase tracking-[0.16em] font-semibold text-rose-100';
-  const SYNC_TITLE_ORANGE = 'text-[11px] uppercase tracking-[0.16em] font-semibold text-orange-100';
-  const SYNC_META_BASE = 'mt-2 lg:mt-0 whitespace-pre-line font-mono text-[10px] leading-relaxed min-h-[2.25rem] lg:h-[4.75rem] lg:overflow-y-auto fixed-scroll transition-colors duration-200 ';
-  function setProgressTheme(banner, theme) {
-    if (!banner) return;
-    banner.className = SYNC_BANNER_BASE + 'sync-theme-' + theme;
-  }
-  function setBarIndeterminate(bar, on) {
-    if (!bar) return;
-    if (on) bar.classList.add('sync-progress-indeterminate');
-    else bar.classList.remove('sync-progress-indeterminate');
-  }
-  function renderProgress(j) {
-    const banner = document.getElementById('syncBanner');
-    const titleEl = document.getElementById('syncBannerTitle');
-    const fill = document.getElementById('syncBannerProgressFill');
-    const pctEl = document.getElementById('syncBannerPct');
-    const meta = document.getElementById('syncProgressMeta');
-    const p = j.progress;
-
-    if (!banner || !titleEl || !fill || !pctEl || !meta) return;
-    fill.className = SYNC_FILL_CURRENT;
-
-    if (!j.running && j.error) {
-      setProgressTheme(banner, 'orange');
-      titleEl.className = SYNC_TITLE_ORANGE;
-      titleEl.textContent = 'Ошибка';
-      fill.style.width = '100%';
-      setBarIndeterminate(fill, false);
-      pctEl.textContent = '!';
-      const errLine = j.error ? String(j.error) : '';
-      const msgLine = (j.message && String(j.message).trim()) ? String(j.message).trim() : '';
-      let metaBody = '';
-      if (msgLine && errLine && msgLine.indexOf(errLine) >= 0) metaBody = msgLine;
-      else if (msgLine && errLine) metaBody = msgLine + String.fromCharCode(10) + errLine;
-      else metaBody = msgLine || errLine || 'Синхронизация завершилась с ошибкой.';
-      meta.textContent = metaBody;
-      meta.className = SYNC_META_BASE + 'text-orange-200/95';
-      return;
+  function syncStatusSnapshotJson(j) {
+    try {
+      return JSON.stringify(
+        {
+          running: !!j.running,
+          error: j.error != null ? j.error : null,
+          message: j.message != null ? String(j.message) : '',
+          progress: j.progress != null ? j.progress : null,
+          last_stats: j.last_stats != null ? j.last_stats : null,
+        },
+        null,
+        2
+      );
+    } catch (e) {
+      return '{}';
     }
-
-    if (!j.running) {
-      if (j.last_stats) {
-        setProgressTheme(banner, 'green');
-        titleEl.className = SYNC_TITLE_GREEN;
-        titleEl.textContent = 'Готово';
-        fill.style.width = '100%';
-        setBarIndeterminate(fill, false);
-        pctEl.textContent = '100%';
-        meta.textContent = (j.message && String(j.message).trim()) ? String(j.message).trim() : 'Синхронизация завершена.';
-        meta.className = SYNC_META_BASE + 'text-emerald-100';
-        return;
+  }
+  function formatSyncStatusBlock(j) {
+    const lines = [];
+    const msg = j.message != null ? String(j.message).trim() : '';
+    if (j.running) {
+      lines.push(syncProgressMetaBlock(j));
+      if (msg && /Предупреждение/i.test(msg)) lines.push(msg);
+    } else {
+      if (msg) lines.push(msg);
+      if (j.error) lines.push('Статус: ошибка');
+      else if (j.last_stats) lines.push('Статус: выполнено');
+      else lines.push('Статус: ожидание');
+      if (j.error) {
+        const errStr = String(j.error);
+        if (!msg || msg.indexOf(errStr) < 0) lines.push('Ошибка: ' + errStr);
       }
-      setProgressTheme(banner, 'blue');
-      titleEl.className = SYNC_TITLE_BLUE;
-      titleEl.textContent = 'Синхронизация';
-      fill.style.width = '0%';
-      setBarIndeterminate(fill, false);
-      pctEl.textContent = '';
-      meta.textContent = '';
-      meta.className = SYNC_META_BASE + 'text-[#9CA3AF]';
-      return;
+      if (j.last_stats) lines.push(JSON.stringify(j.last_stats, null, 2));
     }
-
-    const phase = p && typeof p === 'object' ? String(p.phase || '') : '';
-    const outboundPhase =
-      phase === 'outbound_firebird' ||
-      phase === 'outbound_fetch' ||
-      phase === 'outbound_parse' ||
-      phase === 'outbound_postgres' ||
-      phase === 'outbound_done';
-    if (outboundPhase) {
-      setProgressTheme(banner, 'orange');
-      titleEl.className = SYNC_TITLE_ORANGE;
-    } else {
-      setProgressTheme(banner, 'blue');
-      titleEl.className = SYNC_TITLE_BLUE;
-    }
-    titleEl.textContent = 'Синхронизация';
-    meta.className = SYNC_META_BASE + 'text-[#9CA3AF]';
-
-    if (!p || typeof p !== 'object') {
-      fill.style.width = '';
-      setBarIndeterminate(fill, true);
-      pctEl.textContent = '…';
-      meta.textContent = syncProgressMetaBlock(j);
-      return;
-    }
-
-    const bar = etlBarVisual(p);
-    if (bar.indeterminate) {
-      fill.style.width = '';
-      setBarIndeterminate(fill, true);
-      pctEl.textContent = bar.label;
-    } else {
-      setBarIndeterminate(fill, false);
-      fill.style.width = (bar.pct != null ? bar.pct : 0) + '%';
-      pctEl.textContent = bar.label;
-    }
-    meta.textContent = syncProgressMetaBlock(j);
+    return lines.filter(Boolean).join(String.fromCharCode(10));
   }
-  async function pollPgSnapshot() {
+  function buildSystemLogText(j) {
+    const core = formatSyncStatusBlock(j);
+    if (lastUiMessage && lastUiMessage.logBody && String(lastUiMessage.logBody).trim() && !(j && j.running)) {
+      return core + (core ? String.fromCharCode(10) + String.fromCharCode(10) : '') + '—' + String.fromCharCode(10) + 'Действия (кнопки):' + String.fromCharCode(10) + String(lastUiMessage.logBody);
+    }
+    return core;
+  }
+  function applySyncStatusFromPoll(j, el) {
+    if (!el || syncStartInFlight) return;
+    el.textContent = buildSystemLogText(j);
+    var rawObj;
+    try {
+      rawObj = JSON.parse(syncStatusSnapshotJson(j));
+    } catch (e) {
+      rawObj = { running: !!j.running, error: j.error, message: j.message };
+    }
+    if (lastUiMessage && lastUiMessage.logBody) {
+      rawObj.ui_log = String(lastUiMessage.logBody);
+    }
+    try {
+      el.setAttribute('data-raw', JSON.stringify(rawObj, null, 2));
+    } catch (e2) {
+      el.setAttribute('data-raw', syncStatusSnapshotJson(j));
+    }
+  }
+  async function loadPgSyncSnapshotOnce() {
     const logEl = document.getElementById('pgSnapLogId');
     const egEl = document.getElementById('pgSnapEgmid');
     const licEl = document.getElementById('pgSnapLicMd');
@@ -899,6 +890,9 @@ PAGE = """
         { label: 'EGMID lag', value: fmtNum(p.egmid_lag) },
         { label: 'last_log_id', value: fmtNum(p.etl_last_log_id) },
       ];
+      if (p.fact_rows != null) items.push({ label: 'Витрина: строк', value: fmtNum(p.fact_rows) });
+      if (p.fact_without_egmid != null) items.push({ label: 'Витрина: без EGMID', value: fmtNum(p.fact_without_egmid) });
+      if (p.fact_max_egmid != null) items.push({ label: 'Витрина: max EGMID', value: fmtNum(p.fact_max_egmid) });
       for (const it of items) {
         const li = document.createElement('li');
         li.className = 'flex items-baseline justify-between gap-2 min-w-0';
@@ -963,34 +957,18 @@ PAGE = """
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const j = await r.json();
       POLL_FAIL.sync = 0;
+      const prevRun = wasSyncRunning;
+      wasSyncRunning = !!j.running;
+      if (j.running && !prevRun) {
+        lastUiMessage = { ok: true, strip: '', logBody: '' };
+      }
+      if (prevRun && !wasSyncRunning) {
+        loadPgSyncSnapshotOnce();
+      }
       lastSyncJson = j;
       setPgSnapHintVisible(!!j.running);
-      renderProgress(j);
       refreshConnStatusStrip();
-      const parts = [];
-      const msg = j.message != null ? String(j.message).trim() : '';
-      if (j.running) {
-        parts.push(syncProgressMetaBlock(j));
-        if (msg && /Предупреждение/i.test(msg)) parts.push(msg);
-      } else {
-        if (msg) parts.push(msg);
-        if (j.error) {
-          parts.push('Статус: ошибка');
-        } else if (j.last_stats) {
-          parts.push('Статус: выполнено');
-        } else {
-          parts.push('Статус: ожидание');
-        }
-      }
-      if (j.error) {
-        const errStr = String(j.error);
-        const already = msg && msg.indexOf(errStr) >= 0;
-        if (!already) parts.push('Ошибка: ' + errStr);
-      }
-      if (j.last_stats) parts.push(JSON.stringify(j.last_stats, null, 2));
-      if (!syncStartInFlight) {
-        el.textContent = parts.filter(Boolean).join(String.fromCharCode(10));
-      }
+      applySyncStatusFromPoll(j, el);
     } catch (e) {
       POLL_FAIL.sync += 1;
       // Один-два пропущенных тика во время rollout/port-forward — нормальное явление, не шумим.
@@ -999,12 +977,29 @@ PAGE = """
       const reason = transport
         ? 'conf-ui недоступен (rollout / port-forward / sleep). Повтор через несколько секунд.'
         : ('Ошибка опроса: ' + (e && e.message ? e.message : e));
-      if (el && !syncStartInFlight) el.textContent = reason;
+      if (el && !syncStartInFlight) {
+        el.textContent = reason;
+        try {
+          el.setAttribute('data-raw', JSON.stringify({ fetch_error: reason }, null, 2));
+        } catch (e2) {}
+      }
     }
   }
-  function showCfgMessage(ok, text) {
-    lastUiMessage = { ok: !!ok, text: text || '' };
+  function showCfgMessage(ok, text, opt) {
+    const o = opt || {};
+    const logBody = o.logBody != null ? o.logBody : (text != null ? String(text) : '');
+    var strip;
+    if (o.strip === undefined || o.strip === null) {
+      strip = ok ? '' : 'Ошибка';
+    } else {
+      strip = String(o.strip).trim();
+    }
+    lastUiMessage = { ok: !!ok, strip: strip, logBody: String(logBody) };
     refreshConnStatusStrip();
+    const elLog = document.getElementById('syncStatus');
+    if (elLog && !syncStartInFlight) {
+      applySyncStatusFromPoll(lastSyncJson, elLog);
+    }
   }
   async function postConfigForm(url) {
     const fd = new FormData(document.getElementById('configForm'));
@@ -1019,36 +1014,75 @@ PAGE = """
     try {
       j = JSON.parse(raw);
     } catch (e) {
-      showCfgMessage(false, 'Ответ сервера не JSON (код ' + r.status + '). ' + raw.slice(0, 400));
+      showCfgMessage(false, 'Ответ сервера не JSON (код ' + r.status + '). ' + raw.slice(0, 400), {
+        strip: 'Ошибка ответа',
+        logBody: 'Ответ сервера не JSON (код ' + r.status + '). ' + raw.slice(0, 400),
+      });
       return;
     }
-    showCfgMessage(!!j.ok, j.message || (j.ok ? 'OK' : 'Ошибка'));
+    const msg = j.message != null ? String(j.message) : (j.ok ? 'OK' : 'Ошибка');
+    var strip = '';
+    if (url === '/test-fb') {
+      strip = j.ok ? 'Проверка Firebird' : 'Ошибка Firebird';
+    } else if (url === '/test-pg') {
+      strip = j.ok ? 'Проверка PostgreSQL' : 'Ошибка PostgreSQL';
+    } else if (url === '/save') {
+      strip = j.ok ? 'Сохранено' : 'Ошибка записи';
+    } else {
+      strip = j.ok ? 'Готово' : 'Ошибка';
+    }
+    showCfgMessage(!!j.ok, msg, { strip: strip, logBody: msg });
   }
   function bindClick(id, fn) {
     var elBind = document.getElementById(id);
     if (elBind) elBind.addEventListener('click', fn);
     else if (typeof console !== 'undefined' && console.warn) console.warn('[config-ui] missing #' + id);
   }
+  const RIGHT_ASIDE_KEY = 'egisz_conf_ui_right_aside_collapsed';
+  function readAsideCollapsed() {
+    try {
+      return localStorage.getItem(RIGHT_ASIDE_KEY) === '1';
+    } catch (e) {
+      return false;
+    }
+  }
+  function writeAsideCollapsed(v) {
+    try {
+      localStorage.setItem(RIGHT_ASIDE_KEY, v ? '1' : '0');
+    } catch (e) {}
+  }
+  function applyRightAsideCollapsed(collapsed) {
+    const aside = document.getElementById('rightAsideShell');
+    const btn = document.getElementById('btnRightAsideToggle');
+    if (!aside || !btn) return;
+    if (collapsed) {
+      aside.classList.add('hidden', 'lg:hidden');
+      btn.textContent = 'Показать панель';
+    } else {
+      aside.classList.remove('hidden', 'lg:hidden');
+      btn.textContent = 'Скрыть панель';
+    }
+  }
   bindClick('btnSaveYaml', async function () {
     if (!confirm('Сохранить текущую конфигурацию из полей формы в YAML на сервере?')) return;
     try {
       await postConfigForm('/save');
     } catch (e) {
-      showCfgMessage(false, String(e));
+      showCfgMessage(false, String(e), { strip: 'Ошибка', logBody: String(e) });
     }
   });
   bindClick('btnTestFb', async function () {
     try {
       await postConfigForm('/test-fb');
     } catch (e) {
-      showCfgMessage(false, String(e));
+      showCfgMessage(false, String(e), { strip: 'Ошибка', logBody: String(e) });
     }
   });
   bindClick('btnTestPg', async function () {
     try {
       await postConfigForm('/test-pg');
     } catch (e) {
-      showCfgMessage(false, String(e));
+      showCfgMessage(false, String(e), { strip: 'Ошибка', logBody: String(e) });
     }
   });
   bindClick('btnPgBackup', async function () {
@@ -1061,7 +1095,7 @@ PAGE = """
         credentials: 'same-origin',
       });
     } catch (e) {
-      showCfgMessage(false, String(e));
+      showCfgMessage(false, String(e), { strip: 'Ошибка', logBody: String(e) });
       return;
     }
     if (!r.ok) {
@@ -1070,10 +1104,11 @@ PAGE = """
       try {
         j = JSON.parse(raw);
       } catch (e2) {
-        showCfgMessage(false, 'Бэкап: код ' + r.status + '. ' + raw.slice(0, 400));
+        showCfgMessage(false, 'Бэкап: код ' + r.status + '. ' + raw.slice(0, 400), { strip: 'Ошибка бэкапа', logBody: 'Бэкап: код ' + r.status + '. ' + raw.slice(0, 400) });
         return;
       }
-      showCfgMessage(false, (j && j.message) || raw.slice(0, 400));
+      const errMsg = (j && j.message) || raw.slice(0, 400);
+      showCfgMessage(false, errMsg, { strip: 'Ошибка бэкапа', logBody: errMsg });
       return;
     }
     const blob = await r.blob();
@@ -1095,7 +1130,7 @@ PAGE = """
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
-    showCfgMessage(true, 'Бэкап скачан.');
+    showCfgMessage(true, 'Бэкап скачан.', { strip: 'Бэкап', logBody: 'Бэкап скачан.' });
   });
   bindClick('btnPgRestore', async function () {
     const inp = document.getElementById('pgRestoreFile');
@@ -1115,7 +1150,7 @@ PAGE = """
         credentials: 'same-origin',
       });
     } catch (e) {
-      showCfgMessage(false, String(e));
+      showCfgMessage(false, String(e), { strip: 'Ошибка', logBody: String(e) });
       return;
     }
     const raw = await r.text();
@@ -1123,11 +1158,22 @@ PAGE = """
     try {
       j = JSON.parse(raw);
     } catch (e2) {
-      showCfgMessage(false, 'Ответ сервера не JSON (код ' + r.status + '). ' + raw.slice(0, 400));
+      showCfgMessage(false, 'Ответ сервера не JSON (код ' + r.status + '). ' + raw.slice(0, 400), { strip: 'Ошибка', logBody: raw.slice(0, 400) });
       return;
     }
-    showCfgMessage(!!j.ok, j.message || (j.ok ? 'OK' : 'Ошибка'));
+    const msgR = j.message != null ? String(j.message) : (j.ok ? 'OK' : 'Ошибка');
+    showCfgMessage(!!j.ok, msgR, {
+      strip: j.ok ? 'Восстановление' : 'Ошибка восстановления',
+      logBody: msgR,
+    });
     if (j.ok && inp) inp.value = '';
+  });
+  applyRightAsideCollapsed(readAsideCollapsed());
+  bindClick('btnRightAsideToggle', function () {
+    const aside = document.getElementById('rightAsideShell');
+    const collapsed = !!(aside && aside.classList.contains('hidden'));
+    writeAsideCollapsed(!collapsed);
+    applyRightAsideCollapsed(!collapsed);
   });
   var btnSyncEl = document.getElementById('btnSync');
   var btnSyncDefaultLabel = 'Запустить синхронизацию';
@@ -1143,6 +1189,7 @@ PAGE = """
       return;
     }
     if (btnSyncEl && btnSyncEl.disabled) return;
+    lastUiMessage = { ok: true, strip: '', logBody: '' };
     syncStartInFlight = true;
     if (btnSyncEl) {
       btnSyncEl.disabled = true;
@@ -1201,13 +1248,18 @@ PAGE = """
   // Опрос только пока вкладка видима. Скрытая вкладка через 5–10 минут sleep'а
   // получала залп fetch'ей разом и стабильно ловила TypeError: Failed to fetch.
   let fastTimer = null;
+  let snapTimer = null;
   let slowTimer = null;
   function startPolling() {
     if (fastTimer == null) {
       fastTimer = setInterval(function () {
         pollSync();
-        pollPgSnapshot();
       }, 1500);
+    }
+    if (snapTimer == null) {
+      snapTimer = setInterval(function () {
+        loadPgSyncSnapshotOnce();
+      }, 10000);
     }
     if (slowTimer == null) {
       slowTimer = setInterval(function () {
@@ -1217,24 +1269,25 @@ PAGE = """
   }
   function stopPolling() {
     if (fastTimer != null) { clearInterval(fastTimer); fastTimer = null; }
+    if (snapTimer != null) { clearInterval(snapTimer); snapTimer = null; }
     if (slowTimer != null) { clearInterval(slowTimer); slowTimer = null; }
   }
   startPolling();
   pollSync();
   refreshConnStatusStrip();
-  setTimeout(function () { pollPgSnapshot(); }, 40);
+  setTimeout(function () { loadPgSyncSnapshotOnce(); }, 40);
   setTimeout(function () { pollHealthcheck(); }, 120);
   window.addEventListener('pageshow', function () {
     pollSync();
     refreshConnStatusStrip();
-    setTimeout(function () { pollPgSnapshot(); }, 40);
+    setTimeout(function () { loadPgSyncSnapshotOnce(); }, 40);
     setTimeout(function () { pollHealthcheck(); }, 120);
   });
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'visible') {
       startPolling();
       pollSync();
-      setTimeout(function () { pollPgSnapshot(); }, 40);
+      setTimeout(function () { loadPgSyncSnapshotOnce(); }, 40);
       setTimeout(function () { pollHealthcheck(); }, 120);
     } else {
       stopPolling();
@@ -1259,6 +1312,7 @@ def _merged_yaml_dict_from_form(p: Path, form: Mapping[str, Any]) -> dict[str, A
     old.setdefault("postgres", {})
     old.setdefault("etl", {})
     old.setdefault("metabase", old.get("metabase") or {})
+    old.setdefault("auto_sync", {})
 
     fb_updates: dict[str, object] = {
         "host": str(form.get("fb_host", "") or "").strip(),
@@ -1284,6 +1338,19 @@ def _merged_yaml_dict_from_form(p: Path, form: Mapping[str, Any]) -> dict[str, A
 
     old["etl"]["batch_size"] = int(form.get("etl_batch") or 500)
     old["etl"]["sync_window_days"] = int(form.get("etl_sync_days") or 30)
+    try:
+        interleave = int(form.get("etl_interleave_page_rows") or 8192)
+    except (TypeError, ValueError):
+        interleave = int(old["etl"].get("interleave_page_rows") or 8192)
+    old["etl"]["interleave_page_rows"] = max(1, min(65000, interleave))
+
+    old["auto_sync"]["enabled"] = bool(form.get("auto_sync_enabled"))
+    cron_in = str(form.get("auto_sync_schedule_cron", "") or "").strip()
+    if cron_in:
+        old["auto_sync"]["schedule_cron"] = cron_in
+    tz_in = str(form.get("auto_sync_timezone", "") or "").strip()
+    if tz_in:
+        old["auto_sync"]["timezone"] = tz_in
     return old
 
 
@@ -1326,6 +1393,7 @@ def create_app() -> Flask:
             fb=cfg.firebird,
             pg=cfg.postgres,
             etl=cfg.etl,
+            auto_sync=cfg.auto_sync,
             metabase_site_url=mb_url,
         )
 

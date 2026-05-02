@@ -67,8 +67,6 @@ from egisz_monitor_corp.sql_util import (
 # Минимальный интервал между одинаковыми фазами в progress_detail_cb (сек.): UI не должен замедлять ETL.
 _DETAIL_THROTTLE_SEC = 0.22
 
-# Чередование EGISZ_MESSAGES / EXCHANGELOG: размер страницы из Firebird (FIRST n).
-_INTERLEAVE_PAGE_ROWS = 65_000
 _MSGBACKFILL_IN_CHUNK = 180
 
 
@@ -110,10 +108,13 @@ class LicenseReplyRow:
 class EtlProgressPayload(TypedDict, total=False):
     """Снимок прогресса для UI (все поля опциональны кроме phase).
 
-    phase: pipeline_bootstrap | enrichment_firebird | counting | messages_* | exchangelog_* | outbound_* | …
+    phase: pipeline_bootstrap | pg_schema_apply | firebird_* | enrichment_firebird | counting | messages_* | …
+    pipeline_step / pipeline_steps — доля «холодного старта» до журнала (для фонового sync и полоски %).
     """
 
     phase: str
+    pipeline_step: int
+    pipeline_steps: int
     total_rows: int
     loaded_rows: int
     parsed_facts: int
@@ -268,11 +269,19 @@ def _license_rows_with_jpersons(
 
 
 def _fetch_jpersons_and_licenses_separate(
-    cfg: CorpAppConfig, log: Callable[[str], None]
+    cfg: CorpAppConfig,
+    log: Callable[[str], None],
+    *,
+    before_jpersons: Callable[[], None] | None = None,
+    before_licenses: Callable[[], None] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if before_jpersons:
+        before_jpersons()
     log("Firebird [1/2]: выгрузка JPERSONS (все JID)…")
     jp_rows = _etl_fb_fetch(cfg, jpersons_all_sql())
     log(f"JPERSONS: прочитано {len(jp_rows)} строк из Firebird.")
+    if before_licenses:
+        before_licenses()
     log("Firebird [2/2]: выгрузка EGISZ_LICENSES (без JOIN)…")
     lic_rows = _etl_fb_fetch(cfg, enrichment_egisz_licenses_only_sql())
     log(f"EGISZ_LICENSES: прочитано {len(lic_rows)} строк из Firebird.")
@@ -364,10 +373,20 @@ def _export_egisz_licenses_full(
     log: Callable[[str], None],
     *,
     pg: Any | None = None,
+    before_jpersons: Callable[[], None] | None = None,
+    before_licenses: Callable[[], None] | None = None,
+    before_pg_staging: Callable[[], None] | None = None,
 ) -> EnrichmentCache:
     """Полная выгрузка JPERSONS и EGISZ_LICENSES с Firebird; при PG — staging, сшивка JNAME/JINN/FIR_OID в SQL, merge dim_clinics."""
-    jp_rows, lic_rows = _fetch_jpersons_and_licenses_separate(cfg, log)
+    jp_rows, lic_rows = _fetch_jpersons_and_licenses_separate(
+        cfg,
+        log,
+        before_jpersons=before_jpersons,
+        before_licenses=before_licenses,
+    )
     if pg is not None:
+        if before_pg_staging:
+            before_pg_staging()
         log(
             "PostgreSQL: staging JPERSONS + лицензий, сшивка полей юрлица в SQL (UPDATE … FROM), merge dim_clinics…"
         )
@@ -960,8 +979,8 @@ def _run_interleaved_messages_and_journal(
     log: Callable[[str], None],
     detail: Callable[[EtlProgressPayload], None],
 ) -> tuple[_PageStats, int]:
-    """Пакеты по 65k: EGISZ_MESSAGES (EGMID), затем EXCHANGELOG (LOGID); дозагрузка MSGID; фоновый SELECT сообщений пока парсится журнал."""
-    chunk = _INTERLEAVE_PAGE_ROWS
+    """Пакеты EGISZ_MESSAGES (EGMID) / EXCHANGELOG (LOGID) размером interleave_page_rows; дозагрузка MSGID; параллельный SELECT."""
+    chunk = int(cfg.etl.interleave_page_rows)
     msg_by_msgid: dict[str, dict[str, Any]] = {}
     egmid_cursor = int(last_egmid)
     pipeline = cfg.etl.pipeline_name
@@ -999,7 +1018,7 @@ def _run_interleaved_messages_and_journal(
         )
 
     log(
-        "Очередь EGISZ_MESSAGES → EXCHANGELOG: пакеты по 65000 строк из Firebird; COUNT не используется; "
+        f"Очередь EGISZ_MESSAGES → EXCHANGELOG: пакеты по {chunk} строк из Firebird; COUNT не используется; "
         "пока парсится и пишется журнал, следующая страница EGISZ_MESSAGES читается параллельно."
     )
 
@@ -1170,17 +1189,28 @@ def run_sync(
 
     pg = None if dry_run else connect_pg(cfg.postgres)
     lock_acquired = False
+    bootstrap_total = 6 if pg is not None else 3
+
+    def boot_detail(n: int, phase: str, **extra: Any) -> None:
+        pl: dict[str, Any] = {"phase": phase}
+        if n >= 1:
+            pl["pipeline_step"] = n
+            pl["pipeline_steps"] = bootstrap_total
+        pl.update(extra)
+        detail(pl)  # type: ignore[arg-type]
 
     try:
         log(
             "ETL: четыре источника Firebird — JPERSONS и EGISZ_LICENSES (полная выгрузка в staging), "
             "EGISZ_MESSAGES по курсору EGMID и EXCHANGELOG по LOGID (инкремент); далее витрина и исходящие."
         )
-        detail({"phase": "pipeline_bootstrap"})
+        boot_detail(0, "pipeline_bootstrap")
         if pg is not None:
             log("PostgreSQL: применение DDL витрины (идемпотентно), ожидайте…")
+            boot_detail(1, "pg_schema_apply")
             apply_reports_schema(pg)
             log("PostgreSQL: DDL применён; запрос advisory lock для пайплайна…")
+            boot_detail(2, "pg_advisory_lock")
             # Single-flight на уровне БД: блокирует параллельный запуск из CronJob и UI.
             # Lock освобождается при close() соединения, поэтому крэш не оставит «навечно занято».
             lock_acquired = try_acquire_pipeline_lock(pg, pipeline)
@@ -1191,17 +1221,32 @@ def run_sync(
                 )
             log("PostgreSQL: lock получен; полная выгрузка JPERSONS и EGISZ_LICENSES из Firebird…")
 
-        enrichment = _export_egisz_licenses_full(cfg, log, pg=pg)
+        if pg is not None:
+            enrichment = _export_egisz_licenses_full(
+                cfg,
+                log,
+                pg=pg,
+                before_jpersons=lambda: boot_detail(3, "firebird_jpersons_fetch"),
+                before_licenses=lambda: boot_detail(4, "firebird_licenses_fetch"),
+                before_pg_staging=lambda: boot_detail(5, "pg_license_staging"),
+            )
+        else:
+            enrichment = _export_egisz_licenses_full(
+                cfg,
+                log,
+                pg=None,
+                before_jpersons=lambda: boot_detail(1, "firebird_jpersons_fetch"),
+                before_licenses=lambda: boot_detail(2, "firebird_licenses_fetch"),
+            )
         lic_iso = (
             enrichment.max_licenses_modifydate.isoformat()
             if enrichment.max_licenses_modifydate
             else None
         )
-        detail(
-            {
-                "phase": "enrichment_firebird",
-                "licenses_modifydate_iso": lic_iso,
-            }
+        boot_detail(
+            bootstrap_total,
+            "enrichment_firebird",
+            licenses_modifydate_iso=lic_iso,
         )
 
         if pg is not None and not dry_run and enrichment.max_licenses_modifydate is not None:

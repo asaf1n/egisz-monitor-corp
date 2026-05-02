@@ -64,14 +64,16 @@ USER 10001:10001
 EXPOSE 8080
 
 # tini как PID 1: корректный SIGTERM → gunicorn → graceful drain воркера.
+# --timeout 21600 (6h): фоновый ETL в отдельном потоке не продлевает HTTP-запросы; при дефолте 120s
+# arbiter может убить worker как «молчащий» → обрыв sync и зависание UI на «Выполняется» без last_stats.
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["gunicorn", \
      "egisz_monitor_corp.config_app:create_app()", \
      "--workers", "1", \
      "--threads", "16", \
      "--worker-class", "gthread", \
-     "--timeout", "120", \
-     "--graceful-timeout", "30", \
+     "--timeout", "21600", \
+     "--graceful-timeout", "120", \
      "--keep-alive", "5", \
      "--worker-tmp-dir", "/dev/shm", \
      "--bind", "0.0.0.0:8080", \

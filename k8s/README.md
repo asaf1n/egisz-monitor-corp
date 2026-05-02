@@ -7,7 +7,7 @@
 | Файл | Назначение |
 |------|------------|
 | `metabase.yaml` | Service **`metabase`** (LoadBalancer :3000), Deployment **`metabase`**, образ **`egisz-monitor-metabase`** (тег в YAML) |
-| `conf-ui.yaml` | Service **`conf-ui`** (LoadBalancer :8080), PDB, Deployment **`conf-ui`**, образ **`egisz-conf-ui:corp-web`** |
+| `conf-ui.yaml` | Service **`conf-ui`** (LoadBalancer :8080), PDB, Deployment **`conf-ui`**, образ **`egisz-conf-ui:sync-web`** |
 | `etl-cron.yaml` | CronJob **`egisz-monitor-sync`** (`egisz-monitor sync`), Secret **`egisz-monitor-conf-ui-config`** |
 | `metabase-admin-secret.example.yaml` | Шаблон Secret **`metabase-admin`**; рабочая копия создаётся скриптом как `k8s/metabase-admin-secret.yaml` (не коммитить прод-секреты) |
 

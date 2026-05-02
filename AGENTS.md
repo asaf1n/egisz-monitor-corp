@@ -71,7 +71,7 @@
 | `k8s/postgres/` | StatefulSet, сервисы, Job **`egisz-reports-schema-init`** (DDL по `sql/schema_apply_order.txt`), Job’ы Metabase app DB и (при необходимости) Airflow metadata |
 | `k8s/metabase.yaml` | Deployment Metabase (образ `egisz-monitor-metabase:k8s-v15`); `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75 -XX:+UseG1GC`, startupProbe (240s), `METABASE_FORCE_PROVISION=auto` (идемпотентный provision — dashboard ID не меняются) |
 | `k8s/conf-ui.yaml` | Config UI (gunicorn 1×16t + `sync_routes`); non-root UID 10001, `/healthz`, RollingUpdate `maxUnavailable=0` |
-| `k8s/etl-cron.yaml` | **CronJob `egisz-monitor-sync`**: `*/15 * * * *`, тот же образ `egisz-conf-ui:corp-web`, CLI `egisz-monitor sync`, `concurrencyPolicy: Forbid` + advisory lock в Postgres против гонки с UI-кнопкой |
+| `k8s/etl-cron.yaml` | **CronJob `egisz-monitor-sync`**: `*/15 * * * *`, тот же образ `egisz-conf-ui:sync-web`, CLI `egisz-monitor sync`, `concurrencyPolicy: Forbid` + advisory lock в Postgres против гонки с UI-кнопкой |
 | `k8s/local/egisz_monitor.yaml` | Пример фрагмента конфига для секрета conf-ui |
 | `k8s/airflow/` | Helm/values для DAG `egisz_monitor_firebird_to_postgres` |
 | `airflow/dags/egisz_monitor_etl_dag.py` | Вызов `run_sync` |

@@ -1,0 +1,399 @@
+# Справочник сопоставлений параметров Metabase ↔ поля витрины PostgreSQL.
+# Используется как «проект по умолчанию» при правке дашбордов и провижининга.
+#
+# Источник истины для карточек: JSON в этом каталоге (*.json).
+# Провижининг: metabase/setup-dashboards.sh подставляет dimension ["field", id, null]
+# из объекта metabase-field-filters у каждой карточки (см. docs/METABASE.md).
+
+version: 1
+
+meta:
+  provisioning_script: metabase/setup-dashboards.sh
+  documentation: docs/METABASE.md
+  notes:
+    - Переменная dwh_date — тип dimension (native field filter по дате); для каждой карточки физическое поле задаётся отдельно в metabase-field-filters.
+    - Переменные top_semd, top_clinic, err_parse_code — тип text в SQL; явное равенство колонке в запросе. В экспорт из API (metabase/export_dashboards_from_api.py) они не попадают в metabase-field-filters.
+
+# Один логический «диапазон дат» на дашборде (slug dwh_date_filter), но при привязке к карточке Metabase использует поле из metabase-field-filters этой карточки.
+dwh_date_bindings:
+  by_logical_scope:
+    processed_ips:
+      table_ref: v_egisz_transactions_enriched_ui
+      field_name: Обработано IPS
+      sql_fragment: '[[AND {{dwh_date}}]]'
+    chart_day:
+      table_ref: v_egisz_transactions_enriched_ui
+      field_name: День (тренд)
+      sql_fragment: '[[AND {{dwh_date}}]]'
+    queue_sent:
+      table_ref: v_rpt_documents_no_response_ui
+      field_name: Отправлено
+      sql_fragment: '[[AND {{dwh_date}}]]'
+    parse_errors_created:
+      table_ref: stg_parse_errors
+      field_name: created_at
+      sql_fragment: '[[AND {{dwh_date}}]]'
+
+# Текстовые переменные вопроса (не dimension в смысле export_dashboards_from_api).
+text_parameter_bindings:
+  top_semd:
+    dashboard_slug: top_semd_filter
+    template_tag: top_semd
+    widget: string/=
+    equality_targets:
+      - table: v_egisz_transactions_enriched_ui
+        expression: 'NULLIF(TRIM("Код СЭМД"), '''') = {{top_semd}}'
+      - table: v_rpt_documents_no_response_ui
+        expression: 'NULLIF(TRIM(v."Код СЭМД"), '''') = {{top_semd}}' # alias v в 04
+  top_clinic:
+    dashboard_slug: top_clinic_filter
+    template_tag: top_clinic
+    widget: string/=
+    equality_targets:
+      - table: v_egisz_transactions_enriched_ui
+        expression: '"JID клиники"::text = {{top_clinic}}'
+      - table: v_rpt_documents_no_response_ui
+        expression: 'v."JID клиники"::text = {{top_clinic}}'
+      - table: v_health_by_clinic_ui
+        expression: '"JID клиники"::text = {{top_clinic}}'
+      - table: fact_egisz_transactions
+        expression: 'f.jid::text = {{top_clinic}}'
+  err_parse_code:
+    dashboard_slug: err_parse_code_filter
+    template_tag: err_parse_code
+    widget: string/=
+    equality_targets:
+      - table: stg_parse_errors
+        expression: 'error_code::text = {{err_parse_code}}'
+
+dashboards:
+  - file: 01_operational.json
+    name: 01 Оперативный мониторинг
+    parameters:
+      - slug: dwh_date_filter
+        maps_to: dwh_date
+      - slug: top_semd_filter
+        maps_to: top_semd
+      - slug: top_clinic_filter
+        maps_to: top_clinic
+    primary_source: v_egisz_transactions_enriched_ui
+    cards:
+      - name: Последние операции
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+        other_variables: [top_semd, top_clinic]
+      - name: Статусы за период
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+        other_variables: [top_semd, top_clinic]
+      - name: Доля ошибок по СЭМД
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+        other_variables: [top_semd, top_clinic]
+      - name: Топ типов СЭМД
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+        other_variables: [top_semd, top_clinic]
+      - name: По клиникам (имя)
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+        other_variables: [top_semd, top_clinic]
+      - name: Доля топ-ошибок (ЕГИСЗ)
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+        other_variables: [top_semd, top_clinic]
+      - name: "% Ошибок за период"
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+        other_variables: [top_semd, top_clinic]
+      - name: Доля ошибок по клиникам
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+        other_variables: [top_semd, top_clinic]
+
+  - file: 02_service.json
+    name: 02 Сервис интеграции
+    parameters:
+      - slug: dwh_date_filter
+        maps_to: dwh_date
+      - slug: top_semd_filter
+        maps_to: top_semd
+      - slug: top_clinic_filter
+        maps_to: top_clinic
+    cards:
+      - name: 02 · Топ типов СЭМД (поток)
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+        other_variables: [top_semd, top_clinic]
+      - name: 02 · Объём по клиникам (поток)
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+        other_variables: [top_semd, top_clinic]
+
+  - file: 03_errors.json
+    name: 03 Ошибки и разбор
+    parameters:
+      - slug: dwh_date_filter
+        maps_to: dwh_date
+      - slug: err_parse_code_filter
+        maps_to: err_parse_code
+    cards:
+      - name: 03 · Ошибки парсинга (stg_parse_errors)
+        table_ref: stg_parse_errors
+        metabase-field-filters:
+          dwh_date: { table_ref: stg_parse_errors, field_name: created_at }
+        other_variables: [err_parse_code]
+      - name: 03 · Отказы РЭМД (витрина, деталь)
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+
+  - file: 04_documents_no_response.json
+    name: 04 Документы без ответа
+    parameters:
+      - slug: dwh_date_filter
+        maps_to: dwh_date
+      - slug: top_semd_filter
+        maps_to: top_semd
+      - slug: top_clinic_filter
+        maps_to: top_clinic
+    cards:
+      - name: 04 · Очередь без ответа (список)
+        table_ref: v_rpt_documents_no_response_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_rpt_documents_no_response_ui, field_name: Отправлено }
+        other_variables: [top_semd, top_clinic]
+
+  - file: 05_trends.json
+    name: 05 Тренды и динамика
+    parameters:
+      - slug: dwh_date_filter
+        maps_to: dwh_date
+    cards:
+      - name: 05 · Транзакции по дням и статусам
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: День (тренд) }
+      - name: 05 · Динамика по типам СЭМД
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: День (тренд) }
+      - name: 05 · Доля ошибок по дням
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: День (тренд) }
+      - name: 05 · Объём по часам (72 ч)
+        table_ref: v_egisz_transactions_enriched_ui
+        native_filters: none
+        note: Окно 72 ч от MAX(Обработано IPS) в витрине; глобальный dwh_date дашборда к SQL не подключён (см. description в JSON).
+
+  - file: 06_quality.json
+    name: 06 Качество данных
+    parameters:
+      - slug: dwh_date_filter
+        maps_to: dwh_date
+    cards:
+      - name: 06 · Успешность по клиникам
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+      - name: 06 · Успешность по типам СЭМД
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+      - name: "06 · JID/OID: целостность"
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+      - name: 06 · Полнота полей витрины
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+
+  - file: 07_errors_deep.json
+    name: 07 Ошибки (глубокий срез)
+    parameters:
+      - slug: dwh_date_filter
+        maps_to: dwh_date
+    cards:
+      - name: 07 · Топ причин отказов ЕГИСЗ
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+      - name: 07 · Ошибки по клиникам и СЭМД
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+
+  - file: 08_pending_agg.json
+    name: 08 Очередь (агрегаты)
+    parameters:
+      - slug: dwh_date_filter
+        maps_to: dwh_date
+    cards:
+      - name: 08 · Топ клиник с зависшими документами
+        table_ref: v_rpt_documents_no_response_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_rpt_documents_no_response_ui, field_name: Отправлено }
+      - name: 08 · Возраст зависших документов
+        table_ref: v_rpt_documents_no_response_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_rpt_documents_no_response_ui, field_name: Отправлено }
+      - name: 08 · Зависшие по типам СЭМД
+        table_ref: v_rpt_documents_no_response_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_rpt_documents_no_response_ui, field_name: Отправлено }
+      - name: 08 · Зависшие — детализация
+        table_ref: v_rpt_documents_no_response_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_rpt_documents_no_response_ui, field_name: Отправлено }
+
+  - file: 09_executive.json
+    name: 09 Управленческий дашборд
+    parameters:
+      - slug: dwh_date_filter
+        maps_to: dwh_date
+    notes:
+      - Карточки витрины связывают dwh_date с «Обработано IPS»; карточки очереди — с «Отправлено». Один виджет даты на дашборде, разные поля в metabase-field-filters по карточкам.
+    cards:
+      - name: 09 · KPI по снимку
+        table_ref: v_rpt_documents_no_response_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_rpt_documents_no_response_ui, field_name: Отправлено }
+        note: Первые два столбца SQL не используют {{dwh_date}}; третий — count очереди с фильтром по Отправлено.
+      - name: 09 · Статусы за период (доля)
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+      - name: 09 · Топ причин ошибок (ЕГИСЗ, доля)
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+      - name: 09 · Ошибки по СЭМД (доля)
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+      - name: 09 · Объём по СЭМД и клиникам
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+      - name: 09 · Успешных транзакций
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+      - name: 09 · Доля ошибок по срезам (таблица)
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+      - name: "09 · Очередь: документов в ожидании"
+        table_ref: v_rpt_documents_no_response_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_rpt_documents_no_response_ui, field_name: Отправлено }
+      - name: 09 · Рейтинг формулировок ошибок ЕГИСЗ
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+      - name: 09 · Рейтинг ошибок по коду СЭМД
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+      - name: 09 · Рейтинг клиник по ошибкам
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+      - name: "09 · Очередь: срок ожидания"
+        table_ref: v_rpt_documents_no_response_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_rpt_documents_no_response_ui, field_name: Отправлено }
+      - name: "09 · Очередь: по типу СЭМД"
+        table_ref: v_rpt_documents_no_response_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_rpt_documents_no_response_ui, field_name: Отправлено }
+      - name: "09 · Очередь: топ клиник"
+        table_ref: v_rpt_documents_no_response_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_rpt_documents_no_response_ui, field_name: Отправлено }
+
+  - file: 10_errors_top.json
+    name: 10 Топ ошибок
+    parameters:
+      - slug: dwh_date_filter
+        maps_to: dwh_date
+    cards:
+      - name: 10 · Итоги по ошибкам за период
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+      - name: 10 · Доля топ-ошибок (ЕГИСЗ)
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+      - name: 10 · Доля ошибок по СЭМД
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+      - name: 10 · Доля ошибок по клиникам
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+      - name: 10 · Рейтинг типов ошибок (топ-25)
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+      - name: 10 · Рейтинг СЭМД по числу ошибок
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+      - name: 10 · Рейтинг клиник по ошибкам
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+      - name: "10 · Сводка: тип ошибки × СЭМД × клиника"
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+
+  - file: 11_healthcheck.json
+    name: 11 Healthcheck интеграции
+    parameters:
+      - slug: dwh_date_filter
+        maps_to: dwh_date
+        status: unused_in_sql
+        note: В JSON карточек нет [[AND {{dwh_date}}]]; параметр можно скрыть в UI или подключить к будущим вопросам.
+      - slug: top_clinic_filter
+        maps_to: top_clinic
+    cards:
+      - name: 11 · Сигналы healthcheck
+        table_ref: v_health_signals_ui
+        native_filters: none
+      - name: 11 · Сводка по уровням
+        table_ref: v_health_signals_ui
+        native_filters: none
+      - name: 11 · Топ клиник по error rate (24ч)
+        table_ref: v_health_by_clinic_ui
+        other_variables: [top_clinic]
+        native_filters: none
+        note: Текстовый {{top_clinic}}; при переводе на field filter потребуется смена SQL.
+      - name: 11 · Heatmap клиники × дни (доля ошибок)
+        table_ref: fact_egisz_transactions
+        other_variables: [top_clinic]
+        native_filters: none
+      - name: 11 · Возраст очереди без ответа
+        table_ref: v_health_proxy_db_ui
+        native_filters: none
+      - name: 11 · Тренд ошибок парсинга
+        table_ref: stg_parse_errors
+        native_filters: none
+      - name: 11 · Сводка прокси-БД
+        table_ref: v_health_proxy_db_ui
+        native_filters: none

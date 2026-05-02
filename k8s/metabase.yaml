@@ -144,7 +144,8 @@ spec:
             httpGet:
               path: /api/health
               port: 3000
-            failureThreshold: 40
+            # JVM + миграции app DB на медленном диске / первый старт: до ~8 мин (80×6s).
+            failureThreshold: 80
             periodSeconds: 6
             timeoutSeconds: 5
           # readiness берёт работу после startupProbe (initialDelaySeconds: 0). Делаем её агрессивной:

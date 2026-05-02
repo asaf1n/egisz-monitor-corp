@@ -213,17 +213,17 @@ SELECT
     stg_outbound_total   AS "Staging: всего строк",
     stg_without_egmid    AS "Без EGMID",
     stg_without_jid      AS "Без JID",
-    staging_max_egmid    AS "Staging max EGMID",
+    staging_max_egmid::text    AS "Staging max EGMID",
     staging_max_sent_at  AS "Staging max Sent",
     pending_total        AS "Очередь всего",
     pending_1h           AS "Очередь < 1ч",
     pending_1_24h        AS "Очередь 1–24ч",
     pending_older_24h    AS "Очередь > 24ч",
     etl_last_update      AS "Последний апдейт курсора",
-    etl_last_log_id      AS "etl_state.last_log_id"
+    etl_last_log_id::text      AS "etl_state.last_log_id"
 FROM v_health_proxy_db;
 
-COMMENT ON VIEW v_health_proxy_db_ui IS 'UI-обёртка v_health_proxy_db для дашборда 11 (карточка «Прокси-БД»).';
+COMMENT ON VIEW v_health_proxy_db_ui IS 'UI-обёртка v_health_proxy_db для дашборда 11 (карточка «Прокси-БД»). «Staging max EGMID» и «etl_state.last_log_id» — TEXT (идентификаторы без форматирования числа в Metabase).';
 
 -- Подписи healthcheck-колонок в общем справочнике.
 INSERT INTO dim_column_display_labels (source_object, source_column, display_label_ru) VALUES

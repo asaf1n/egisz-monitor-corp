@@ -29,6 +29,12 @@ etl:
   source_query: null
   # Таймаут SELECT к Firebird (сек.); в Config UI не редактируется — только YAML/Secret (см. config/egisz_monitor.example.yaml).
   firebird_query_timeout_sec: 900
+  interleave_page_rows: 8192
+
+auto_sync:
+  enabled: false
+  schedule_cron: "*/15 * * * *"
+  timezone: "Etc/UTC"
 
 metabase:
   # С ПК при port-forward Metabase на localhost:3000 (см. .\start.ps1 -Action web). Вход в Metabase: admin@egisz.local / egisz.

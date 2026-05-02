@@ -383,8 +383,8 @@ ON CONFLICT (source_object, source_column) DO UPDATE SET display_label_ru = EXCL
 CREATE OR REPLACE VIEW v_egisz_transactions_enriched_ui AS
 SELECT
     local_uid_semd AS "localUid СЭМД",
-    exchangelog_log_id AS "LOGID журнала EXCHANGELOG",
-    egisz_messages_egmid AS "EGMID сообщения EGISZ_MESSAGES",
+    exchangelog_log_id::text AS "LOGID журнала EXCHANGELOG",
+    egisz_messages_egmid::text AS "EGMID сообщения EGISZ_MESSAGES",
     jid::text AS "JID клиники",
     gost_host AS "Хост клиники (VPN ГОСТ)",
     org_oid AS "OID организации",
@@ -404,7 +404,7 @@ SELECT
     relates_to_id AS "Связанное сообщение"
 FROM v_egisz_transactions_enriched;
 
-COMMENT ON VIEW v_egisz_transactions_enriched_ui IS 'Обёртка над v_egisz_transactions_enriched с подписями колонок для отчётов; см. dim_column_display_labels. JID клиники и Код СЭМД — TEXT (идентификаторы, не суммируются в Metabase). «Сводка ошибок» — errors_friendly: агрегация подсказок по errors_json, исходные «Ошибки JSON» не меняются. Колонка «Связанное сообщение» (relates_to_id) — последняя для удобства витрин и Metabase.';
+COMMENT ON VIEW v_egisz_transactions_enriched_ui IS 'Обёртка над v_egisz_transactions_enriched с подписями колонок для отчётов; см. dim_column_display_labels. JID клиники, Код СЭМД, LOGID/EGMID — TEXT (идентификаторы: без разделителей тысяч и суммирования в Metabase). «Сводка ошибок» — errors_friendly: агрегация подсказок по errors_json, исходные «Ошибки JSON» не меняются. Колонка «Связанное сообщение» (relates_to_id) — последняя для удобства витрин и Metabase.';
 
 CREATE OR REPLACE VIEW v_rpt_documents_no_response_ui AS
 SELECT

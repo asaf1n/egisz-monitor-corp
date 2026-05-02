@@ -625,6 +625,31 @@ def fetch_healthcheck_snapshot(con, *, top_clinics: int = 5) -> dict[str, Any]: 
                     "etl_last_update": etl_last_update.isoformat() if etl_last_update else None,
                     "etl_last_log_id": int(etl_last_log_id) if etl_last_log_id is not None else None,
                 }
+                # Исходящий staging может быть пуст (прогон без outbound / старая витрина), при этом
+                # fact_egisz_transactions уже заполнена — те же сущности, что в Metabase.
+                if int(stg_total or 0) == 0:
+                    try:
+                        cur.execute(
+                            """
+                            SELECT
+                                COUNT(*)::bigint,
+                                COUNT(*) FILTER (
+                                    WHERE egisz_messages_egmid IS NULL OR egisz_messages_egmid = 0
+                                )::bigint,
+                                MAX(egisz_messages_egmid)
+                            FROM fact_egisz_transactions
+                            """
+                        )
+                        fact_row = cur.fetchone()
+                        if fact_row:
+                            fc, fnull, fmax = fact_row
+                            pb = out["proxy_db"]
+                            pb["fact_rows"] = int(fc or 0)
+                            pb["fact_without_egmid"] = int(fnull or 0)
+                            pb["fact_max_egmid"] = int(fmax) if fmax is not None else None
+                    except psycopg2.Error as e2:  # pragma: no cover
+                        con.rollback()
+                        out["errors"].append(f"fact_egisz_transactions (fallback): {e2}")
         except psycopg2.Error as e:  # pragma: no cover
             con.rollback()
             out["errors"].append(f"v_health_proxy_db: {e}")
@@ -633,27 +658,66 @@ def fetch_healthcheck_snapshot(con, *, top_clinics: int = 5) -> dict[str, Any]: 
 
 
 def fetch_pg_sync_snapshot(con, pipeline: str) -> dict[str, Any]:  # type: ignore[no-untyped-def]
-    """Три показателя для UI: курсор LOGID, загруженный EGMID, MAX(MODIFYDATE) лицензий из etl_state."""
+    """Показатели из etl_state плюс max EGMID из витрины, если курсор в состоянии ещё нулевой."""
     with con.cursor() as cur:
         cur.execute(
             """
             SELECT
-                (SELECT last_log_id FROM etl_state WHERE pipeline = %s) AS last_log_id,
-                (SELECT COALESCE(last_egmid, 0) FROM etl_state WHERE pipeline = %s) AS last_egmid,
-                (SELECT COALESCE(source_max_egmid, 0) FROM etl_state WHERE pipeline = %s) AS source_max_egmid,
-                (SELECT source_max_licenses_modifydate FROM etl_state WHERE pipeline = %s)
-                    AS source_max_licenses_modifydate
+                last_log_id,
+                COALESCE(last_egmid, 0),
+                COALESCE(source_max_egmid, 0),
+                source_max_licenses_modifydate
+            FROM etl_state
+            WHERE pipeline = %s
+            LIMIT 1
             """,
-            (pipeline, pipeline, pipeline, pipeline),
+            (pipeline,),
         )
         row = cur.fetchone()
     if not row:
-        return {"log_id": None, "egmid": None, "licenses_modifydate": None}
+        facts_only = 0
+        try:
+            with con.cursor() as cur2:
+                cur2.execute("SET LOCAL statement_timeout = '5s'")
+                cur2.execute(
+                    """
+                    SELECT COALESCE(MAX(egisz_messages_egmid), 0)
+                    FROM fact_egisz_transactions
+                    WHERE egisz_messages_egmid IS NOT NULL AND egisz_messages_egmid > 0
+                    """
+                )
+                mx0 = cur2.fetchone()
+                if mx0 and mx0[0] is not None:
+                    facts_only = int(mx0[0])
+        except Exception:
+            facts_only = 0
+        return {
+            "log_id": None,
+            "egmid": facts_only if facts_only > 0 else None,
+            "licenses_modifydate": None,
+        }
     lid_raw, last_egmid_raw, src_eg_raw, lic_raw = row
     log_id = int(lid_raw) if lid_raw is not None else None
     last_eg = int(last_egmid_raw) if last_egmid_raw is not None else 0
     src_eg = int(src_eg_raw) if src_eg_raw is not None else 0
     eg_display = max(last_eg, src_eg)
+    facts_max_eg = 0
+    try:
+        with con.cursor() as cur:
+            cur.execute("SET LOCAL statement_timeout = '5s'")
+            cur.execute(
+                """
+                SELECT COALESCE(MAX(egisz_messages_egmid), 0)
+                FROM fact_egisz_transactions
+                WHERE egisz_messages_egmid IS NOT NULL AND egisz_messages_egmid > 0
+                """
+            )
+            mx = cur.fetchone()
+            if mx and mx[0] is not None:
+                facts_max_eg = int(mx[0])
+    except Exception:
+        facts_max_eg = 0
+    eg_display = max(eg_display, facts_max_eg)
     lic_iso = lic_raw.isoformat() if lic_raw is not None else None
 
     return {

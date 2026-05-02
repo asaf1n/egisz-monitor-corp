@@ -1,4 +1,4 @@
-#!/usr/bin/env powershell
+﻿#!/usr/bin/env powershell
 # Local full stack in Kubernetes (namespace egisz-monitor). Firebird stays on Windows host.
 # Requires: Docker, kubectl; optional: kind (https://kind.sigs.k8s.io/) for auto cluster create.
 #
@@ -84,7 +84,7 @@ function Invoke-PythonTests {
         Write-Host "ERROR: No .venv\Scripts\python.exe and no py launcher. Install Python 3.10+." -ForegroundColor Red
         exit 1
     }
-    Write-Host "[test] OK" -ForegroundColor Green
+    Write-Host "`[test] OK" -ForegroundColor Green
 }
 
 function Write-Banner([string]$Title, [string]$Color = "Cyan") {
@@ -146,20 +146,20 @@ function Invoke-DockerBuildConfUi {
     $nc = @()
     if ($DockerNoCache) {
         $nc = @("--no-cache")
-        Write-Host "[Docker] Building Config UI with --no-cache..." -ForegroundColor Yellow
+        Write-Host "`[Docker] Building Config UI with --no-cache..." -ForegroundColor Yellow
     }
-    Write-Host "[Docker] Building egisz-conf-ui (Config UI)..." -ForegroundColor Yellow
+    Write-Host "`[Docker] Building egisz-conf-ui (Config UI)..." -ForegroundColor Yellow
     Invoke-Native docker build @nc -f docker/web/Dockerfile -t egisz-conf-ui:latest $Root
     if ($LASTEXITCODE -ne 0) { exit 1 }
     Invoke-Native docker tag egisz-conf-ui:latest egisz-conf-ui:sync-web
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    Write-Host "[Docker] egisz-conf-ui OK" -ForegroundColor Green
+    Write-Host "`[Docker] egisz-conf-ui OK" -ForegroundColor Green
 }
 
 function Invoke-DockerBuild {
     param([switch]$DockerNoCache)
     Invoke-DockerBuildConfUi -DockerNoCache:$DockerNoCache
-    Write-Host "[Docker] Building egisz-monitor-metabase..." -ForegroundColor Yellow
+    Write-Host "`[Docker] Building egisz-monitor-metabase..." -ForegroundColor Yellow
     $nc = @()
     if ($DockerNoCache) {
         $nc = @("--no-cache")
@@ -171,7 +171,7 @@ function Invoke-DockerBuild {
     if ($LASTEXITCODE -ne 0) { exit 1 }
     Invoke-Native docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:local
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    Write-Host "[Docker] OK" -ForegroundColor Green
+    Write-Host "`[Docker] OK" -ForegroundColor Green
 }
 
 function Test-KubectlResponds {
@@ -183,7 +183,7 @@ function Test-KubectlResponds {
 
 function Initialize-LocalKubernetesCluster {
     if (Test-KubectlResponds) {
-        Write-Host "[kubectl] Cluster API is reachable." -ForegroundColor Green
+        Write-Host "`[kubectl] Cluster API is reachable." -ForegroundColor Green
         return
     }
     if ($SkipKindCluster) {
@@ -201,7 +201,7 @@ function Initialize-LocalKubernetesCluster {
     if ($clusterLines -contains $kindName) {
         cmd /c ('kubectl config use-context "' + $ctx + '" 1>nul 2>nul')
         if (Test-KubectlResponds) {
-            Write-Host "[kind] Using existing cluster $kindName." -ForegroundColor Green
+            Write-Host "`[kind] Using existing cluster $kindName." -ForegroundColor Green
             return
         }
         Write-Host ("ERROR: kind cluster '{0}' exists but the API is not reachable (context {1})." -f $kindName, $ctx) -ForegroundColor Red
@@ -216,7 +216,7 @@ function Initialize-LocalKubernetesCluster {
         Write-Host "ERROR: kind cluster created but cluster-info still fails." -ForegroundColor Red
         exit 1
     }
-    Write-Host "[kind] Cluster $kindName is ready." -ForegroundColor Green
+    Write-Host "`[kind] Cluster $kindName is ready." -ForegroundColor Green
 }
 
 function Invoke-KindLoadImagesIfNeeded {
@@ -225,7 +225,7 @@ function Invoke-KindLoadImagesIfNeeded {
     $ctx = $ctx.Trim()
     if ($ctx -notmatch '^kind-') { return }
     $name = $ctx -replace '^kind-', ''
-    Write-Host "[kind] Loading local images into cluster $name..." -ForegroundColor Cyan
+    Write-Host "`[kind] Loading local images into cluster $name..." -ForegroundColor Cyan
     kind load docker-image egisz-conf-ui:sync-web --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }
     kind load docker-image egisz-monitor-metabase:latest --name $name
@@ -234,7 +234,7 @@ function Invoke-KindLoadImagesIfNeeded {
     if ($LASTEXITCODE -ne 0) { exit 1 }
     kind load docker-image egisz-monitor-metabase:local --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    Write-Host "[kind] Images loaded." -ForegroundColor Green
+    Write-Host "`[kind] Images loaded." -ForegroundColor Green
 }
 
 function New-LocalDeployArtifactFiles {
@@ -266,7 +266,7 @@ stringData:
     $mbPath = Join-Path $Root "k8s\metabase-admin-secret.yaml"
     Write-Utf8NoBom $pgPath $pg
     Write-Utf8NoBom $mbPath $mb
-    Write-Host "[local] Wrote k8s\postgres\postgres-credentials.yaml and k8s\metabase-admin-secret.yaml" -ForegroundColor Green
+    Write-Host "`[local] Wrote k8s\postgres\postgres-credentials.yaml and k8s\metabase-admin-secret.yaml" -ForegroundColor Green
 }
 
 function Wait-KubectlJobSucceeded {
@@ -318,10 +318,10 @@ function Publish-ConfUiImageToDockerDesktopK8s {
     if ($LASTEXITCODE -eq 0) {
         kubectl -n egisz-monitor set image cronjob/egisz-monitor-sync "sync=$img"
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "[docker-desktop] cronjob/egisz-monitor-sync sync -> $img (aligned with conf-ui)" -ForegroundColor DarkGray
+            Write-Host "`[docker-desktop] cronjob/egisz-monitor-sync sync -> $img (aligned with conf-ui)" -ForegroundColor DarkGray
         }
     }
-    Write-Host "[docker-desktop] conf-ui -> $img (local image digest refresh)" -ForegroundColor DarkGray
+    Write-Host "`[docker-desktop] conf-ui -> $img (local image digest refresh)" -ForegroundColor DarkGray
 }
 
 function Invoke-ResetMetabaseApplicationDatabase {
@@ -338,7 +338,7 @@ function Invoke-ResetMetabaseApplicationDatabase {
         Write-NestedSiblingMonitorWarning
         Write-Banner "reset-metabase (application DB only)" Cyan
     } else {
-        Write-Host "[kubectl] ����� �� ���������� Metabase (DROP/CREATE metabase � Postgres)..." -ForegroundColor Cyan
+        Write-Host "`[kubectl] ����� �� ���������� Metabase (DROP/CREATE metabase � Postgres)..." -ForegroundColor Cyan
     }
     kubectl -n $ns get deploy metabase -o name 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) {
@@ -361,7 +361,7 @@ function Invoke-ResetMetabaseApplicationDatabase {
         Write-Host "ERROR: no pod with label app.kubernetes.io/name=postgres in $ns." -ForegroundColor Red
         exit 1
     }
-    Write-Host "[kubectl] Scaling deployment/metabase to 0..." -ForegroundColor Cyan
+    Write-Host "`[kubectl] Scaling deployment/metabase to 0..." -ForegroundColor Cyan
     kubectl -n $ns scale deployment/metabase --replicas=0
     if ($LASTEXITCODE -ne 0) { exit 1 }
     $deadline = (Get-Date).AddMinutes(4)
@@ -377,7 +377,7 @@ function Invoke-ResetMetabaseApplicationDatabase {
     } finally {
         $ErrorActionPreference = $prevEaLoop
     }
-    Write-Host "[kubectl] Dropping database metabase on pod $pgPod (owner $pgUser)..." -ForegroundColor Cyan
+    Write-Host "`[kubectl] Dropping database metabase on pod $pgPod (owner $pgUser)..." -ForegroundColor Cyan
     # Single-quoted here-string: in @"..."@ PowerShell would parse pg_backend_pid() as a function call.
     $sql = @'
 SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'metabase' AND pid <> pg_backend_pid();
@@ -396,7 +396,7 @@ CREATE DATABASE metabase OWNER
         Write-Host "ERROR: psql DROP/CREATE metabase failed (see above)." -ForegroundColor Red
         exit 1
     }
-    Write-Host "[kubectl] Scaling deployment/metabase to 1 (migrations + provision from image)..." -ForegroundColor Cyan
+    Write-Host "`[kubectl] Scaling deployment/metabase to 1 (migrations + provision from image)..." -ForegroundColor Cyan
     kubectl -n $ns scale deployment/metabase --replicas=1
     if ($LASTEXITCODE -ne 0) { exit 1 }
     if (-not $AsDeployStep) {
@@ -416,7 +416,7 @@ function Invoke-CorpRolloutRestartMetabaseOnly {
         Write-Host "ERROR: deployment/metabase not found in $ns." -ForegroundColor Red
         exit 1
     }
-    Write-Host "[kubectl] rollout restart deployment/metabase..." -ForegroundColor Cyan
+    Write-Host "`[kubectl] rollout restart deployment/metabase..." -ForegroundColor Cyan
     kubectl -n $ns rollout restart deployment/metabase
     if ($LASTEXITCODE -ne 0) { exit 1 }
 }
@@ -428,13 +428,13 @@ function Invoke-CorpRolloutRestartConfUiOnly {
         Write-Host "ERROR: deployment/conf-ui not found in $ns." -ForegroundColor Red
         exit 1
     }
-    Write-Host "[kubectl] rollout restart deployment/conf-ui..." -ForegroundColor Cyan
+    Write-Host "`[kubectl] rollout restart deployment/conf-ui..." -ForegroundColor Cyan
     kubectl -n $ns rollout restart deployment/conf-ui
     if ($LASTEXITCODE -ne 0) { exit 1 }
 }
 
 function Wait-CorpMetabaseRollout {
-    Write-Host "[kubectl] Waiting for Metabase (up to 10m)..." -ForegroundColor Cyan
+    Write-Host "`[kubectl] Waiting for Metabase (up to 10m)..." -ForegroundColor Cyan
     kubectl -n egisz-monitor rollout status deployment/metabase --timeout=600s
     if ($LASTEXITCODE -ne 0) {
         Write-Host "WARN: Metabase not Ready in 10m. Check: kubectl -n egisz-monitor logs deploy/metabase --tail=80" -ForegroundColor Yellow
@@ -442,7 +442,7 @@ function Wait-CorpMetabaseRollout {
 }
 
 function Wait-CorpConfUiRollout {
-    Write-Host "[kubectl] Waiting for conf-ui (up to 3m)..." -ForegroundColor Cyan
+    Write-Host "`[kubectl] Waiting for conf-ui (up to 3m)..." -ForegroundColor Cyan
     kubectl -n egisz-monitor rollout status deployment/conf-ui --timeout=180s
     if ($LASTEXITCODE -ne 0) {
         Write-Host "WARN: conf-ui not Ready in 3m. Check: kubectl -n egisz-monitor describe deploy/conf-ui" -ForegroundColor Yellow
@@ -460,21 +460,21 @@ function Invoke-CorpRolloutRestartMetabaseAndConfUi {
     if (-not $SkipMetabase) {
         kubectl -n $ns get deploy metabase -o name 2>$null | Out-Null
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "[kubectl] rollout restart deployment/metabase (����� �����, ����������� ��� ������ ����)..." -ForegroundColor Cyan
+            Write-Host "`[kubectl] rollout restart deployment/metabase (����� �����, ����������� ��� ������ ����)..." -ForegroundColor Cyan
             kubectl -n $ns rollout restart deployment/metabase
             if ($LASTEXITCODE -ne 0) { exit 1 }
         }
     }
     kubectl -n $ns get deploy conf-ui -o name 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "[kubectl] rollout restart deployment/conf-ui (����� ����� Config UI)..." -ForegroundColor Cyan
+        Write-Host "`[kubectl] rollout restart deployment/conf-ui (����� ����� Config UI)..." -ForegroundColor Cyan
         kubectl -n $ns rollout restart deployment/conf-ui
         if ($LASTEXITCODE -ne 0) { exit 1 }
     }
 }
 
 function Invoke-PostgresEnsureAppRole {
-    Write-Host "[kubectl] Postgres: ���� egisz � �� �� Secret (��������� �role egisz does not exist� �� ������ ����)..." -ForegroundColor Cyan
+    Write-Host "`[kubectl] Postgres: ���� egisz � �� �� Secret (��������� �role egisz does not exist� �� ������ ����)..." -ForegroundColor Cyan
     $pgPod = kubectl -n egisz-monitor get pods -l app.kubernetes.io/name=postgres -o jsonpath="{.items[0].metadata.name}" 2>$null
     if (-not $pgPod) {
         Write-Host "ERROR: pod postgres � egisz-monitor �� ������." -ForegroundColor Red
@@ -508,7 +508,7 @@ function Invoke-PostgresEnsureAppRole {
 }
 
 function Invoke-PostgresSchemaInit {
-    Write-Host "[kubectl] ConfigMap + Job: apply warehouse DDL (sql/schema_apply_order.txt)..." -ForegroundColor Cyan
+    Write-Host "`[kubectl] ConfigMap + Job: apply warehouse DDL (sql/schema_apply_order.txt)..." -ForegroundColor Cyan
     $orderFile = Join-Path $Root "sql\schema_apply_order.txt"
     if (-not (Test-Path $orderFile)) {
         Write-Host "ERROR: Missing $orderFile" -ForegroundColor Red
@@ -552,12 +552,12 @@ function Invoke-PostgresSchemaInit {
         Write-Host "ERROR: Schema job did not succeed. Logs: kubectl -n egisz-monitor logs job/egisz-reports-schema-init" -ForegroundColor Red
         exit 1
     }
-    Write-Host "[kubectl] DWH schema applied." -ForegroundColor Green
+    Write-Host "`[kubectl] DWH schema applied." -ForegroundColor Green
 }
 
 function Invoke-PostgresAirflowDbInit {
     $jobFile = Join-Path $Root "k8s\postgres\airflow-metadata-init-job.yaml"
-    Write-Host "[kubectl] Job: create database airflow..." -ForegroundColor Cyan
+    Write-Host "`[kubectl] Job: create database airflow..." -ForegroundColor Cyan
     kubectl -n egisz-monitor delete job/airflow-metadata-db-init --ignore-not-found
     kubectl apply -f $jobFile
     if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -565,7 +565,7 @@ function Invoke-PostgresAirflowDbInit {
         Write-Host "ERROR: Airflow DB job did not succeed. Logs: kubectl -n egisz-monitor logs job/airflow-metadata-db-init" -ForegroundColor Red
         exit 1
     }
-    Write-Host "[kubectl] Database airflow ready." -ForegroundColor Green
+    Write-Host "`[kubectl] Database airflow ready." -ForegroundColor Green
 }
 
 function Invoke-WebConfigSecret {
@@ -574,7 +574,7 @@ function Invoke-WebConfigSecret {
         Write-Host "ERROR: Missing $cfg" -ForegroundColor Red
         exit 1
     }
-    Write-Host "[kubectl] Secret egisz-monitor-conf-ui-config from k8s\local\egisz_monitor.yaml..." -ForegroundColor Cyan
+    Write-Host "`[kubectl] Secret egisz-monitor-conf-ui-config from k8s\local\egisz_monitor.yaml..." -ForegroundColor Cyan
     kubectl -n egisz-monitor create secret generic egisz-monitor-conf-ui-config `
         --from-file="egisz_monitor.yaml=$cfg" `
         --dry-run=client -o yaml | kubectl apply -f -
@@ -586,23 +586,23 @@ function Invoke-RemoveLegacyComposePostgresVolume {
     $vol = "egisz_monitor_corp_postgres_data"
     cmd /c "docker volume inspect $vol 1>nul 2>nul"
     if ($LASTEXITCODE -ne 0) { return }
-    Write-Host "[docker] Removing legacy Compose volume $vol (standalone Postgres removed from project)..." -ForegroundColor Yellow
+    Write-Host "`[docker] Removing legacy Compose volume $vol (standalone Postgres removed from project)..." -ForegroundColor Yellow
     cmd /c "docker volume rm $vol 2>nul"
     if ($LASTEXITCODE -ne 0) {
         Write-Host "WARN: could not remove volume $vol (stop containers using it: docker volume ls)." -ForegroundColor Yellow
     } else {
-        Write-Host "[docker] Volume $vol removed." -ForegroundColor Green
+        Write-Host "`[docker] Volume $vol removed." -ForegroundColor Green
     }
 }
 
 function Invoke-ResetK8sNamespace {
-    Write-Host "[kubectl] Full reset: deleting namespace egisz-monitor..." -ForegroundColor Cyan
+    Write-Host "`[kubectl] Full reset: deleting namespace egisz-monitor..." -ForegroundColor Cyan
     kubectl delete namespace egisz-monitor --ignore-not-found
     $maxWait = 72
     for ($i = 0; $i -lt $maxWait; $i++) {
         cmd /c 'kubectl get namespace egisz-monitor -o name 1>nul 2>nul'
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "[kubectl] Namespace egisz-monitor is gone." -ForegroundColor Green
+            Write-Host "`[kubectl] Namespace egisz-monitor is gone." -ForegroundColor Green
             return
         }
         Start-Sleep -Seconds 5
@@ -629,7 +629,7 @@ function Invoke-KubectlApply {
 
     New-LocalDeployArtifactFiles
 
-    Write-Host "[kubectl] Namespace..." -ForegroundColor Cyan
+    Write-Host "`[kubectl] Namespace..." -ForegroundColor Cyan
     kubectl apply -f (Join-Path $Root "k8s\postgres\namespace.yaml")
     if ($LASTEXITCODE -ne 0) { exit 1 }
 
@@ -640,7 +640,7 @@ function Invoke-KubectlApply {
     kubectl apply -f (Join-Path $Root "k8s\postgres\postgres-service.yaml")
     if ($LASTEXITCODE -ne 0) { exit 1 }
 
-    Write-Host "[kubectl] Waiting for Postgres (up to 10m, first PVC bind can be slow)..." -ForegroundColor Cyan
+    Write-Host "`[kubectl] Waiting for Postgres (up to 10m, first PVC bind can be slow)..." -ForegroundColor Cyan
     kubectl -n egisz-monitor rollout status statefulset/postgres --timeout=600s
     if ($LASTEXITCODE -ne 0) {
         Write-Host "ERROR: StatefulSet postgres not Ready." -ForegroundColor Red
@@ -670,12 +670,12 @@ function Invoke-KubectlApply {
     kubectl apply -f (Join-Path $Root "k8s\conf-ui.yaml")
     if ($LASTEXITCODE -ne 0) { exit 1 }
 
-    # CronJob periodic sync ETL (k8s/etl-cron.yaml). Same image as conf-ui (egisz-conf-ui:sync-web);
-    # race with UI button is blocked via pg_try_advisory_lock in run_sync.
+    # CronJob (k8s/etl-cron.yaml): по умолчанию suspend:true — kubectl patch при включении.
     $cronYaml = Join-Path $Root "k8s\etl-cron.yaml"
     if (Test-Path $cronYaml) {
         kubectl apply -f $cronYaml
         if ($LASTEXITCODE -ne 0) { exit 1 }
+        Write-Host "`[kubectl] cronjob/egisz-monitor-sync: по умолчанию suspend=true (см. k8s/etl-cron.yaml и auto_sync в конфиге)." -ForegroundColor DarkGray
     }
 
     Publish-ConfUiImageToDockerDesktopK8s
@@ -688,21 +688,22 @@ function Invoke-KubectlApply {
     Wait-CorpMetabaseRollout
     Wait-CorpConfUiRollout
 
-    Write-Host "[kubectl] Apply finished." -ForegroundColor Green
+    Write-Host "`[kubectl] Apply finished." -ForegroundColor Green
 }
 
 function Invoke-ConfUiFirebirdDriverSelfTest {
     cmd /c 'kubectl -n egisz-monitor get deploy conf-ui -o name 1>nul 2>nul'
     if ($LASTEXITCODE -ne 0) { return }
-    Write-Host "[verify] conf-ui pod: Firebird client library + firebird.driver..." -ForegroundColor Cyan
+    Write-Host "`[verify] conf-ui pod: Firebird client library + firebird.driver..." -ForegroundColor Cyan
     # -c conf-ui: ��������� �Defaulted container � out of: conf-ui, seed-config (init)� �� kubectl
     # �� stderr � ����� PowerShell � $ErrorActionPreference=Stop ������ �� ���������� NOTICE.
-    kubectl -n egisz-monitor exec deploy/conf-ui -c conf-ui -- python -c "from firebird.driver import fbapi; fbapi.load_api(); print('firebird.driver OK')"
+    # Avoid nested " inside -c: Windows kubectl often truncates argv and breaks print("...").
+    kubectl -n egisz-monitor exec deploy/conf-ui -c conf-ui -- python -c "from firebird.driver import fbapi; fbapi.load_api()"
     if ($LASTEXITCODE -ne 0) {
         Write-Host "ERROR: Firebird driver check in conf-ui failed (see docker/web/Dockerfile libfbclient2)." -ForegroundColor Red
         exit 1
     }
-    Write-Host "[verify] conf-ui Firebird driver OK (libfbclient loaded; sync uses k8s/local/egisz_monitor.yaml in Secret)." -ForegroundColor Green
+    Write-Host "`[verify] conf-ui Firebird driver OK (libfbclient loaded; sync uses k8s/local/egisz_monitor.yaml in Secret)." -ForegroundColor Green
 }
 
 function Test-MetabaseVerifyFatalOutput {
@@ -759,18 +760,18 @@ function Invoke-K8sCorpStackVerify {
             Write-Host "ERROR: verify: ��������� ������ (jq/������ � ������); ������� �� �������. ������������ ����� Metabase: .\start.ps1 -Action build, ����� apply ��� rollout restart deployment/metabase." -ForegroundColor Red
             exit 1
         }
-        Write-Host ("[verify] attempt {0}/{1} failed; retry in 10s (provision may still be running)..." -f ($i + 1), $max) -ForegroundColor Yellow
+        Write-Host ("`[verify] attempt {0}/{1} failed; retry in 10s (provision may still be running)..." -f ($i + 1), $max) -ForegroundColor Yellow
         Start-Sleep -Seconds 10
     }
     if ($verifyOk) {
         $ErrorActionPreference = $prevEaVerify
-        Write-Host "[verify] OK (Postgres tables + Metabase dashboards in personal collection root)" -ForegroundColor Green
+        Write-Host "`[verify] OK (Postgres tables + Metabase dashboards in personal collection root)" -ForegroundColor Green
         Write-Host "  Metabase: open Personal collection in sidebar - dashboards are on that page." -ForegroundColor DarkGray
         Invoke-ConfUiFirebirdDriverSelfTest
         return
     }
-    Write-Host "[verify] Checks still failing (stale pod or dashboards mismatch vs JSON in image)." -ForegroundColor Yellow
-    Write-Host "[verify] rollout restart Metabase + conf-ui (does not clear Firebird or etl_state); waiting Ready..." -ForegroundColor Cyan
+    Write-Host "`[verify] Checks still failing (stale pod or dashboards mismatch vs JSON in image)." -ForegroundColor Yellow
+    Write-Host "`[verify] rollout restart Metabase + conf-ui (does not clear Firebird or etl_state); waiting Ready..." -ForegroundColor Cyan
     Invoke-CorpRolloutRestartMetabaseAndConfUi
     kubectl -n egisz-monitor rollout status deployment/metabase --timeout=600s
     if ($LASTEXITCODE -ne 0) {
@@ -798,12 +799,12 @@ function Invoke-K8sCorpStackVerify {
             Write-Host "ERROR: verify (����� recovery): ��������� ������; ��. ����. ������������ ����� Metabase (.\start.ps1 -Action build)." -ForegroundColor Red
             exit 1
         }
-        Write-Host ("[verify] recovery attempt {0}/{1} failed; retry in 10s..." -f ($j + 1), $maxRecovery) -ForegroundColor Yellow
+        Write-Host ("`[verify] recovery attempt {0}/{1} failed; retry in 10s..." -f ($j + 1), $maxRecovery) -ForegroundColor Yellow
         Start-Sleep -Seconds 10
     }
     if ($verifyOk) {
         $ErrorActionPreference = $prevEaVerify
-        Write-Host "[verify] OK after recovery restart (Postgres + Metabase dashboards)" -ForegroundColor Green
+        Write-Host "`[verify] OK after recovery restart (Postgres + Metabase dashboards)" -ForegroundColor Green
         Write-Host "  Metabase: open Personal collection in sidebar - dashboards are on that page." -ForegroundColor DarkGray
         Invoke-ConfUiFirebirdDriverSelfTest
         return
@@ -969,7 +970,7 @@ function Invoke-CorpWebPortForward {
         [void]$startedPids.Add($pm.Id)
         $pidFile = Get-CorpPortForwardPidFile
         Set-Content -LiteralPath $pidFile -Value (($startedPids | ForEach-Object { $_.ToString() }) -join "`n") -Encoding ascii
-        Write-Host ("[forward] PIDs saved to {0}" -f $pidFile) -ForegroundColor DarkGray
+        Write-Host ("`[forward] PIDs saved to {0}" -f $pidFile) -ForegroundColor DarkGray
     } else {
         if ($forwardPostgres) {
             cmd /c 'kubectl -n egisz-monitor get svc postgres 1>nul 2>nul'
@@ -1092,9 +1093,9 @@ switch ($Action) {
         Write-NestedSiblingMonitorWarning
         Initialize-LocalKubernetesCluster
         if ($_ -eq "start") {
-            Write-Host "[start] �� ��, ��� apply: Config UI �� �������� ����, ������ Metabase �����������..." -ForegroundColor Cyan
+            Write-Host "`[start] �� ��, ��� apply: Config UI �� �������� ����, ������ Metabase �����������..." -ForegroundColor Cyan
         } else {
-            Write-Host "[apply] ���������� ������ Config UI �� �������� ���� (Metabase �� �������)..." -ForegroundColor Cyan
+            Write-Host "`[apply] ���������� ������ Config UI �� �������� ���� (Metabase �� �������)..." -ForegroundColor Cyan
         }
         Invoke-DockerBuildConfUi -DockerNoCache:$DockerNoCache
         Invoke-KindLoadImagesIfNeeded
@@ -1107,7 +1108,7 @@ switch ($Action) {
     "apply-rebuild" {
         Write-NestedSiblingMonitorWarning
         Initialize-LocalKubernetesCluster
-        Write-Host "[apply-rebuild] Config UI: docker build --no-cache + kubectl apply (Metabase �� ������������)..." -ForegroundColor Cyan
+        Write-Host "`[apply-rebuild] Config UI: docker build --no-cache + kubectl apply (Metabase �� ������������)..." -ForegroundColor Cyan
         Invoke-DockerBuildConfUi -DockerNoCache:$true
         Invoke-KindLoadImagesIfNeeded
         Invoke-KubectlApply
@@ -1126,7 +1127,7 @@ switch ($Action) {
         Write-Banner "restart-metabase"
         Invoke-CorpRolloutRestartMetabaseOnly
         Wait-CorpMetabaseRollout
-        Write-Host "[restart-metabase] ������." -ForegroundColor Green
+        Write-Host "`[restart-metabase] ������." -ForegroundColor Green
     }
     "restart-conf-ui" {
         Write-NestedSiblingMonitorWarning
@@ -1138,7 +1139,7 @@ switch ($Action) {
         Write-Banner "restart-conf-ui"
         Invoke-CorpRolloutRestartConfUiOnly
         Wait-CorpConfUiRollout
-        Write-Host "[restart-conf-ui] ������." -ForegroundColor Green
+        Write-Host "`[restart-conf-ui] ������." -ForegroundColor Green
     }
     "restart-web" {
         Write-NestedSiblingMonitorWarning
@@ -1151,7 +1152,7 @@ switch ($Action) {
         Invoke-CorpRolloutRestartMetabaseAndConfUi
         Wait-CorpMetabaseRollout
         Wait-CorpConfUiRollout
-        Write-Host "[restart-web] ������." -ForegroundColor Green
+        Write-Host "`[restart-web] ������." -ForegroundColor Green
     }
     "status" {
         kubectl -n egisz-monitor get pods,svc -o wide

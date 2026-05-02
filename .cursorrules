@@ -122,7 +122,7 @@
 
 `run_sync` берёт session-level **`pg_try_advisory_lock(hash(pipeline_name))`** в начале и освобождает в `finally`. Это устраняет гонку между:
 
-- **CronJob `egisz-monitor-sync`** (`k8s/etl-cron.yaml`, `*/15 * * * *`, `concurrencyPolicy: Forbid`, тот же образ что conf-ui),
+- **CronJob `egisz-monitor-sync`** (`k8s/etl-cron.yaml`, по умолчанию `suspend: true`; расписание `*/15 * * * *`, `concurrencyPolicy: Forbid`, тот же образ что conf-ui),
 - **UI-кнопкой «Синхронизировать сейчас»** в Config UI (`sync_routes._state` единый процесс под gunicorn).
 
 Если оба стартуют одновременно — второй получает `PipelineLockBusyError`:

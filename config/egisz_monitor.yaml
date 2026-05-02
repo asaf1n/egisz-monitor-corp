@@ -1,3 +1,4 @@
+# Рабочий конфиг (не коммитить прод-секреты). Полный шаблон и комментарии: config/egisz_monitor.example.yaml
 firebird:
   host: localhost
   port: 3050
@@ -17,7 +18,12 @@ postgres:
 etl:
   batch_size: 500
   pipeline_name: firebird_exchangelog
-  sync_window_days: 30
+  sync_window_days: 10
   source_query: null
+  interleave_page_rows: 8192
+auto_sync:
+  enabled: false
+  schedule_cron: "*/15 * * * *"
+  timezone: "Etc/UTC"
 metabase:
   site_url: http://localhost:3000

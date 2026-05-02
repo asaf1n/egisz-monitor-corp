@@ -100,10 +100,18 @@ ORDER BY m.EGMID DESC
 """.strip()
 
 
+# Верхняя граница FIRST n в Firebird для страниц журнала/сообщений (см. etl.interleave_page_rows).
+_FB_FIRST_ROWS_HARD_CAP = 65_000
+
+
+def _clamp_fb_first_limit(limit: int) -> int:
+    return max(1, min(int(limit), _FB_FIRST_ROWS_HARD_CAP))
+
+
 def egisz_messages_incremental_sql(*, last_egmid: int, limit: int) -> str:
     """Страница EGISZ_MESSAGES: только EGMID выше курсора (инкремент без окна по дате)."""
     last = int(last_egmid)
-    lim = max(1, min(int(limit), 65_000))
+    lim = _clamp_fb_first_limit(limit)
     return f"""
 SELECT FIRST {lim}
     m.EGMID AS EGMID,
@@ -144,7 +152,7 @@ WHERE m.MSGID IN ({placeholders})
 def paginated_exchangelog_sql(inner_select: str, *, last_log_id: int, limit: int) -> str:
     """Firebird: FIRST n rows with LOGID > cursor, ordered by LOGID (incremental, not MODIFYDATE)."""
     lid = int(last_log_id)
-    lim = max(1, min(int(limit), 65_000))
+    lim = _clamp_fb_first_limit(limit)
     base = inner_select.strip().rstrip(";")
     return f"""
 SELECT FIRST {lim} src.*

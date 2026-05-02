@@ -1,6 +1,6 @@
 {
   "name": "04 Документы без ответа",
-  "description": "Поиск «зависших» транзакций. [Field filter](https://www.metabase.com/docs/v0.60/questions/native-editor/field-filters) по **«Отправлено»** (дата/диапазон).",
+  "description": "Поиск «зависших» транзакций. [Field filter](https://www.metabase.com/docs/v0.60/questions/native-editor/field-filters) по **«Отправлено»** (дата/диапазон). Фильтры **Код СЭМД** и **JID клиники** — те же слаги `top_semd_filter` / `top_clinic_filter`, что на «01 Оперативный мониторинг» (общий query string в URL).",
   "width": "full",
   "parameters": [
     {
@@ -9,6 +9,20 @@
       "slug": "dwh_date_filter",
       "type": "date/all-options",
       "sectionId": "date"
+    },
+    {
+      "id": "f4e5f6a7-b8c9-0d1e-2f3a-4b5c6d7e8f0a2",
+      "name": "Код СЭМД",
+      "slug": "top_semd_filter",
+      "type": "string/=",
+      "sectionId": "string"
+    },
+    {
+      "id": "e4e5f6a7-b8c9-0d1e-2f3a-4b5c6d7e8f0a3",
+      "name": "JID клиники",
+      "slug": "top_clinic_filter",
+      "type": "string/=",
+      "sectionId": "string"
     }
   ],
   "cards": [
@@ -25,7 +39,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT v.* FROM public.v_rpt_documents_no_response_ui v WHERE 1=1 [[AND {{dwh_date}}]] ORDER BY v.\"Отправлено\" DESC NULLS LAST LIMIT 100",
+          "query": "SELECT v.* FROM public.v_rpt_documents_no_response_ui v WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(v.\"Код СЭМД\"), '') = {{top_semd}}]] [[AND v.\"JID клиники\"::text = {{top_clinic}}]] ORDER BY v.\"Отправлено\" DESC NULLS LAST LIMIT 100",
           "template-tags": {
             "dwh_date": {
               "id": "f4000001-0001-4001-8001-000000000001",
@@ -33,6 +47,22 @@
               "display-name": "По дате «Отправлено»",
               "type": "dimension",
               "widget-type": "date/all-options"
+            },
+            "top_semd": {
+              "id": "f4000001-0001-4001-8001-000000000010",
+              "name": "top_semd",
+              "display-name": "Код СЭМД",
+              "type": "text",
+              "widget-type": "string/=",
+              "required": false
+            },
+            "top_clinic": {
+              "id": "f4000001-0001-4001-8001-000000000011",
+              "name": "top_clinic",
+              "display-name": "JID клиники",
+              "type": "text",
+              "widget-type": "string/=",
+              "required": false
             }
           }
         },
