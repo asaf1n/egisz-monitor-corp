@@ -89,8 +89,10 @@ def try_start_sync(
         _state["message"] = "Запуск..."
         _state["last_stats"] = None
         _state["progress"] = None
+    # daemon=False: фоновый ETL — долгоживущий поток; при daemon=True он обрывается вместе с процессом
+    # при жёстком завершении воркера. Не-daemon даёт шанс завершить поток при обычном shutdown интерпретатора.
     t = threading.Thread(
-        target=_run_sync_job, args=(config_path, merged_dict), daemon=True
+        target=_run_sync_job, args=(config_path, merged_dict), daemon=False
     )
     t.start()
     return True, "Синхронизация запущена в фоне."

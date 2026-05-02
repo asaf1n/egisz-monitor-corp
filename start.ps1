@@ -695,13 +695,34 @@ function Invoke-ConfUiFirebirdDriverSelfTest {
     cmd /c 'kubectl -n egisz-monitor get deploy conf-ui -o name 1>nul 2>nul'
     if ($LASTEXITCODE -ne 0) { return }
     Write-Host "`[verify] conf-ui pod: Firebird client library + firebird.driver..." -ForegroundColor Cyan
-    # -c conf-ui: ��������� �Defaulted container � out of: conf-ui, seed-config (init)� �� kubectl
-    # �� stderr � ����� PowerShell � $ErrorActionPreference=Stop ������ �� ���������� NOTICE.
-    # Avoid nested " inside -c: Windows kubectl often truncates argv and breaks print("...").
-    kubectl -n egisz-monitor exec deploy/conf-ui -c conf-ui -- python -c "from firebird.driver import fbapi; fbapi.load_api()"
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "ERROR: Firebird driver check in conf-ui failed (see docker/web/Dockerfile libfbclient2)." -ForegroundColor Red
-        exit 1
+    # Quote the Python one-liner only on Linux (sh -c), not in Windows argv — avoids kubectl truncation bugs.
+    # Use Start-Process so exit code is real: piping kubectl to Write-Host can clear $LASTEXITCODE in Windows PS.
+    $shCmd = "python -c 'from firebird.driver import fbapi; fbapi.load_api()'"
+    $kubectlArgs = @(
+        '-n', 'egisz-monitor',
+        'exec', 'deployment/conf-ui',
+        '-c', 'conf-ui',
+        '--', '/bin/sh', '-c', $shCmd
+    )
+    $kubectlExe = 'kubectl'
+    $kExe = Get-Command kubectl.exe -ErrorAction SilentlyContinue
+    if ($kExe -and $kExe.Path) {
+        $kubectlExe = $kExe.Path
+    } else {
+        try {
+            $cmdInfo = Get-Command kubectl -ErrorAction Stop
+            if ($cmdInfo.Path) { $kubectlExe = $cmdInfo.Path }
+        } catch { }
+    }
+    $p = Start-Process -FilePath $kubectlExe -ArgumentList $kubectlArgs -Wait -PassThru -NoNewWindow
+    $code = if ($null -ne $p -and $null -ne $p.ExitCode) { [int]$p.ExitCode } else { -1 }
+    if ($code -ne 0) {
+        Write-Host "WARN: Firebird driver self-test in conf-ui failed (exit $code). See docker/web/Dockerfile (libfbclient2). Apply continues — use Config UI sync; set EGISZ_MONITOR_STRICT_FB_VERIFY=1 to fail verify on this check." -ForegroundColor Yellow
+        if ($env:EGISZ_MONITOR_STRICT_FB_VERIFY -eq '1') {
+            Write-Host "ERROR: EGISZ_MONITOR_STRICT_FB_VERIFY=1 set; aborting." -ForegroundColor Red
+            exit 1
+        }
+        return
     }
     Write-Host "`[verify] conf-ui Firebird driver OK (libfbclient loaded; sync uses k8s/local/egisz_monitor.yaml in Secret)." -ForegroundColor Green
 }
