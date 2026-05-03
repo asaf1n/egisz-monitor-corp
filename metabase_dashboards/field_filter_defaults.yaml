@@ -30,7 +30,7 @@ dwh_date_bindings:
       field_name: Отправлено
       sql_fragment: '[[AND {{dwh_date}}]]'
     parse_errors_created:
-      table_ref: stg_parse_errors
+      table_ref: v_stg_parse_errors_by_document
       field_name: created_at
       sql_fragment: '[[AND {{dwh_date}}]]'
 
@@ -64,6 +64,8 @@ text_parameter_bindings:
     widget: string/=
     equality_targets:
       - table: stg_parse_errors
+        expression: 'error_code::text = {{err_parse_code}}'
+      - table: v_stg_parse_errors_by_document
         expression: 'error_code::text = {{err_parse_code}}'
 
 dashboards:
@@ -103,7 +105,7 @@ dashboards:
         metabase-field-filters:
           dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
         other_variables: [top_semd, top_clinic]
-      - name: Доля топ-ошибок (ЕГИСЗ)
+      - name: Ошибки по типу
         table_ref: v_egisz_transactions_enriched_ui
         metabase-field-filters:
           dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
@@ -148,10 +150,19 @@ dashboards:
       - slug: err_parse_code_filter
         maps_to: err_parse_code
     cards:
-      - name: 03 · Ошибки парсинга (stg_parse_errors)
-        table_ref: stg_parse_errors
+      - name: "03 · Парсинг: строки журнала vs уникальные документы"
+        table_ref: v_stg_parse_errors_by_document
         metabase-field-filters:
-          dwh_date: { table_ref: stg_parse_errors, field_name: created_at }
+          dwh_date: { table_ref: v_stg_parse_errors_by_document, field_name: created_at }
+        other_variables: [err_parse_code]
+      - name: "03 · Расхождение источников JID (витрина)"
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+      - name: 03 · Ошибки парсинга (stg_parse_errors)
+        table_ref: v_stg_parse_errors_by_document
+        metabase-field-filters:
+          dwh_date: { table_ref: v_stg_parse_errors_by_document, field_name: created_at }
         other_variables: [err_parse_code]
       - name: 03 · Отказы РЭМД (витрина, деталь)
         table_ref: v_egisz_transactions_enriched_ui
@@ -287,7 +298,7 @@ dashboards:
         table_ref: v_egisz_transactions_enriched_ui
         metabase-field-filters:
           dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
-      - name: 09 · Успешных транзакций
+      - name: 09 · Успешных документов
         table_ref: v_egisz_transactions_enriched_ui
         metabase-field-filters:
           dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
@@ -334,7 +345,7 @@ dashboards:
         table_ref: v_egisz_transactions_enriched_ui
         metabase-field-filters:
           dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
-      - name: 10 · Доля топ-ошибок (ЕГИСЗ)
+      - name: 10 · Ошибки по типу
         table_ref: v_egisz_transactions_enriched_ui
         metabase-field-filters:
           dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
@@ -392,7 +403,7 @@ dashboards:
         table_ref: v_health_proxy_db_ui
         native_filters: none
       - name: 11 · Тренд ошибок парсинга
-        table_ref: stg_parse_errors
+        table_ref: v_stg_parse_errors_by_document
         native_filters: none
       - name: 11 · Сводка прокси-БД
         table_ref: v_health_proxy_db_ui

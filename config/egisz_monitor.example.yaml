@@ -29,7 +29,8 @@ postgres:
 etl:
   batch_size: 500
   pipeline_name: "firebird_exchangelog"
-  # Поле сохраняется в YAML/UI для совместимости; текущий ETL не использует его в SQL к Firebird (сообщения и outbound — по EGMID).
+  # Окно по датам в Firebird: EXCHANGELOG.LOGDATE и EGISZ_MESSAGES.CREATEDATE (DATEADD -N DAY TO CURRENT_TIMESTAMP).
+  # 0 или отрицательное — без ограничения по дате (только курсоры LOGID / EGMID).
   sync_window_days: 30
   # Игнорируется пайплайном: журнал всегда строится из встроенного SELECT по EXCHANGELOG.LOGID.
   source_query: null

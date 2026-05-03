@@ -259,24 +259,15 @@ PAGE = """
                   <input name="etl_interleave_page_rows" type="number" min="1" max="65000" value="{{ etl.interleave_page_rows }}" title="Размер страницы FIRST n при чередовании EGISZ_MESSAGES / EXCHANGELOG в Firebird (верхняя граница 65000)." class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
                 </label>
               </div>
-              <div class="mt-4 max-w-2xl rounded-lg border border-[#1B2940] bg-[#121826]/80 px-3 py-3 lg:py-2.5">
-                <div class="mb-2 text-[11px] font-medium uppercase tracking-[0.14em] text-[#509EE3]">Автосинхронизация (YAML)</div>
-                <p class="mb-2 text-xs leading-relaxed text-[#9CA3AF]">Эти поля попадают в YAML при нажатии «Сохранить в YAML» (и дальше в Secret для подов). Порядок: задайте расписание и таймзону → сохраните → в кластере для CronJob <code class="text-[#E5E7EB]">egisz-monitor-sync</code> выставьте <code class="text-[#E5E7EB]">suspend: false</code>, когда нужен автозапуск; <code class="text-[#E5E7EB]">enabled</code> в файле — ваше намерение в конфиге, оно не переключает k8s само по себе.</p>
-                <p class="mb-3 text-[10px] leading-relaxed text-[#6B7280]">Cron: ровно <strong class="text-[#9CA3AF]">5 полей</strong> через пробел: <code class="text-[#C4D4E8]">минута час день(месяца) месяц день(недели)</code>. Примеры: <code class="text-[#C4D4E8]">*/15 * * * *</code> — каждые 15&nbsp;мин; <code class="text-[#C4D4E8]">0 3 * * *</code> — 03:00 (в zone из timezone). IANA: <code class="text-[#C4D4E8]">Europe/Moscow</code>, <code class="text-[#C4D4E8]">Etc/UTC</code>.</p>
+              <div class="mt-4 max-w-2xl rounded-lg border border-[#1B2940] bg-[#121826]/80 px-3 py-2 lg:py-2">
+                <div class="mb-1.5 text-[11px] font-medium uppercase tracking-[0.14em] text-[#509EE3]">Автосинхронизация (YAML)</div>
                 <label class="flex cursor-pointer items-center gap-2 text-sm text-[#D1D5DB]">
                   <input type="checkbox" name="auto_sync_enabled" value="1" class="h-4 w-4 shrink-0 rounded border-[#2D3F5E] bg-[#0F1522] text-[#509EE3] focus:ring-[#509EE3]" {% if auto_sync.enabled %}checked{% endif %}/>
                   <span class="font-mono text-xs uppercase tracking-[0.12em] text-[#9CA3AF]">auto_sync.enabled</span>
                 </label>
-                <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <label class="block min-w-0">
-                    <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px]">schedule_cron (5 полей)</span>
-                    <input name="auto_sync_schedule_cron" value="{{ auto_sync.schedule_cron|default('*/15 * * * *', true) }}" pattern="\\S+(?:\\s+\\S+){4}" maxlength="120" placeholder="*/15 * * * *" spellcheck="false" title="5 полей через пробел: минута час день месяц день_недели. Разрешены *, /, числа, имёна (MON…)." class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
-                  </label>
-                  <label class="block min-w-0">
-                    <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px]">timezone (IANA)</span>
-                    <input name="auto_sync_timezone" value="{{ auto_sync.timezone|default('Etc/UTC', true) }}" maxlength="80" placeholder="Etc/UTC" spellcheck="false" title="Имя зоны IANA, как в Kubernetes: Europe/Moscow, Asia/Yekaterinburg, …" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono text-sm text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
-                  </label>
-                </div>
+                <input type="hidden" name="auto_sync_schedule_cron" value="{{ auto_sync.schedule_cron|default('*/15 * * * *', true) }}"/>
+                <input type="hidden" name="auto_sync_timezone" value="{{ auto_sync.timezone|default('Etc/UTC', true) }}"/>
+                <p class="mt-1.5 text-[10px] leading-snug text-[#6B7280]">Расписание и timezone — в YAML, файл <code class="text-[#9CA3AF]">{{ path }}</code> (раздел <code class="text-[#9CA3AF]">auto_sync</code>).</p>
               </div>
               <div class="mt-3 flex min-h-[2.75rem] w-full flex-wrap items-center gap-3">
               </div>
@@ -362,21 +353,34 @@ PAGE = """
       <div class="shrink-0 rounded-lg border border-[#2D3F5E] bg-[#121826] px-3 py-3 lg:py-2.5">
         <input type="file" id="pgRestoreFile" accept=".dump,.backup,application/octet-stream" class="sr-only" tabindex="-1" aria-hidden="true"/>
         <div class="flex flex-col gap-2">
-          <button type="button" id="btnPgBackup" class="inline-flex min-h-11 w-full items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-3 py-2.5 font-mono text-sm text-[#D1D5DB] transition hover:border-[#509EE3] hover:bg-[#223555] hover:text-white lg:min-h-10">
-            Скачать бэкап
-          </button>
-          <button type="button" id="btnPgRestore" class="inline-flex min-h-11 w-full items-center justify-center rounded-md border border-rose-700/70 bg-rose-950/40 px-3 py-2.5 font-mono text-sm text-rose-100 transition hover:bg-rose-900/50 lg:min-h-10">
-            Восстановить из дампа
-          </button>
+          <div class="flex min-w-0 items-stretch gap-2">
+            <button type="button" id="btnPgBackup" class="inline-flex min-h-10 min-w-0 flex-1 max-w-[calc(100%-2.75rem)] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-2 py-2 font-mono text-xs text-[#D1D5DB] transition hover:border-[#509EE3] hover:bg-[#223555] hover:text-white sm:text-sm">
+              Скачать бэкап
+            </button>
+            <button type="button" id="btnPgBackupDir" class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-[#2D3F5E] bg-[#0F1522] text-[#509EE3] transition hover:border-[#509EE3] hover:bg-[#1B2940]" title="Папка для сохранения дампа (Chrome/Edge)">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            </button>
+          </div>
+          <p id="pgBackupDirHint" class="hidden truncate text-[10px] text-[#6B7280]" title=""></p>
+          <div class="flex min-w-0 items-stretch gap-2">
+            <button type="button" id="btnPgRestore" class="inline-flex min-h-10 min-w-0 flex-1 max-w-[calc(100%-2.75rem)] items-center justify-center rounded-md border border-rose-700/70 bg-rose-950/40 px-2 py-2 font-mono text-xs text-rose-100 transition hover:bg-rose-900/50 sm:text-sm">
+              Восстановить из дампа
+            </button>
+            <button type="button" id="btnPgRestorePick" class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-rose-800/60 bg-[#0F1522] text-rose-200 transition hover:border-rose-600 hover:bg-rose-950/50" title="Выбрать файл дампа">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            </button>
+          </div>
+          <p id="pgRestoreFileHint" class="hidden truncate text-[10px] text-[#6B7280]" title=""></p>
         </div>
       </div>
     </aside>
   </div>
 
   <script>
-  let lastSyncJson = { running: false, error: null, message: '', last_stats: null };
+  let lastSyncJson = { running: false, error: null, message: '', last_stats: null, sync_attempted: false };
   let wasSyncRunning = false;
   let lastUiMessage = { ok: true, strip: '', logBody: '' };
+  let pgBackupDirHandle = null;
   const STRIP_BASE =
     'relative rounded-md border min-h-[2.75rem] overflow-hidden text-xs sm:text-sm font-mono transition-[background-color,border-color,color] duration-150';
   function etlPhaseLabelRu(phase) {
@@ -404,11 +408,10 @@ PAGE = """
     if (n == null || !Number.isFinite(Number(n))) return null;
     return Math.trunc(Number(n)).toLocaleString('ru-RU');
   }
-  /** Факты из payload ETL (без процентов «от потолка»). */
-  function etlProgressFactsLine(p) {
-    if (!p || typeof p !== 'object') return '';
+  /** Краткие строки system log: текущий элемент и числа (без дублирования курсоров и «полный объём не считается»). */
+  function etlProgressLogConcise(p) {
+    if (!p || typeof p !== 'object') return { title: '', detail: '' };
     const ph = String(p.phase || '');
-    const bits = [];
     const lo = Number(p.loaded_rows);
     const tot = Number(p.total_rows);
     const page = Number(p.page);
@@ -417,52 +420,68 @@ PAGE = """
     const logid = p.cursor_log_id;
     const egm = p.messages_cursor_egmid;
     const br = p.messages_batch_rows;
+    const jb = Number(p.journal_batch_rows);
     const cache = p.messages_msgid_cache_size;
     const outL = Number(p.outbound_loaded);
     const outT = Number(p.outbound_total);
     if (ph === 'messages_incremental') {
-      if (Number.isFinite(lo) && lo > 0) bits.push('сообщений загружено ' + fmtIntRu(lo));
-      if (Number.isFinite(page) && page > 0) bits.push('страница выборки ' + fmtIntRu(page));
-      if (egm != null && egm !== '') bits.push('курсор EGMID ' + String(egm));
-      if (Number.isFinite(br) && br > 0) bits.push('строк в последнем пакете ' + fmtIntRu(br));
-      if (Number.isFinite(cache) && cache > 0) bits.push('MSGID в кэше ' + fmtIntRu(cache));
-      bits.push('полный объём EGISZ_MESSAGES в FB не считается (без COUNT)');
-    } else if (
-      ph === 'exchangelog_export' ||
-      ph === 'exchangelog_parse' ||
-      ph === 'parsing' ||
-      ph === 'page_done'
-    ) {
-      if (Number.isFinite(page) && page > 0) bits.push('пакет журнала ' + fmtIntRu(page));
-      if (Number.isFinite(lo) && lo > 0) bits.push('строк журнала обработано ' + fmtIntRu(lo));
-      if (Number.isFinite(tot) && tot > 0) bits.push('всего строк (оценка) ' + fmtIntRu(tot));
-      else bits.push('полный объём журнала в FB не считается');
-      if (Number.isFinite(facts) && facts >= 0) bits.push('фактов ' + fmtIntRu(facts));
-      if (Number.isFinite(stag) && stag > 0) bits.push('ошибок staging ' + fmtIntRu(stag));
-    } else if (ph === 'exchangelog_ready') {
-      if (logid != null && logid !== '') bits.push('курсор LOGID на старте ' + String(logid));
-      if (Number.isFinite(tot) && tot > 0) bits.push('всего строк журнала (оценка) ' + fmtIntRu(tot));
-      else bits.push('полный объём журнала в FB не считается');
-    } else if (ph.indexOf('outbound_') === 0) {
-      if (Number.isFinite(outT) && outT > 0 && Number.isFinite(outL))
-        bits.push('документов ' + fmtIntRu(outL) + ' / ' + fmtIntRu(outT));
-      if (Number.isFinite(facts) && facts >= 0 && ph !== 'outbound_fetch') bits.push('в staging ' + fmtIntRu(facts));
-    } else if (ph === 'enrichment_firebird') {
-      bits.push('загрузка справочников в начале прогона');
-    } else if (ph === 'counting') {
-      bits.push('переход к выборке из Firebird');
+      const parts = [];
+      if (Number.isFinite(lo) && lo > 0) parts.push('сообщений ' + fmtIntRu(lo));
+      if (Number.isFinite(page) && page > 0) parts.push('страница ' + fmtIntRu(page));
+      if (egm != null && egm !== '') parts.push('EGMID ' + String(egm));
+      if (Number.isFinite(br) && br > 0) parts.push('в пакете ' + fmtIntRu(br) + ' строк');
+      if (Number.isFinite(cache) && cache > 0) parts.push('MSGID в кэше ' + fmtIntRu(cache));
+      return { title: 'Выгрузка EGISZ_MESSAGES по курсору EGMID', detail: parts.join(' · ') };
     }
-    if (
-      logid != null &&
-      logid !== '' &&
-      ph !== 'exchangelog_ready' &&
-      ph.indexOf('messages_') !== 0 &&
-      ph !== 'enrichment_firebird' &&
-      ph !== 'counting'
-    ) {
-      bits.push('LOGID ' + String(logid));
+    if (ph === 'messages_counting') {
+      const parts = [];
+      if (Number.isFinite(lo) && lo > 0) parts.push('дозагрузка по MSGID журнала — ' + fmtIntRu(lo) + ' строк');
+      if (Number.isFinite(cache) && cache > 0) parts.push('уникальных MSGID в кэше ' + fmtIntRu(cache));
+      return { title: 'EGISZ_MESSAGES', detail: parts.join(', ') };
     }
-    return bits.join(' · ');
+    if (ph === 'parsing') {
+      const parts = [];
+      if (Number.isFinite(page) && page > 0) parts.push('пакет ' + fmtIntRu(page));
+      if (Number.isFinite(jb) && jb > 0) parts.push('строк в пакете ' + fmtIntRu(jb));
+      if (Number.isFinite(lo) && lo > 0) parts.push('строк журнала обработано ' + fmtIntRu(lo));
+      if (Number.isFinite(facts) && facts >= 0) parts.push('фактов ' + fmtIntRu(facts));
+      if (logid != null && logid !== '') parts.push('LOGID ' + String(logid));
+      return { title: 'Разбор строк журнала (пакет)', detail: parts.join(' · ') };
+    }
+    if (ph === 'exchangelog_export' || ph === 'exchangelog_parse' || ph === 'page_done') {
+      const segs = [];
+      if (Number.isFinite(page) && page > 0) segs.push('пакет ' + fmtIntRu(page));
+      if (Number.isFinite(jb) && jb > 0) segs.push('строк в пакете ' + fmtIntRu(jb));
+      if (Number.isFinite(lo) && lo > 0) segs.push('всего обработано журнала ' + fmtIntRu(lo));
+      if (logid != null && logid !== '') segs.push('LOGID курсор ' + String(logid));
+      if (Number.isFinite(facts) && facts >= 0) segs.push('фактов ' + fmtIntRu(facts));
+      if (Number.isFinite(stag) && stag > 0) segs.push('ошибок staging ' + fmtIntRu(stag));
+      const verb =
+        ph === 'exchangelog_export' ? 'чтение пакета' : ph === 'exchangelog_parse' ? 'разбор пакета' : 'пакет обработан';
+      return { title: 'EXCHANGELOG: ' + verb, detail: segs.join(', ') };
+    }
+    if (ph === 'exchangelog_ready') {
+      const parts = [];
+      if (logid != null && logid !== '') parts.push('LOGID ' + String(logid));
+      if (Number.isFinite(tot) && tot > 0) parts.push('оценка строк журнала ' + fmtIntRu(tot));
+      return { title: 'EXCHANGELOG: старт по LOGID', detail: parts.join(' · ') };
+    }
+    if (ph === 'exchangelog_done') {
+      const parts = [];
+      if (Number.isFinite(lo) && lo > 0) parts.push('строк журнала ' + fmtIntRu(lo));
+      if (Number.isFinite(facts) && facts >= 0) parts.push('фактов ' + fmtIntRu(facts));
+      return { title: 'EXCHANGELOG: завершено', detail: parts.join(' · ') };
+    }
+    if (ph.indexOf('outbound_') === 0) {
+      const parts = [];
+      if (Number.isFinite(outT) && outT > 0 && Number.isFinite(outL)) parts.push('документов ' + fmtIntRu(outL) + ' / ' + fmtIntRu(outT));
+      if (Number.isFinite(facts) && facts >= 0 && ph !== 'outbound_fetch') parts.push('staging ' + fmtIntRu(facts));
+      return { title: 'Исходящие документы', detail: parts.join(' · ') };
+    }
+    if (ph === 'enrichment_firebird') return { title: 'Справочники Firebird', detail: 'лицензии, JPERSONS' };
+    if (ph === 'counting') return { title: 'Журнал EXCHANGELOG', detail: 'подготовка выборки' };
+    const short = etlPhaseLabelRu(ph);
+    return { title: short || ph, detail: '' };
   }
   /**
    * Полоска: только при известном знаменателе (доля журнала или исходящих).
@@ -542,7 +561,12 @@ PAGE = """
     }
     if (m) {
       return ui && ui.ok
-        ? { key: 'db_ok', title: statusLinePhrase(m, 40) || 'Готово', hint: logHint, classBar: 'border-emerald-800/80 bg-emerald-900/25 text-emerald-300' }
+        ? {
+            key: 'db_ok',
+            title: statusLinePhrase(m, 72) || 'Готово',
+            hint: logHint,
+            classBar: 'border-emerald-500/90 bg-emerald-700/40 text-emerald-50',
+          }
         : { key: 'db_err', title: statusLinePhrase(m, 40) || 'Ошибка', hint: logHint, classBar: 'border-rose-800/80 bg-rose-900/30 text-rose-200' };
     }
     if (j && j.last_stats) {
@@ -552,18 +576,15 @@ PAGE = """
   }
   function syncProgressMetaBlock(j) {
     const p = j && j.progress && typeof j.progress === 'object' ? j.progress : null;
-    const phase = p ? String(p.phase || '') : '';
-    const head = phase ? etlPhaseLabelRu(phase) : '';
     const msg = j && j.message != null ? String(j.message).trim() : '';
-    const facts = p ? etlProgressFactsLine(p) : '';
     const lines = [];
-    if (head) lines.push(head);
-    if (msg) lines.push(msg);
-    if (facts) lines.push(facts);
-    lines.push('—');
-    lines.push('Курсор прогона (payload ETL):');
-    lines.push.apply(lines, syncMetricsLines(j));
-    return lines.filter(function (x) { return x; }).join(String.fromCharCode(10));
+    if (p) {
+      const c = etlProgressLogConcise(p);
+      if (c.title) lines.push(c.title);
+      if (c.detail) lines.push(c.detail);
+    }
+    if (msg && (/Предупреждение/i.test(msg) || !p)) lines.push(msg);
+    return lines.filter(Boolean).join(String.fromCharCode(10));
   }
   function setPgSnapHintVisible(on) {
     const h = document.getElementById('pgSnapHint');
@@ -586,7 +607,7 @@ PAGE = """
     }
     fill.classList.remove('sync-progress-indeterminate');
     fill.style.width = '0%';
-    textEl.textContent = statusLinePhrase(st.title, 40);
+    textEl.textContent = statusLinePhrase(st.title, st.key === 'db_ok' ? 72 : 40);
     textEl.setAttribute('title', st.hint && String(st.hint).trim() ? String(st.hint) : st.title);
     if (j && j.running) {
       const p = j.progress;
@@ -655,23 +676,6 @@ PAGE = """
       'LICENSES.MODIFYDATE: ' + licV,
     ];
   }
-  function syncStatusSnapshotJson(j) {
-    try {
-      return JSON.stringify(
-        {
-          running: !!j.running,
-          error: j.error != null ? j.error : null,
-          message: j.message != null ? String(j.message) : '',
-          progress: j.progress != null ? j.progress : null,
-          last_stats: j.last_stats != null ? j.last_stats : null,
-        },
-        null,
-        2
-      );
-    } catch (e) {
-      return '{}';
-    }
-  }
   function formatSyncStatusBlock(j) {
     const lines = [];
     const msg = j.message != null ? String(j.message).trim() : '';
@@ -679,15 +683,23 @@ PAGE = """
       lines.push(syncProgressMetaBlock(j));
       if (msg && /Предупреждение/i.test(msg)) lines.push(msg);
     } else {
-      if (msg) lines.push(msg);
-      if (j.error) lines.push('Статус: ошибка');
-      else if (j.last_stats) lines.push('Статус: выполнено');
-      else lines.push('Статус: ожидание');
       if (j.error) {
+        if (msg) lines.push(msg);
+        lines.push('Синхронизация завершилась с ошибкой.');
         const errStr = String(j.error);
         if (!msg || msg.indexOf(errStr) < 0) lines.push('Ошибка: ' + errStr);
+      } else if (j.last_stats) {
+        if (msg) lines.push(msg);
+        else lines.push('Синхронизация завершена успешно: полный проход конвейера Firebird → PostgreSQL.');
+        lines.push(JSON.stringify(j.last_stats, null, 2));
+      } else if (j.sync_attempted) {
+        if (msg) lines.push(msg);
+        lines.push(
+          'Итог последнего запуска не зафиксирован (нет счётчиков): прерывание, конфликт lock или рестарт воркера.'
+        );
+      } else {
+        lines.push('Статус: ожидание');
       }
-      if (j.last_stats) lines.push(JSON.stringify(j.last_stats, null, 2));
     }
     return lines.filter(Boolean).join(String.fromCharCode(10));
   }
@@ -700,21 +712,9 @@ PAGE = """
   }
   function applySyncStatusFromPoll(j, el) {
     if (!el || syncStartInFlight) return;
-    el.textContent = buildSystemLogText(j);
-    var rawObj;
-    try {
-      rawObj = JSON.parse(syncStatusSnapshotJson(j));
-    } catch (e) {
-      rawObj = { running: !!j.running, error: j.error, message: j.message };
-    }
-    if (lastUiMessage && lastUiMessage.logBody) {
-      rawObj.ui_log = String(lastUiMessage.logBody);
-    }
-    try {
-      el.setAttribute('data-raw', JSON.stringify(rawObj, null, 2));
-    } catch (e2) {
-      el.setAttribute('data-raw', syncStatusSnapshotJson(j));
-    }
+    const display = buildSystemLogText(j);
+    el.textContent = display;
+    el.setAttribute('data-raw', display);
   }
   async function loadPgSyncSnapshotOnce() {
     const logEl = document.getElementById('pgSnapLogId');
@@ -979,9 +979,7 @@ PAGE = """
         : ('Ошибка опроса: ' + (e && e.message ? e.message : e));
       if (el && !syncStartInFlight) {
         el.textContent = reason;
-        try {
-          el.setAttribute('data-raw', JSON.stringify({ fetch_error: reason }, null, 2));
-        } catch (e2) {}
+        el.setAttribute('data-raw', reason);
       }
     }
   }
@@ -1023,15 +1021,17 @@ PAGE = """
     const msg = j.message != null ? String(j.message) : (j.ok ? 'OK' : 'Ошибка');
     var strip = '';
     if (url === '/test-fb') {
-      strip = j.ok ? 'Проверка Firebird' : 'Ошибка Firebird';
+      strip = j.ok ? 'Подключение к Firebird OK' : 'Ошибка Firebird';
     } else if (url === '/test-pg') {
-      strip = j.ok ? 'Проверка PostgreSQL' : 'Ошибка PostgreSQL';
+      strip = j.ok ? 'Подключение к PostgreSQL OK' : 'Ошибка PostgreSQL';
     } else if (url === '/save') {
       strip = j.ok ? 'Сохранено' : 'Ошибка записи';
     } else {
       strip = j.ok ? 'Готово' : 'Ошибка';
     }
-    showCfgMessage(!!j.ok, msg, { strip: strip, logBody: msg });
+    var displayMsg = msg;
+    if (j.ok && (url === '/test-fb' || url === '/test-pg')) displayMsg = strip;
+    showCfgMessage(!!j.ok, displayMsg, { strip: strip, logBody: displayMsg });
   }
   function bindClick(id, fn) {
     var elBind = document.getElementById(id);
@@ -1085,6 +1085,49 @@ PAGE = """
       showCfgMessage(false, String(e), { strip: 'Ошибка', logBody: String(e) });
     }
   });
+  bindClick('btnPgBackupDir', async function () {
+    if (typeof window.showDirectoryPicker !== 'function') {
+      showCfgMessage(false, 'Выбор папки для сохранения поддерживается в Chromium (Chrome, Edge, Яндекс.Браузер). Иначе дамп уйдёт в папку загрузок по умолчанию.', {
+        strip: 'Папка',
+        logBody: 'showDirectoryPicker недоступен',
+      });
+      return;
+    }
+    try {
+      pgBackupDirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+      const hint = document.getElementById('pgBackupDirHint');
+      if (hint) {
+        hint.textContent = 'Сохранение: ' + (pgBackupDirHandle.name || 'папка');
+        hint.classList.remove('hidden');
+        hint.title = hint.textContent;
+      }
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+      showCfgMessage(false, String(e && e.message ? e.message : e), { strip: 'Папка', logBody: String(e) });
+    }
+  });
+  bindClick('btnPgRestorePick', function () {
+    const inp = document.getElementById('pgRestoreFile');
+    if (inp) inp.click();
+  });
+  (function bindPgRestoreFileHint() {
+    const inp = document.getElementById('pgRestoreFile');
+    if (!inp) return;
+    inp.addEventListener('change', function () {
+      const hint = document.getElementById('pgRestoreFileHint');
+      const f = inp.files && inp.files[0];
+      if (!hint) return;
+      if (f) {
+        hint.textContent = 'Файл: ' + f.name;
+        hint.classList.remove('hidden');
+        hint.title = f.name;
+      } else {
+        hint.textContent = '';
+        hint.classList.add('hidden');
+        hint.title = '';
+      }
+    });
+  })();
   bindClick('btnPgBackup', async function () {
     const fd = new FormData(document.getElementById('configForm'));
     let r;
@@ -1186,6 +1229,7 @@ PAGE = """
     if (!el) return;
     if (!form) {
       el.textContent = 'В DOM нет формы #configForm — обновите страницу (кэш/прокси могли отдать неполный HTML).';
+      el.setAttribute('data-raw', el.textContent);
       return;
     }
     if (btnSyncEl && btnSyncEl.disabled) return;
@@ -1198,6 +1242,7 @@ PAGE = """
     }
     try {
       el.textContent = 'Запрос...';
+      el.setAttribute('data-raw', el.textContent);
       const fd = new FormData(form);
       var ac = typeof AbortController !== 'undefined' ? new AbortController() : null;
       var to = ac ? setTimeout(function () { ac.abort(); }, 45000) : null;
@@ -1218,12 +1263,14 @@ PAGE = """
         } else {
           el.textContent = String(e);
         }
+        el.setAttribute('data-raw', el.textContent);
         return;
       }
       if (to) clearTimeout(to);
       const raw = await r.text();
       if (!r.ok) {
         el.textContent = 'Ошибка HTTP ' + r.status + String.fromCharCode(10) + raw.slice(0, 800);
+        el.setAttribute('data-raw', el.textContent);
         await pollSync();
         return;
       }
@@ -1232,9 +1279,11 @@ PAGE = """
         j = JSON.parse(raw);
       } catch (e2) {
         el.textContent = 'Ответ сервера не JSON (код ' + r.status + '). ' + raw.slice(0, 400);
+        el.setAttribute('data-raw', el.textContent);
         return;
       }
       el.textContent = j.message || j.error || JSON.stringify(j);
+      el.setAttribute('data-raw', el.textContent);
       await pollSync();
     } finally {
       syncStartInFlight = false;

@@ -21,7 +21,7 @@
   "cards": [
     {
       "name": "11 · Сигналы healthcheck",
-      "description": "Пять сигналов: error_rate_high (>10% за 24ч при объёме >50), unknown_high (>5%), parse_errors_burst (>10/час), queue_red_24h (>50 в очереди >24ч), cursor_stale (etl_state.updated_at >6ч). Уровень — green/yellow/red.",
+      "description": "Пять сигналов: error_rate_high (>10% за 24ч при объёме **документов** >50), unknown_high (>5%), parse_errors_burst (**уникальных документов** с ошибкой парсинга за час >10), queue_red_24h (>50 в очереди >24ч), cursor_stale (etl_state.updated_at >6ч). Уровень — green/yellow/red.",
       "table_ref": "v_health_signals_ui",
       "dataset_query": {
         "type": "native",
@@ -34,7 +34,9 @@
       "visualization_settings": {
         "table.column_formatting": [
           {
-            "columns": ["Уровень"],
+            "columns": [
+              "Уровень"
+            ],
             "type": "single",
             "operator": "=",
             "value": "red",
@@ -42,7 +44,9 @@
             "highlight_row": true
           },
           {
-            "columns": ["Уровень"],
+            "columns": [
+              "Уровень"
+            ],
             "type": "single",
             "operator": "=",
             "value": "yellow",
@@ -50,7 +54,9 @@
             "highlight_row": true
           },
           {
-            "columns": ["Уровень"],
+            "columns": [
+              "Уровень"
+            ],
             "type": "single",
             "operator": "=",
             "value": "green",
@@ -109,8 +115,12 @@
       },
       "display": "row",
       "visualization_settings": {
-        "graph.dimensions": ["Наименование клиники"],
-        "graph.metrics": ["Доля ошибок, %"],
+        "graph.dimensions": [
+          "Наименование клиники"
+        ],
+        "graph.metrics": [
+          "Доля ошибок, %"
+        ],
         "graph.show_values": true
       },
       "sizeX": 16,
@@ -120,12 +130,12 @@
     },
     {
       "name": "11 · Heatmap клиники × дни (доля ошибок)",
-      "description": "Тепловая карта: строки — клиники с объёмом >5 за 14 дней, столбцы — дни, значение — доля ошибок (%). Подсвечивает «горячие» клиники, у которых проблема не точечная, а длится несколько дней. Окно фиксировано (14 дней) — фильтр периода с дашборда не применяется.",
+      "description": "Тепловая карта: строки — клиники с объёмом **>5 документов** за 14 дней, столбцы — дни, значение — доля ошибок (%). Подсвечивает «горячие» клиники, у которых проблема не точечная, а длится несколько дней. Окно фиксировано (14 дней) — фильтр периода с дашборда не применяется.",
       "table_ref": "fact_egisz_transactions",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH d AS (SELECT date_trunc('day', f.processed_at)::date AS day, COALESCE(NULLIF(TRIM(dc.jname),''),'JID '||f.jid::text) AS clinic, COUNT(*) AS cnt, COUNT(*) FILTER (WHERE f.status = 'error') AS err FROM public.fact_egisz_transactions f LEFT JOIN public.dim_clinics dc ON dc.jid = f.jid WHERE f.processed_at >= NOW() - INTERVAL '14 days' AND f.jid IS NOT NULL [[AND f.jid::text = {{top_clinic}}]] GROUP BY 1,2 HAVING COUNT(*) > 5) SELECT day AS \"День\", clinic AS \"Клиника\", ROUND(100.0 * err / NULLIF(cnt,0), 2) AS \"Доля ошибок, %\" FROM d ORDER BY 1, 2",
+          "query": "WITH d AS (SELECT date_trunc('day', f.processed_at)::date AS day, COALESCE(NULLIF(TRIM(dc.jname),''),'JID '||f.jid::text) AS clinic, COUNT(DISTINCT f.relates_to_id) AS cnt, COUNT(DISTINCT f.relates_to_id) FILTER (WHERE f.status = 'error') AS err FROM public.fact_egisz_transactions f LEFT JOIN public.dim_clinics dc ON dc.jid = f.jid WHERE f.processed_at >= NOW() - INTERVAL '14 days' AND f.jid IS NOT NULL [[AND f.jid::text = {{top_clinic}}]] GROUP BY 1,2 HAVING COUNT(DISTINCT f.relates_to_id) > 5) SELECT day AS \"День\", clinic AS \"Клиника\", ROUND(100.0 * err / NULLIF(cnt,0), 2) AS \"Доля ошибок, %\" FROM d ORDER BY 1, 2",
           "template-tags": {
             "top_clinic": {
               "id": "h1100002-1001-4101-8101-000000000010",
@@ -146,9 +156,15 @@
         "table.cell_column": "Доля ошибок, %",
         "table.column_formatting": [
           {
-            "columns": ["Доля ошибок, %"],
+            "columns": [
+              "Доля ошибок, %"
+            ],
             "type": "range",
-            "colors": ["#10B981", "#F59E0B", "#EF4444"],
+            "colors": [
+              "#10B981",
+              "#F59E0B",
+              "#EF4444"
+            ],
             "min_type": "custom",
             "min_value": 0,
             "max_type": "custom",
@@ -174,8 +190,12 @@
       },
       "display": "row",
       "visualization_settings": {
-        "graph.dimensions": ["Возраст"],
-        "graph.metrics": ["Документов"],
+        "graph.dimensions": [
+          "Возраст"
+        ],
+        "graph.metrics": [
+          "Документов"
+        ],
         "graph.show_values": true
       },
       "sizeX": 12,
@@ -185,19 +205,23 @@
     },
     {
       "name": "11 · Тренд ошибок парсинга",
-      "description": "Динамика количества записей `stg_parse_errors` по часам за 24 часа. Выпады = всплеск битого XML или потерянного `relatesToMessage`.",
-      "table_ref": "stg_parse_errors",
+      "description": "Динамика **уникальных документов** с ошибкой парсинга (`document_group_key` в `v_stg_parse_errors_by_document`) по часам за 24 часа. Всплеск = битый XML или отсутствие `relatesToMessage` в разборе.",
+      "table_ref": "v_stg_parse_errors_by_document",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT date_trunc('hour', created_at) AS \"Час\", COUNT(*)::bigint AS \"Ошибок\" FROM public.stg_parse_errors WHERE created_at >= NOW() - INTERVAL '24 hours' GROUP BY 1 ORDER BY 1"
+          "query": "SELECT date_trunc('hour', created_at) AS \"Час\", COUNT(DISTINCT document_group_key)::bigint AS \"Уникальных документов с ошибкой\" FROM public.v_stg_parse_errors_by_document WHERE created_at >= NOW() - INTERVAL '24 hours' GROUP BY 1 ORDER BY 1"
         },
         "database": 1
       },
       "display": "line",
       "visualization_settings": {
-        "graph.dimensions": ["Час"],
-        "graph.metrics": ["Ошибок"],
+        "graph.dimensions": [
+          "Час"
+        ],
+        "graph.metrics": [
+          "Уникальных документов с ошибкой"
+        ],
         "graph.show_values": true,
         "graph.x_axis.scale": "timeseries"
       },

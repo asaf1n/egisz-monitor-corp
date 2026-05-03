@@ -166,8 +166,8 @@ function Invoke-DockerBuild {
     }
     Invoke-Native docker build @nc -f metabase/Dockerfile -t egisz-monitor-metabase:latest $Root
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    # :k8s-v15 + :local = ��� �� digest, ��� :latest. � k8s/metabase.yaml ����� � :k8s-v15 (bump v16� ��� ����� ��������/���������), ����� kubelet Docker Desktop ������ ������ digest ��� ����� ����.
-    Invoke-Native docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:k8s-v15
+    # :k8s-v16 + :local = ��� �� digest, ��� :latest. � k8s/metabase.yaml ����� � :k8s-v16 (bump v16� ��� ����� ��������/���������), ����� kubelet Docker Desktop ������ ������ digest ��� ����� ����.
+    Invoke-Native docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:k8s-v16
     if ($LASTEXITCODE -ne 0) { exit 1 }
     Invoke-Native docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:local
     if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -230,7 +230,7 @@ function Invoke-KindLoadImagesIfNeeded {
     if ($LASTEXITCODE -ne 0) { exit 1 }
     kind load docker-image egisz-monitor-metabase:latest --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    kind load docker-image egisz-monitor-metabase:k8s-v15 --name $name
+    kind load docker-image egisz-monitor-metabase:k8s-v16 --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }
     kind load docker-image egisz-monitor-metabase:local --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }

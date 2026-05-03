@@ -6,20 +6,22 @@ SELECT pipeline, last_log_id, updated_at
 FROM etl_state
 ORDER BY pipeline;
 
--- Количество фактов (накапливаются; не ограничены текущим sync_window_days)
-SELECT COUNT(*)::bigint AS fact_rows_total
+-- Количество фактов (документов/callback: один relates_to_id = одна строка)
+SELECT COUNT(DISTINCT relates_to_id)::bigint AS fact_documents_total
 FROM fact_egisz_transactions;
 
 -- Факты за последние N суток по processed_at (подставьте N из конфига для ориентира; необязательно совпадает с окном Firebird)
-SELECT COUNT(*)::bigint AS fact_rows_processed_last_30d
+SELECT COUNT(DISTINCT relates_to_id)::bigint AS fact_documents_processed_last_30d
 FROM fact_egisz_transactions
 WHERE processed_at >= NOW() - INTERVAL '30 days';
 -- Замените 30 на нужное число дней.
 
--- Staging исходящих — полный снимок последнего успешного sync (окно CREATEDATE во Firebird)
-SELECT COUNT(*)::bigint AS stg_outbound_rows
+-- Staging исходящих — по одной строке на document_id (PK)
+SELECT COUNT(DISTINCT document_id)::bigint AS stg_outbound_documents
 FROM stg_egisz_outbound_documents;
 
--- Ошибки парсинга журнала (объясняют расхождение fetched vs facts)
-SELECT COUNT(*)::bigint AS parse_error_rows
+-- Ошибки парсинга: уникальные документы (группировка), и сырой объём строк журнала
+SELECT COUNT(DISTINCT document_group_key)::bigint AS parse_error_documents
+FROM v_stg_parse_errors_by_document;
+SELECT COUNT(*)::bigint AS parse_error_staging_rows
 FROM stg_parse_errors;

@@ -1,11 +1,13 @@
 from egisz_monitor_corp.sql_util import (
     default_exchangelog_select,
     egisz_messages_by_msgids_sql,
+    egisz_messages_incremental_page_max_egmid_sql,
     egisz_messages_incremental_sql,
     enrichment_egisz_licenses_only_sql,
     enrichment_egisz_licenses_sql,
     exchangelog_count_after_cursor,
     exchangelog_count_logid_after_cursor,
+    exchangelog_inner_sql_for_etl,
     jpersons_all_sql,
     outbound_documents_staging_select,
     paginated_exchangelog_sql,
@@ -70,6 +72,31 @@ def test_default_select_exchangelog_joins_messages_for_egmid() -> None:
     assert "LEFT JOIN EGISZ_MESSAGES m ON m.MSGID = e.MSGID" in s.replace("\n", " ")
     assert "m.EGMID AS MESSAGE_EGMID" in s.replace("\n", " ")
     assert "DATEADD" not in s
+
+
+def test_exchangelog_inner_for_etl_adds_logdate_window() -> None:
+    s = exchangelog_inner_sql_for_etl(sync_window_days=14)
+    assert "LOGDATE >= DATEADD(-14 DAY TO CURRENT_TIMESTAMP)" in s.replace("\n", " ")
+
+
+def test_exchangelog_inner_for_etl_zero_means_no_extra_predicate() -> None:
+    s = exchangelog_inner_sql_for_etl(sync_window_days=0)
+    assert "DATEADD" not in s
+
+
+def test_egisz_messages_incremental_respects_sync_window() -> None:
+    s = egisz_messages_incremental_sql(last_egmid=1, limit=50, sync_window_days=7)
+    assert "FIRST 50" in s
+    assert "EGMID > 1" in s
+    assert "CREATEDATE >= DATEADD(-7 DAY TO CURRENT_TIMESTAMP)" in s.replace("\n", " ")
+
+
+def test_egisz_messages_page_max_sql_matches_incremental_window() -> None:
+    s = egisz_messages_incremental_page_max_egmid_sql(last_egmid=9, limit=100, sync_window_days=3)
+    assert "MAX(p.EGMID)" in s.replace("\n", " ")
+    assert "FIRST 100" in s
+    assert "EGMID > 9" in s
+    assert "CREATEDATE >= DATEADD(-3 DAY TO CURRENT_TIMESTAMP)" in s.replace("\n", " ")
 
 
 def test_outbound_staging_select_orders_by_egmid_desc_uses_egmid_floor() -> None:

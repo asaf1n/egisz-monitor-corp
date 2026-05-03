@@ -743,7 +743,7 @@ def upsert_facts_batch(
         dedup[r["relates_to_id"]] = r
     rows = list(dedup.values())
     cs = max(50, min(int(chunk_size), 10_000))
-    template = "(%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s)"
+    template = "(%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
     n = len(rows)
     multi = n > cs
     for start in range(0, n, cs):
@@ -769,6 +769,12 @@ def upsert_facts_batch(
                     r["processed_at"],
                     r.get("exchangelog_log_id"),
                     r.get("egisz_messages_egmid"),
+                    r.get("jid_from_license"),
+                    r.get("jid_from_gost_log"),
+                    r.get("jid_from_gost_reply"),
+                    r.get("gost_token_logtext"),
+                    r.get("gost_token_replyto"),
+                    r.get("jid_sources_mismatch", False),
                 )
             )
         with con.cursor() as cur:
@@ -783,7 +789,9 @@ def upsert_facts_batch(
                 INSERT INTO fact_egisz_transactions (
                     relates_to_id, local_uid_semd, jid, gost_jid_token, org_oid, kind_code, status,
                     emdr_id, errors_json, registration_date, semd_creation_at, processed_at,
-                    exchangelog_log_id, egisz_messages_egmid
+                    exchangelog_log_id, egisz_messages_egmid,
+                    jid_from_license, jid_from_gost_log, jid_from_gost_reply,
+                    gost_token_logtext, gost_token_replyto, jid_sources_mismatch
                 ) VALUES %s
                 ON CONFLICT (relates_to_id) DO UPDATE SET
                     local_uid_semd = EXCLUDED.local_uid_semd,
@@ -798,7 +806,13 @@ def upsert_facts_batch(
                     semd_creation_at = EXCLUDED.semd_creation_at,
                     processed_at = EXCLUDED.processed_at,
                     exchangelog_log_id = EXCLUDED.exchangelog_log_id,
-                    egisz_messages_egmid = EXCLUDED.egisz_messages_egmid
+                    egisz_messages_egmid = EXCLUDED.egisz_messages_egmid,
+                    jid_from_license = EXCLUDED.jid_from_license,
+                    jid_from_gost_log = EXCLUDED.jid_from_gost_log,
+                    jid_from_gost_reply = EXCLUDED.jid_from_gost_reply,
+                    gost_token_logtext = EXCLUDED.gost_token_logtext,
+                    gost_token_replyto = EXCLUDED.gost_token_replyto,
+                    jid_sources_mismatch = EXCLUDED.jid_sources_mismatch
                 """,
                 tuples,
                 template=template,
@@ -807,15 +821,21 @@ def upsert_facts_batch(
             con.commit()
 
 
-def insert_staging_errors(con, rows: list[tuple[str | None, str, str, str | None]]) -> None:  # type: ignore[no-untyped-def]
+def insert_staging_errors(
+    con, rows: list[tuple[str | None, str, str, str | None, int | None, int | None, str | None, str | None, str | None, str | None]]
+) -> None:  # type: ignore[no-untyped-def]
     if not rows:
         return
     with con.cursor() as cur:
         execute_batch(
             cur,
             """
-            INSERT INTO stg_parse_errors (relates_to_id, error_code, message, log_excerpt)
-            VALUES (%s, %s, %s, %s);
+            INSERT INTO stg_parse_errors (
+                relates_to_id, error_code, message, log_excerpt,
+                exchangelog_log_id, egisz_messages_egmid, journal_msgid,
+                relates_to_hint, local_uid_hint, emdr_id_hint
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
             """,
             rows,
         )

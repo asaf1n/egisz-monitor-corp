@@ -228,18 +228,18 @@ def test_process_exchangelog_pages_msgtext_too_large_staging_only() -> None:
 
     assert stats.facts == 0
     assert any(any(t[1] == "MSGTEXT_TOO_LARGE" for t in batch) for batch in flushed)
-    """Полная страница без сдвига EGMID → выходим из цикла (иначе бесконечный опрос FB)."""
+    # Полная страница без сдвига EGMID в драйвере: основной SELECT + MAX(EGMID) в Firebird, затем выход.
     calls = {"n": 0}
 
     def fake_fetch(_cfg: Any, sql: str, *_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
         calls["n"] += 1
-        if calls["n"] > 2:
+        if calls["n"] > 3:
             raise AssertionError("fetch_all called too many times (infinite loop)")
         return [{"msgid": f"k{i}", "egmid": None, "replyto": None, "documentid": None, "msg_created_at": None} for i in range(500)]
 
     with patch("egisz_monitor_corp.etl.fetch_all", side_effect=fake_fetch):
         msg, cur = _export_egisz_messages_by_egmid(_cfg(), 0, log=lambda _m: None, detail=None)
 
-    assert calls["n"] == 1
+    assert calls["n"] == 2
     assert cur == 0
     assert len(msg) == 500

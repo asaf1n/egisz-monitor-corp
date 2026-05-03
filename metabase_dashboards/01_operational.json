@@ -64,47 +64,164 @@
       "visualization_settings": {
         "table": {
           "columns": [
-            { "name": "Обработано IPS", "enabled": true },
-            { "name": "Статус", "enabled": true },
-            { "name": "JID клиники", "enabled": true },
-            { "name": "Код СЭМД", "enabled": true },
-            { "name": "Наименование СЭМД", "enabled": true },
-            { "name": "Сводка ошибок", "enabled": true },
-            { "name": "Рег. номер РЭМД (emdrid)", "enabled": true },
-            { "name": "Зарегистрирован в ЕГИСЗ РЭМД", "enabled": true },
-            { "name": "Хост клиники (VPN ГОСТ)", "enabled": true },
-            { "name": "OID организации", "enabled": true },
-            { "name": "localUid СЭМД", "enabled": true },
-            { "name": "Ошибки JSON", "enabled": true },
-            { "name": "Создание СЭМД", "enabled": true },
-            { "name": "День (тренд)", "enabled": true },
-            { "name": "Наименование клиники", "enabled": true },
-            { "name": "ИНН клиники", "enabled": true },
-            { "name": "OID клиники", "enabled": true },
-            { "name": "Связанное сообщение", "enabled": true }
+            {
+              "name": "Обработано IPS",
+              "enabled": true
+            },
+            {
+              "name": "Статус",
+              "enabled": true
+            },
+            {
+              "name": "JID клиники",
+              "enabled": true
+            },
+            {
+              "name": "Код СЭМД",
+              "enabled": true
+            },
+            {
+              "name": "Наименование СЭМД",
+              "enabled": true
+            },
+            {
+              "name": "Сводка ошибок",
+              "enabled": true
+            },
+            {
+              "name": "Рег. номер РЭМД (emdrid)",
+              "enabled": true
+            },
+            {
+              "name": "Зарегистрирован в ЕГИСЗ РЭМД",
+              "enabled": true
+            },
+            {
+              "name": "Хост клиники (VPN ГОСТ)",
+              "enabled": true
+            },
+            {
+              "name": "OID организации",
+              "enabled": true
+            },
+            {
+              "name": "localUid СЭМД",
+              "enabled": true
+            },
+            {
+              "name": "Ошибки JSON",
+              "enabled": true
+            },
+            {
+              "name": "Создание СЭМД",
+              "enabled": true
+            },
+            {
+              "name": "День (тренд)",
+              "enabled": true
+            },
+            {
+              "name": "Наименование клиники",
+              "enabled": true
+            },
+            {
+              "name": "ИНН клиники",
+              "enabled": true
+            },
+            {
+              "name": "OID клиники",
+              "enabled": true
+            },
+            {
+              "name": "Связанное сообщение",
+              "enabled": true
+            }
           ]
         },
         "table.columns": [
-          { "name": "Обработано IPS", "enabled": true },
-          { "name": "Статус", "enabled": true },
-          { "name": "JID клиники", "enabled": true },
-          { "name": "Код СЭМД", "enabled": true },
-          { "name": "Наименование СЭМД", "enabled": true },
-          { "name": "Сводка ошибок", "enabled": true },
-          { "name": "Рег. номер РЭМД (emdrid)", "enabled": true },
-          { "name": "Зарегистрирован в ЕГИСЗ РЭМД", "enabled": true },
-          { "name": "Хост клиники (VPN ГОСТ)", "enabled": true },
-          { "name": "OID организации", "enabled": true },
-          { "name": "localUid СЭМД", "enabled": true },
-          { "name": "Ошибки JSON", "enabled": true },
-          { "name": "Создание СЭМД", "enabled": true },
-          { "name": "День (тренд)", "enabled": true },
-          { "name": "Наименование клиники", "enabled": true },
-          { "name": "ИНН клиники", "enabled": true },
-          { "name": "OID клиники", "enabled": true },
-          { "name": "Связанное сообщение", "enabled": true }
+          {
+            "name": "Обработано IPS",
+            "enabled": true
+          },
+          {
+            "name": "Статус",
+            "enabled": true
+          },
+          {
+            "name": "JID клиники",
+            "enabled": true
+          },
+          {
+            "name": "Код СЭМД",
+            "enabled": true
+          },
+          {
+            "name": "Наименование СЭМД",
+            "enabled": true
+          },
+          {
+            "name": "Сводка ошибок",
+            "enabled": true
+          },
+          {
+            "name": "Рег. номер РЭМД (emdrid)",
+            "enabled": true
+          },
+          {
+            "name": "Зарегистрирован в ЕГИСЗ РЭМД",
+            "enabled": true
+          },
+          {
+            "name": "Хост клиники (VPN ГОСТ)",
+            "enabled": true
+          },
+          {
+            "name": "OID организации",
+            "enabled": true
+          },
+          {
+            "name": "localUid СЭМД",
+            "enabled": true
+          },
+          {
+            "name": "Ошибки JSON",
+            "enabled": true
+          },
+          {
+            "name": "Создание СЭМД",
+            "enabled": true
+          },
+          {
+            "name": "День (тренд)",
+            "enabled": true
+          },
+          {
+            "name": "Наименование клиники",
+            "enabled": true
+          },
+          {
+            "name": "ИНН клиники",
+            "enabled": true
+          },
+          {
+            "name": "OID клиники",
+            "enabled": true
+          },
+          {
+            "name": "Связанное сообщение",
+            "enabled": true
+          }
         ],
-        "table.column_widths": [null, null, null, 76, 216, 568, null, 197],
+        "table.column_widths": [
+          null,
+          null,
+          null,
+          76,
+          216,
+          568,
+          null,
+          197
+        ],
         "table.pivot_column": "Рег. номер РЭМД (emdrid)",
         "table.cell_column": "Связанное сообщение",
         "column_settings": {
@@ -182,7 +299,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT \"Статус\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID клиники\"::text = {{top_clinic}}]] GROUP BY 1 ORDER BY 2 DESC",
+          "query": "SELECT \"Статус\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID клиники\"::text = {{top_clinic}}]] GROUP BY 1 ORDER BY 2 DESC",
           "template-tags": {
             "top_semd": {
               "widget-type": "string/=",
@@ -266,7 +383,7 @@
           }
         ],
         "graph.metrics": [
-          "Количество"
+          "Документов"
         ],
         "pie.show_legend": true,
         "pie.show_total": true,
@@ -275,7 +392,7 @@
           "[\"name\",\"Статус\"]": {
             "column_title": "Статус"
           },
-          "[\"name\",\"Количество\"]": {
+          "[\"name\",\"Документов\"]": {
             "column_title": "Количество",
             "number_separators": ".",
             "decimals": 0
@@ -303,7 +420,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH per_code AS ( SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS lbl, COUNT(*)::bigint AS cnt FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID клиники\"::text = {{top_clinic}}]] GROUP BY 1 ), ranked AS ( SELECT lbl, cnt, ROW_NUMBER() OVER (ORDER BY cnt DESC) AS rn FROM per_code ), tail AS ( SELECT COALESCE(SUM(cnt), 0)::bigint AS tail_cnt FROM ranked WHERE rn > 10 ) SELECT CASE WHEN r.rn <= 10 THEN r.lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END AS \"Код СЭМД\", SUM(r.cnt)::bigint AS \"Количество\" FROM ranked r CROSS JOIN tail t GROUP BY CASE WHEN r.rn <= 10 THEN r.lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END ORDER BY 2 DESC",
+          "query": "WITH per_code AS ( SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS lbl, COUNT(DISTINCT \"Связанное сообщение\")::bigint AS cnt FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID клиники\"::text = {{top_clinic}}]] GROUP BY 1 ), ranked AS ( SELECT lbl, cnt, ROW_NUMBER() OVER (ORDER BY cnt DESC) AS rn FROM per_code ), tail AS ( SELECT COALESCE(SUM(cnt), 0)::bigint AS tail_cnt FROM ranked WHERE rn > 10 ) SELECT CASE WHEN r.rn <= 10 THEN r.lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END AS \"Код СЭМД\", SUM(r.cnt)::bigint AS \"Количество\" FROM ranked r CROSS JOIN tail t GROUP BY CASE WHEN r.rn <= 10 THEN r.lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END ORDER BY 2 DESC",
           "template-tags": {
             "dwh_date": {
               "widget-type": "date/all-options",
@@ -375,11 +492,11 @@
     },
     {
       "name": "Топ типов СЭМД",
-      "description": "Количество записей по коду и наименованию СЭМД.",
+      "description": "Количество **уникальных документов** (DISTINCT «Связанное сообщение») по коду и наименованию СЭМД.",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID клиники\"::text = {{top_clinic}}]] GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 25",
+          "query": "SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID клиники\"::text = {{top_clinic}}]] GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 25",
           "template-tags": {
             "top_semd": {
               "widget-type": "string/=",
@@ -433,14 +550,14 @@
           "[\"name\",\"Наименование СЭМД\"]": {
             "column_title": "Наименование СЭМД"
           },
-          "[\"name\",\"Количество\"]": {
+          "[\"name\",\"Документов\"]": {
             "column_title": "Количество",
             "number_separators": ".",
             "decimals": 0
           }
         },
         "graph.metrics": [
-          "Количество"
+          "Документов"
         ]
       },
       "sizeX": 8,
@@ -457,11 +574,11 @@
     },
     {
       "name": "По клиникам (имя)",
-      "description": "Топ клиник по числу записей.",
+      "description": "Топ клиник по числу **документов** (DISTINCT «Связанное сообщение»), все статусы.",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT \"JID клиники\", \"Наименование клиники\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID клиники\"::text = {{top_clinic}}]] GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20",
+          "query": "SELECT \"JID клиники\", \"Наименование клиники\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID клиники\"::text = {{top_clinic}}]] GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20",
           "template-tags": {
             "top_semd": {
               "widget-type": "string/=",
@@ -515,14 +632,14 @@
           "[\"name\",\"Наименование клиники\"]": {
             "column_title": "Наименование клиники"
           },
-          "[\"name\",\"Количество\"]": {
+          "[\"name\",\"Документов\"]": {
             "column_title": "Количество",
             "number_separators": ".",
             "decimals": 0
           }
         },
         "graph.metrics": [
-          "Количество"
+          "Документов"
         ]
       },
       "sizeX": 6,
@@ -538,12 +655,12 @@
       }
     },
     {
-      "name": "Доля топ-ошибок (ЕГИСЗ)",
-      "description": "До 8 наиболее частых формулировок по первому элементу «Ошибки JSON» на транзакцию; хвост — «Остальные (N)», N = число транзакций вне топ‑8. «Итого» = все error за период (как «Статусы за период»).",
+      "name": "Ошибки по типу",
+      "description": "До 8 наиболее частых формулировок по первому элементу «Ошибки JSON» на документ (DISTINCT «Связанное сообщение»); хвост — «Остальные (N)», N = число документов вне топ‑8. «Итого» = все error за период (как «Статусы за период»).",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH per_err AS ( SELECT COALESCE( ( SELECT LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 52) FROM jsonb_array_elements(COALESCE(env.\"Ошибки JSON\", '[]'::jsonb)) AS e(err) WHERE NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL LIMIT 1 ), '(ошибка без деталей)' ) AS err_lbl, COUNT(*)::bigint AS cnt FROM public.v_egisz_transactions_enriched_ui env WHERE env.\"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(env.\"Код СЭМД\"), '') = {{top_semd}}]] [[AND env.\"JID клиники\"::text = {{top_clinic}}]] GROUP BY 1 ), ranked AS ( SELECT err_lbl, cnt, ROW_NUMBER() OVER (ORDER BY cnt DESC) AS rn FROM per_err ), tail AS ( SELECT COALESCE(SUM(cnt), 0)::bigint AS tail_cnt FROM ranked WHERE rn > 8 ) SELECT CASE WHEN r.rn <= 8 THEN r.err_lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END AS \"Тип ошибки\", SUM(r.cnt)::bigint AS \"Количество\" FROM ranked r CROSS JOIN tail t GROUP BY CASE WHEN r.rn <= 8 THEN r.err_lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END ORDER BY 2 DESC",
+          "query": "WITH per_err AS ( SELECT COALESCE( ( SELECT LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 52) FROM jsonb_array_elements(COALESCE(env.\"Ошибки JSON\", '[]'::jsonb)) AS e(err) WHERE NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL LIMIT 1 ), '(ошибка без деталей)' ) AS err_lbl, COUNT(DISTINCT env.\"Связанное сообщение\")::bigint AS cnt FROM public.v_egisz_transactions_enriched_ui env WHERE env.\"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(env.\"Код СЭМД\"), '') = {{top_semd}}]] [[AND env.\"JID клиники\"::text = {{top_clinic}}]] GROUP BY 1 ), ranked AS ( SELECT err_lbl, cnt, ROW_NUMBER() OVER (ORDER BY cnt DESC) AS rn FROM per_err ), tail AS ( SELECT COALESCE(SUM(cnt), 0)::bigint AS tail_cnt FROM ranked WHERE rn > 8 ) SELECT CASE WHEN r.rn <= 8 THEN r.err_lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END AS \"Тип ошибки\", SUM(r.cnt)::bigint AS \"Количество\" FROM ranked r CROSS JOIN tail t GROUP BY CASE WHEN r.rn <= 8 THEN r.err_lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END ORDER BY 2 DESC",
           "template-tags": {
             "dwh_date": {
               "widget-type": "date/all-options",
@@ -619,7 +736,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH filtered AS ( SELECT v.* FROM public.v_egisz_transactions_enriched_ui v WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(v.\"Код СЭМД\"), '') = {{top_semd}}]] [[AND v.\"JID клиники\"::text = {{top_clinic}}]] ), with_err AS ( SELECT f.*, CASE WHEN f.\"Статус\" = 'success' THEN '(успешно)' WHEN f.\"Статус\" = 'unknown' THEN '(неизвестно)' WHEN f.\"Статус\" = 'error' THEN COALESCE( ( SELECT LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 120) FROM jsonb_array_elements(COALESCE(f.\"Ошибки JSON\", '[]'::jsonb)) AS e(err) WHERE NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL LIMIT 1 ), '(ошибка без деталей)' ) ELSE '(' || COALESCE(f.\"Статус\", '?') || ')' END AS err_kind FROM filtered f ) SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Тип СЭМД\", \"JID клиники\", COALESCE(NULLIF(TRIM(\"Наименование клиники\"), ''), '(нет)') AS \"Наименование клиники\", err_kind AS \"Тип ошибки\", COUNT(*)::bigint AS \"Транзакций\", SUM(CASE WHEN \"Статус\" = 'error' THEN 1 ELSE 0 END)::bigint AS \"Ошибок\", ROUND(100.0 * SUM(CASE WHEN \"Статус\" = 'error' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS \"Процент ошибок\" FROM with_err GROUP BY 1, 2, 3, 4 ORDER BY \"Ошибок\" DESC, \"Транзакций\" DESC LIMIT 500",
+          "query": "WITH filtered AS ( SELECT v.* FROM public.v_egisz_transactions_enriched_ui v WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(v.\"Код СЭМД\"), '') = {{top_semd}}]] [[AND v.\"JID клиники\"::text = {{top_clinic}}]] ), with_err AS ( SELECT f.*, CASE WHEN f.\"Статус\" = 'success' THEN '(успешно)' WHEN f.\"Статус\" = 'unknown' THEN '(неизвестно)' WHEN f.\"Статус\" = 'error' THEN COALESCE( ( SELECT LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 120) FROM jsonb_array_elements(COALESCE(f.\"Ошибки JSON\", '[]'::jsonb)) AS e(err) WHERE NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL LIMIT 1 ), '(ошибка без деталей)' ) ELSE '(' || COALESCE(f.\"Статус\", '?') || ')' END AS err_kind FROM filtered f ) SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Тип СЭМД\", \"JID клиники\", COALESCE(NULLIF(TRIM(\"Наименование клиники\"), ''), '(нет)') AS \"Наименование клиники\", err_kind AS \"Тип ошибки\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\", COUNT(DISTINCT \"Связанное сообщение\") FILTER (WHERE \"Статус\" = 'error')::bigint AS \"Ошибок\", ROUND(100.0 * COUNT(DISTINCT \"Связанное сообщение\") FILTER (WHERE \"Статус\" = 'error') / NULLIF(COUNT(DISTINCT \"Связанное сообщение\"), 0), 2) AS \"Доля ошибок\" FROM with_err GROUP BY 1, 2, 3, 4 ORDER BY \"Ошибок\" DESC, \"Транзакций\" DESC LIMIT 500",
           "template-tags": {
             "dwh_date": {
               "widget-type": "date/all-options",
@@ -705,7 +822,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH per_clinic AS ( SELECT (LEFT(COALESCE(NULLIF(TRIM(\"Наименование клиники\"), ''), ''), 24) || ' | ' || \"JID клиники\"::text) AS lbl, COUNT(*)::bigint AS cnt FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID клиники\"::text = {{top_clinic}}]] GROUP BY 1 ), ranked AS ( SELECT lbl, cnt, ROW_NUMBER() OVER (ORDER BY cnt DESC) AS rn FROM per_clinic ), tail AS ( SELECT COALESCE(SUM(cnt), 0)::bigint AS tail_cnt FROM ranked WHERE rn > 10 ) SELECT CASE WHEN r.rn <= 10 THEN r.lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END AS \"Клиника\", SUM(r.cnt)::bigint AS \"Количество\" FROM ranked r CROSS JOIN tail t GROUP BY CASE WHEN r.rn <= 10 THEN r.lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END ORDER BY 2 DESC",
+          "query": "WITH per_clinic AS ( SELECT (LEFT(COALESCE(NULLIF(TRIM(\"Наименование клиники\"), ''), ''), 24) || ' | ' || \"JID клиники\"::text) AS lbl, COUNT(DISTINCT \"Связанное сообщение\")::bigint AS cnt FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID клиники\"::text = {{top_clinic}}]] GROUP BY 1 ), ranked AS ( SELECT lbl, cnt, ROW_NUMBER() OVER (ORDER BY cnt DESC) AS rn FROM per_clinic ), tail AS ( SELECT COALESCE(SUM(cnt), 0)::bigint AS tail_cnt FROM ranked WHERE rn > 10 ) SELECT CASE WHEN r.rn <= 10 THEN r.lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END AS \"Клиника\", SUM(r.cnt)::bigint AS \"Количество\" FROM ranked r CROSS JOIN tail t GROUP BY CASE WHEN r.rn <= 10 THEN r.lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END ORDER BY 2 DESC",
           "template-tags": {
             "dwh_date": {
               "widget-type": "date/all-options",

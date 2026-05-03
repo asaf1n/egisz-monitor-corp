@@ -16,11 +16,16 @@
       "name": "08 · Топ клиник с зависшими документами",
       "description": "Клиники с наибольшим количеством документов без ответа, с JID для различения одинаковых наименований.",
       "table_ref": "v_rpt_documents_no_response_ui",
-      "metabase-field-filters": { "dwh_date": { "table_ref": "v_rpt_documents_no_response_ui", "field_name": "Отправлено" } },
+      "metabase-field-filters": {
+        "dwh_date": {
+          "table_ref": "v_rpt_documents_no_response_ui",
+          "field_name": "Отправлено"
+        }
+      },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH pend_ref AS ( SELECT COALESCE((SELECT MAX(\"Отправлено\") FROM public.v_rpt_documents_no_response_ui), NOW()) AS ref_ts ) SELECT \"JID клиники\", \"Наименование клиники\", COUNT(*)::bigint AS \"Количество\" FROM public.v_rpt_documents_no_response_ui p CROSS JOIN pend_ref WHERE 1=1 [[AND {{dwh_date}}]] GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20",
+          "query": "WITH pend_ref AS ( SELECT COALESCE((SELECT MAX(\"Отправлено\") FROM public.v_rpt_documents_no_response_ui), NOW()) AS ref_ts ) SELECT \"JID клиники\", \"Наименование клиники\", COUNT(DISTINCT p.\"localUid СЭМД\")::bigint AS \"Документов\" FROM public.v_rpt_documents_no_response_ui p CROSS JOIN pend_ref WHERE 1=1 [[AND {{dwh_date}}]] GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20",
           "template-tags": {
             "dwh_date": {
               "id": "f8000001-0001-4001-8001-000000000001",
@@ -39,7 +44,7 @@
           "Наименование клиники"
         ],
         "graph.metrics": [
-          "Количество"
+          "Документов"
         ],
         "graph.show_values": true,
         "column_settings": {
@@ -49,7 +54,7 @@
           "[\"name\",\"Наименование клиники\"]": {
             "column_title": "Наименование клиники"
           },
-          "[\"name\",\"Количество\"]": {
+          "[\"name\",\"Документов\"]": {
             "column_title": "Количество",
             "number_separators": ".",
             "decimals": 0
@@ -65,11 +70,16 @@
       "name": "08 · Возраст зависших документов",
       "description": "Распределение по времени ожидания; «сейчас» для расчёта — момент последней «Отправлено» в снимке.",
       "table_ref": "v_rpt_documents_no_response_ui",
-      "metabase-field-filters": { "dwh_date": { "table_ref": "v_rpt_documents_no_response_ui", "field_name": "Отправлено" } },
+      "metabase-field-filters": {
+        "dwh_date": {
+          "table_ref": "v_rpt_documents_no_response_ui",
+          "field_name": "Отправлено"
+        }
+      },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH pend_ref AS ( SELECT COALESCE((SELECT MAX(\"Отправлено\") FROM public.v_rpt_documents_no_response_ui), NOW()) AS ref_ts ) SELECT CASE WHEN p.\"Отправлено\" IS NULL THEN 'дата неизвестна' WHEN EXTRACT(EPOCH FROM (pend_ref.ref_ts - p.\"Отправлено\"))/3600 < 1 THEN 'менее 1 часа' WHEN EXTRACT(EPOCH FROM (pend_ref.ref_ts - p.\"Отправлено\"))/3600 < 12 THEN '1–12 часов' WHEN EXTRACT(EPOCH FROM (pend_ref.ref_ts - p.\"Отправлено\"))/3600 < 24 THEN '12–24 часа' ELSE 'свыше 24 часов' END AS \"Время ожидания\", COUNT(*)::bigint AS \"Количество\" FROM public.v_rpt_documents_no_response_ui p CROSS JOIN pend_ref WHERE 1=1 [[AND {{dwh_date}}]] AND p.\"Отправлено\" IS NOT NULL GROUP BY 1 ORDER BY MIN(EXTRACT(EPOCH FROM (pend_ref.ref_ts - p.\"Отправлено\")))",
+          "query": "WITH pend_ref AS ( SELECT COALESCE((SELECT MAX(\"Отправлено\") FROM public.v_rpt_documents_no_response_ui), NOW()) AS ref_ts ) SELECT CASE WHEN p.\"Отправлено\" IS NULL THEN 'дата неизвестна' WHEN EXTRACT(EPOCH FROM (pend_ref.ref_ts - p.\"Отправлено\"))/3600 < 1 THEN 'менее 1 часа' WHEN EXTRACT(EPOCH FROM (pend_ref.ref_ts - p.\"Отправлено\"))/3600 < 12 THEN '1–12 часов' WHEN EXTRACT(EPOCH FROM (pend_ref.ref_ts - p.\"Отправлено\"))/3600 < 24 THEN '12–24 часа' ELSE 'свыше 24 часов' END AS \"Время ожидания\", COUNT(DISTINCT p.\"localUid СЭМД\")::bigint AS \"Документов\" FROM public.v_rpt_documents_no_response_ui p CROSS JOIN pend_ref WHERE 1=1 [[AND {{dwh_date}}]] AND p.\"Отправлено\" IS NOT NULL GROUP BY 1 ORDER BY MIN(EXTRACT(EPOCH FROM (pend_ref.ref_ts - p.\"Отправлено\")))",
           "template-tags": {
             "dwh_date": {
               "id": "f8000002-0002-4002-8002-000000000001",
@@ -88,14 +98,14 @@
           "Время ожидания"
         ],
         "graph.metrics": [
-          "Количество"
+          "Документов"
         ],
         "graph.show_values": true,
         "column_settings": {
           "[\"name\",\"Время ожидания\"]": {
             "column_title": "Время ожидания"
           },
-          "[\"name\",\"Количество\"]": {
+          "[\"name\",\"Документов\"]": {
             "column_title": "Количество",
             "number_separators": ".",
             "decimals": 0
@@ -111,11 +121,16 @@
       "name": "08 · Зависшие по типам СЭМД",
       "description": "Распределение документов без ответа по коду и наименованию СЭМД.",
       "table_ref": "v_rpt_documents_no_response_ui",
-      "metabase-field-filters": { "dwh_date": { "table_ref": "v_rpt_documents_no_response_ui", "field_name": "Отправлено" } },
+      "metabase-field-filters": {
+        "dwh_date": {
+          "table_ref": "v_rpt_documents_no_response_ui",
+          "field_name": "Отправлено"
+        }
+      },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH pend_ref AS ( SELECT COALESCE((SELECT MAX(\"Отправлено\") FROM public.v_rpt_documents_no_response_ui), NOW()) AS ref_ts ) SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(*)::bigint AS \"Количество\" FROM public.v_rpt_documents_no_response_ui p CROSS JOIN pend_ref WHERE 1=1 [[AND {{dwh_date}}]] GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 25",
+          "query": "WITH pend_ref AS ( SELECT COALESCE((SELECT MAX(\"Отправлено\") FROM public.v_rpt_documents_no_response_ui), NOW()) AS ref_ts ) SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(DISTINCT p.\"localUid СЭМД\")::bigint AS \"Документов\" FROM public.v_rpt_documents_no_response_ui p CROSS JOIN pend_ref WHERE 1=1 [[AND {{dwh_date}}]] GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 25",
           "template-tags": {
             "dwh_date": {
               "id": "f8000003-0003-4003-8003-000000000001",
@@ -134,7 +149,7 @@
           "Наименование СЭМД"
         ],
         "graph.metrics": [
-          "Количество"
+          "Документов"
         ],
         "graph.show_values": true,
         "column_settings": {
@@ -144,7 +159,7 @@
           "[\"name\",\"Наименование СЭМД\"]": {
             "column_title": "Наименование СЭМД"
           },
-          "[\"name\",\"Количество\"]": {
+          "[\"name\",\"Документов\"]": {
             "column_title": "Количество",
             "number_separators": ".",
             "decimals": 0
@@ -160,7 +175,12 @@
       "name": "08 · Зависшие — детализация",
       "description": "До 500 строк: ИД документа (localUid), код и наименование СЭМД, клиника (JID и наименование), дата отправки и корзина возраста относительно снимка очереди.",
       "table_ref": "v_rpt_documents_no_response_ui",
-      "metabase-field-filters": { "dwh_date": { "table_ref": "v_rpt_documents_no_response_ui", "field_name": "Отправлено" } },
+      "metabase-field-filters": {
+        "dwh_date": {
+          "table_ref": "v_rpt_documents_no_response_ui",
+          "field_name": "Отправлено"
+        }
+      },
       "dataset_query": {
         "type": "native",
         "native": {

@@ -1,6 +1,6 @@
 {
   "name": "03 Ошибки и разбор",
-  "description": "Технический аудит. [Field filter](https://www.metabase.com/docs/v0.60/questions/native-editor/field-filters) `dwh_date`: **created_at** на staging, **«Обработано»** в витрине (один слаг дашборда — один диапазон на оба вопроса, если нужен другой сценарий — вынесите отдельный вопрос). Код парсинга — опция.",
+  "description": "Технический аудит. Ошибки парсинга **агрегируются по документу** (ключ: relatesToMessage → localUid → emdrId, см. `v_stg_parse_errors_by_document.document_group_key`), а не по числу строк журнала. Карточка **«Расхождение источников JID»** — фактические строки витрины с несогласованными **EGISZ_LICENSES / LOGTEXT / REPLYTO**. Исходные строки Firebird: **EXCHANGELOG.LOGID / MSGID**, кэш **EGISZ_MESSAGES.EGMID**. [Field filter](https://www.metabase.com/docs/v0.60/questions/native-editor/field-filters) `dwh_date`: **created_at** на staging, **«Обработано»** в витрине (один слаг дашборда — один диапазон на оба типа вопросов, если нужен другой сценарий — вынесите отдельный вопрос). Код парсинга — опция.",
   "width": "full",
   "parameters": [
     {
@@ -20,14 +20,78 @@
   ],
   "cards": [
     {
-      "name": "03 · Ошибки парсинга (stg_parse_errors)",
-      "description": "Последние 100 записей staging; field filter по **created_at**.",
-      "table_ref": "stg_parse_errors",
-      "metabase-field-filters": { "dwh_date": { "table_ref": "stg_parse_errors", "field_name": "created_at" } },
+      "name": "03 · Парсинг: строки журнала vs уникальные документы",
+      "description": "Сравнение сырого COUNT(*) по ошибкам и **COUNT(DISTINCT document_group_key)**. Одна и та же проблема по одному СЭМД не должна многократно раздувать «документную» метрику, если в тексте извлечён relatesToMessage / localUid / emdrId.",
+      "table_ref": "v_stg_parse_errors_by_document",
+      "metabase-field-filters": { "dwh_date": { "table_ref": "v_stg_parse_errors_by_document", "field_name": "created_at" } },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT id AS \"Номер записи\", error_code AS \"Код ошибки\", LEFT(message, 200) AS \"Сообщение\", created_at AS \"Создано\", relates_to_id AS \"Связанное сообщение\" FROM public.stg_parse_errors WHERE 1=1 [[AND {{dwh_date}}]] [[AND error_code::text = {{err_parse_code}}]] ORDER BY id DESC LIMIT 100",
+          "query": "SELECT COUNT(*)::bigint AS \"Строк в stg_parse_errors\", COUNT(DISTINCT document_group_key)::bigint AS \"Уникальных документов с ошибкой\" FROM public.v_stg_parse_errors_by_document WHERE 1=1 [[AND {{dwh_date}}]] [[AND error_code::text = {{err_parse_code}}]]",
+          "template-tags": {
+            "dwh_date": {
+              "id": "f3000000-0001-4001-8001-000000000001",
+              "name": "dwh_date",
+              "display-name": "По дате created_at (stg)",
+              "type": "dimension",
+              "widget-type": "date/all-options"
+            },
+            "err_parse_code": {
+              "id": "f3000000-0001-4001-8001-000000000010",
+              "name": "err_parse_code",
+              "display-name": "Код ошибки парсинга",
+              "type": "text",
+              "widget-type": "string/=",
+              "required": false
+            }
+          }
+        },
+        "database": 1
+      },
+      "display": "table",
+      "visualization_settings": {},
+      "sizeX": 24,
+      "sizeY": 3,
+      "row": 0,
+      "col": 0
+    },
+    {
+      "name": "03 · Расхождение источников JID (витрина)",
+      "description": "Записи, где **JID из EGISZ_LICENSES**, **gost в LOGTEXT** и **gost в REPLYTO** не согласованы (включая нецифровой токен gost при другом числовом JID). Итоговый JID в витрине — «JID клиники»; наименование клиники подтягивается по этому JID из справочника.",
+      "table_ref": "v_egisz_transactions_enriched_ui",
+      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано IPS" } },
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT \"Связанное сообщение\", \"Обработано IPS\", \"Статус\", \"JID клиники\", \"JID (EGISZ_LICENSES)\", \"JID из gost в LOGTEXT\", \"JID из gost в REPLYTO\", \"Токен gost (LOGTEXT)\", \"Токен gost (REPLYTO)\", \"Хост клиники (VPN ГОСТ)\", \"Наименование клиники\" FROM public.v_egisz_transactions_enriched_ui WHERE \"Расхождение источников JID\" = true AND 1=1 [[AND {{dwh_date}}]] ORDER BY \"Обработано IPS\" DESC NULLS LAST LIMIT 200",
+          "template-tags": {
+            "dwh_date": {
+              "id": "f3000003-0005-4005-8005-000000000001",
+              "name": "dwh_date",
+              "display-name": "По дате «Обработано» (витрина)",
+              "type": "dimension",
+              "widget-type": "date/all-options"
+            }
+          }
+        },
+        "database": 1
+      },
+      "display": "table",
+      "visualization_settings": {},
+      "sizeX": 24,
+      "sizeY": 7,
+      "row": 3,
+      "col": 0
+    },
+    {
+      "name": "03 · Ошибки парсинга (stg_parse_errors)",
+      "description": "Последние 100 записей staging с **ссылками на источник** (LOGID, MSGID, EGMID) и подсказками из сырого XML. Деталь по строкам журнала; для KPI используйте карточку «строки vs документы» и `document_group_key`.",
+      "table_ref": "v_stg_parse_errors_by_document",
+      "metabase-field-filters": { "dwh_date": { "table_ref": "v_stg_parse_errors_by_document", "field_name": "created_at" } },
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT id AS \"Номер записи\", error_code AS \"Код ошибки\", LEFT(message, 200) AS \"Сообщение\", created_at AS \"Создано\", relates_to_hint AS \"relatesToMessage (из текста)\", local_uid_hint AS \"localUid (из текста)\", emdr_id_hint AS \"emdrId (из текста)\", exchangelog_log_id AS \"EXCHANGELOG.LOGID\", journal_msgid AS \"EXCHANGELOG.MSGID\", egisz_messages_egmid AS \"EGISZ_MESSAGES.EGMID\", document_group_key AS \"Ключ документа (группировка)\", relates_to_id AS \"relates_to_id (если есть)\" FROM public.v_stg_parse_errors_by_document WHERE 1=1 [[AND {{dwh_date}}]] [[AND error_code::text = {{err_parse_code}}]] ORDER BY id DESC LIMIT 100",
           "template-tags": {
             "dwh_date": {
               "id": "f3000001-0001-4001-8001-000000000001",
@@ -50,20 +114,9 @@
       },
       "display": "table",
       "visualization_settings": {
-        "table": {
-          "columns": [
-            {
-              "name": "Связанное сообщение",
-              "enabled": false
-            }
-          ]
-        },
         "column_settings": {
           "[\"name\",\"Номер записи\"]": {
             "column_title": "№ записи"
-          },
-          "[\"name\",\"Связанное сообщение\"]": {
-            "column_title": "Связанное сообщение (relatesToMessage)"
           },
           "[\"name\",\"Код ошибки\"]": {
             "column_title": "Код ошибки"
@@ -78,7 +131,7 @@
       },
       "sizeX": 24,
       "sizeY": 8,
-      "row": 0,
+      "row": 10,
       "col": 0
     },
     {
@@ -168,7 +221,7 @@
       },
       "sizeX": 24,
       "sizeY": 8,
-      "row": 8,
+      "row": 18,
       "col": 0
     }
   ]

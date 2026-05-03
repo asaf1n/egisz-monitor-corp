@@ -4,7 +4,7 @@ Schema (PROXY_EGISZ): EXCHANGELOG (LOGTEXT = URL/хост клиники, MSGTEX
 EGISZ_MESSAGES (DOCUMENTID, REPLYTO, MSGID, EGMID), EGISZ_LICENSES (MO_UID, MO_DOMEN, JID, KIND),
 JPERSONS (JNAME, JINN VARCHAR(12), FIR_OID VARCHAR(255) — как MO UID для <organization>).
 KIND exists only in EGISZ_LICENSES — not on EGISZ_MESSAGES. Строка EGISZ_LICENSES: REPLYTO matches MO_DOMEN.
-localUid в SOAP ↔ DOCUMENTID; клиника: gost- сначала в MSGTEXT (разбор текста сообщения), затем LOGTEXT, иначе REPLYTO → MO_DOMEN → JID → JPERSONS.
+localUid в SOAP ↔ DOCUMENTID; **JID клиники:** gost- только в **EXCHANGELOG.LOGTEXT** и **EGISZ_MESSAGES.REPLYTO** (не в MSGTEXT); затем **EGISZ_LICENSES** по REPLYTO → **JID**; **JPERSONS** по JID для наименования.
 
 Инкремент журнала по EXCHANGELOG.LOGID; в выборке журнала — LEFT JOIN EGISZ_MESSAGES по MSGID (поле MESSAGE_EGMID).
 Сообщения дополнительно кэшируются постранично по EGMID выше курсора; лицензии — полная выгрузка EGISZ_LICENSES без JOIN в Firebird; JPERSONS отдельно; сшивка JNAME/JINN/FIR_OID в PostgreSQL (`stg_jpersons_import` + `UPDATE … FROM`); merge в dim_clinics в PostgreSQL; сопоставление с журналом по MSGID и REPLYTO→лицензия после выгрузки.
@@ -36,6 +36,18 @@ FROM EXCHANGELOG e
 LEFT JOIN EGISZ_MESSAGES m ON m.MSGID = e.MSGID
 WHERE 1=1
 """.strip()
+
+
+def exchangelog_inner_sql_for_etl(*, sync_window_days: int | None) -> str:
+    """Дефолтный SELECT журнала + опционально окно по LOGDATE (как в sql/003_diagnostic_counts_firebird.sql)."""
+    base = default_exchangelog_select()
+    d = int(sync_window_days) if sync_window_days is not None else 0
+    if d <= 0:
+        return base
+    return (
+        base
+        + f"\n  AND e.LOGDATE >= DATEADD(-{d} DAY TO CURRENT_TIMESTAMP)"
+    )
 
 
 def jpersons_all_sql() -> str:
@@ -108,10 +120,20 @@ def _clamp_fb_first_limit(limit: int) -> int:
     return max(1, min(int(limit), _FB_FIRST_ROWS_HARD_CAP))
 
 
-def egisz_messages_incremental_sql(*, last_egmid: int, limit: int) -> str:
-    """Страница EGISZ_MESSAGES: только EGMID выше курсора (инкремент без окна по дате)."""
+def _sync_window_sql_fragment(sync_window_days: int | None) -> str:
+    d = int(sync_window_days) if sync_window_days is not None else 0
+    if d <= 0:
+        return ""
+    return f"\n  AND m.CREATEDATE >= DATEADD(-{d} DAY TO CURRENT_TIMESTAMP)"
+
+
+def egisz_messages_incremental_sql(
+    *, last_egmid: int, limit: int, sync_window_days: int | None = None
+) -> str:
+    """Страница EGISZ_MESSAGES: EGMID выше курсора; опционально CREATEDATE в пределах sync_window_days."""
     last = int(last_egmid)
     lim = _clamp_fb_first_limit(limit)
+    win = _sync_window_sql_fragment(sync_window_days)
     return f"""
 SELECT FIRST {lim}
     m.EGMID AS EGMID,
@@ -120,8 +142,26 @@ SELECT FIRST {lim}
     TRIM(m.DOCUMENTID) AS DOCUMENTID,
     m.CREATEDATE AS MSG_CREATED_AT
 FROM EGISZ_MESSAGES m
-WHERE m.EGMID > {last}
+WHERE m.EGMID > {last}{win}
 ORDER BY m.EGMID
+""".strip()
+
+
+def egisz_messages_incremental_page_max_egmid_sql(
+    *, last_egmid: int, limit: int, sync_window_days: int | None = None
+) -> str:
+    """MAX(EGMID) по той же странице FIRST n, что и egisz_messages_incremental_sql (обход «залипания» курсора в драйвере)."""
+    last = int(last_egmid)
+    lim = _clamp_fb_first_limit(limit)
+    win = _sync_window_sql_fragment(sync_window_days)
+    return f"""
+SELECT MAX(p.EGMID) AS max_egmid
+FROM (
+    SELECT FIRST {lim} m.EGMID AS EGMID
+    FROM EGISZ_MESSAGES m
+    WHERE m.EGMID > {last}{win}
+    ORDER BY m.EGMID
+) p
 """.strip()
 
 

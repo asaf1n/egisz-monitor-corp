@@ -31,7 +31,7 @@ from typing import Any, Callable, Mapping, Sequence, TypedDict
 
 from egisz_monitor_corp.config_loader import CorpAppConfig, load_corp_config
 from egisz_monitor_corp.fb_client import fetch_all
-from egisz_monitor_corp.parser import EgiszMonitorParser, StagingParseError, _norm_kind_code
+from egisz_monitor_corp.parser import EgiszMonitorParser, StagingParseError, _norm_kind_code, extract_parse_hints
 from egisz_monitor_corp.pg_warehouse import (
     PipelineLockBusyError,
     apply_reports_schema,
@@ -54,10 +54,11 @@ from egisz_monitor_corp.pg_warehouse import (
     upsert_facts_batch,
 )
 from egisz_monitor_corp.sql_util import (
-    default_exchangelog_select,
     egisz_messages_by_msgids_sql,
+    egisz_messages_incremental_page_max_egmid_sql,
     egisz_messages_incremental_sql,
     enrichment_egisz_licenses_only_sql,
+    exchangelog_inner_sql_for_etl,
     jpersons_all_sql,
     outbound_documents_staging_select,
     paginated_exchangelog_sql,
@@ -68,6 +69,34 @@ from egisz_monitor_corp.sql_util import (
 _DETAIL_THROTTLE_SEC = 0.22
 
 _MSGBACKFILL_IN_CHUNK = 180
+
+
+def _etl_sync_window_days(cfg: CorpAppConfig) -> int | None:
+    d = int(cfg.etl.sync_window_days)
+    return d if d > 0 else None
+
+
+def _egisz_messages_page_max_egmid_from_fb(
+    cfg: CorpAppConfig, last_egmid: int, limit: int
+) -> int | None:
+    sql = egisz_messages_incremental_page_max_egmid_sql(
+        last_egmid=last_egmid,
+        limit=limit,
+        sync_window_days=_etl_sync_window_days(cfg),
+    )
+    rows = _etl_fb_fetch(cfg, sql)
+    if not rows:
+        return None
+    raw = rows[0].get("max_egmid")
+    if raw is None:
+        raw = rows[0].get("MAX_EGMID")
+    if raw is None:
+        return None
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return n
 
 
 def _etl_fb_fetch(
@@ -126,6 +155,7 @@ class EtlProgressPayload(TypedDict, total=False):
     messages_cursor_egmid: int
     messages_batch_rows: int
     messages_msgid_cache_size: int
+    journal_batch_rows: int
     cursor_log_id: int
     licenses_modifydate_iso: str
 
@@ -433,11 +463,18 @@ class _PageStats:
 
 
 def _messages_page_after_egmid(
-    cfg: CorpAppConfig, cursor: int, limit: int
+    cfg: CorpAppConfig,
+    cursor: int,
+    limit: int,
+    log: Callable[[str], None] | None = None,
 ) -> tuple[list[dict[str, Any]], int, int]:
     """Одна страница EGISZ_MESSAGES по EGMID. Возвращает (rows, new_cursor, prev_cursor)."""
     prev = int(cursor)
-    sql = egisz_messages_incremental_sql(last_egmid=cursor, limit=limit)
+    sql = egisz_messages_incremental_sql(
+        last_egmid=cursor,
+        limit=limit,
+        sync_window_days=_etl_sync_window_days(cfg),
+    )
     rows = _etl_fb_fetch(cfg, sql)
     if not rows:
         return rows, prev, prev
@@ -446,6 +483,20 @@ def _messages_page_after_egmid(
         eg = _egmid_sql_int(r.get("egmid"))
         if eg is not None:
             page_max = max(page_max, eg)
+    if limit > 0 and len(rows) >= limit and page_max == prev:
+        fb_max = _egisz_messages_page_max_egmid_from_fb(cfg, prev, limit)
+        if fb_max is not None and fb_max > prev:
+            if log:
+                log(
+                    "EGISZ_MESSAGES: полная страница, курсор по строкам драйвера не сдвинулся; "
+                    f"MAX(EGMID) в Firebird={fb_max} — продолжаем (строки уже в кэше MSGID)."
+                )
+            page_max = fb_max
+        elif log:
+            log(
+                "EGISZ_MESSAGES: полная страница, курсор не сдвигается и MAX(EGMID) в Firebird не помог; "
+                "остановка выгрузки сообщений (проверьте EGMID в Firebird и charset)."
+            )
     return rows, page_max, prev
 
 
@@ -502,7 +553,7 @@ def _ingest_exchangelog_rows_chunk(
     msg_by_msgid: dict[str, dict[str, Any]],
     total_exchangelog: int,
     parser: EgiszMonitorParser,
-    staging_buffer: list[tuple[str | None, str, str, str | None]],
+    staging_buffer: list[tuple],
     fact_buffer: list[dict[str, Any]],
     stats: _PageStats,
     pipeline: str,
@@ -521,7 +572,7 @@ def _ingest_exchangelog_rows_chunk(
         detail(pl)  # type: ignore[arg-type]
 
     def on_stage(err: StagingParseError) -> None:
-        staging_buffer.append((err.relates_to_id, err.error_code, err.message, err.log_excerpt))
+        staging_buffer.append(err.as_insert_tuple())
         stats.staging_n += 1
         if pg is not None and len(staging_buffer) >= 200:
             insert_staging_errors(pg, staging_buffer)
@@ -537,13 +588,14 @@ def _ingest_exchangelog_rows_chunk(
             "journal_facts": stats.facts,
             "staging_errors": stats.staging_n,
             "page": page,
+            "journal_batch_rows": len(rows),
             **_progress_payload_total_rows(total_exchangelog),
         }
     )
 
     for row_i, r in enumerate(rows, start=1):
-        lid = _to_int(r.get("logid"))
-        if lid and lid > stats.max_log_id:
+        lid = _fb_sql_bigint(r.get("logid"))
+        if lid is not None and lid > stats.max_log_id:
             stats.max_log_id = lid
 
         logtext = r.get("logtext")
@@ -585,12 +637,19 @@ def _ingest_exchangelog_rows_chunk(
                 excerpt = (
                     (combined_ex[:cap] + "…") if len(combined_ex) > cap else (combined_ex or None)
                 )
+                rth, luh, emh = extract_parse_hints(msgtext)
                 on_stage(
                     StagingParseError(
                         relates_to_id=None,
                         error_code="MSGTEXT_TOO_LARGE",
                         message=f"MSGTEXT UTF-8 size {nbytes} exceeds max_msgtext_bytes={lim}",
                         log_excerpt=excerpt,
+                        exchangelog_log_id=row_log_id,
+                        egisz_messages_egmid=row_msg_egmid,
+                        journal_msgid=mk,
+                        relates_to_hint=rth,
+                        local_uid_hint=luh,
+                        emdr_id_hint=emh,
                     )
                 )
                 continue
@@ -609,6 +668,7 @@ def _ingest_exchangelog_rows_chunk(
             on_staging_error=on_stage,
             exchangelog_log_id=row_log_id,
             egisz_messages_egmid=row_msg_egmid,
+            journal_msgid=mk,
         )
         if progress_detail_cb and (row_i % 800 == 0 or row_i == len(rows)):
             _d(
@@ -619,6 +679,7 @@ def _ingest_exchangelog_rows_chunk(
                     "journal_facts": stats.facts,
                     "staging_errors": stats.staging_n,
                     "page": page,
+                    "journal_batch_rows": len(rows),
                     **_progress_payload_total_rows(total_exchangelog),
                 }
             )
@@ -684,6 +745,7 @@ def _ingest_exchangelog_rows_chunk(
             "journal_facts": stats.facts,
             "staging_errors": stats.staging_n,
             "page": page,
+            "journal_batch_rows": len(rows),
             **_progress_payload_total_rows(total_exchangelog),
         }
     )
@@ -717,13 +779,14 @@ def _export_egisz_messages_by_egmid(
                 "messages_msgid_cache_size": 0,
             }
         )
-    log("Выгрузка EGISZ_MESSAGES из Firebird по курсору EGMID (без COUNT в Firebird)…")
+    log("Выгрузка EGISZ_MESSAGES из Firebird по курсору EGMID (опционально окно CREATEDATE — etl.sync_window_days)…")
     while True:
         page_n += 1
         prev_cursor = cursor
         sql = egisz_messages_incremental_sql(
             last_egmid=cursor,
             limit=batch,
+            sync_window_days=_etl_sync_window_days(cfg),
         )
         rows = _etl_fb_fetch(cfg, sql)
         if not rows:
@@ -737,7 +800,22 @@ def _export_egisz_messages_by_egmid(
             mk = _norm_msgid_key(r.get("msgid"))
             if mk:
                 msg_by_msgid[mk] = r
-        cursor = page_max
+        if len(rows) >= batch and page_max == prev_cursor:
+            fb_max = _egisz_messages_page_max_egmid_from_fb(cfg, prev_cursor, batch)
+            if fb_max is not None and fb_max > prev_cursor:
+                log(
+                    "EGISZ_MESSAGES: полная страница, курсор по строкам драйвера не сдвинулся; "
+                    f"MAX(EGMID) в Firebird={fb_max} — продолжаем."
+                )
+                cursor = fb_max
+            else:
+                log(
+                    "Предупреждение: EGISZ_MESSAGES — полная страница, но курсор EGMID не сдвинулся; "
+                    "останавливаем загрузку (проверьте EGMID в Firebird и charset)."
+                )
+                break
+        else:
+            cursor = page_max
         last_batch_rows = len(rows)
         if detail is not None and (
             page_n == 1 or page_n % 4 == 0 or len(rows) < batch
@@ -755,12 +833,6 @@ def _export_egisz_messages_by_egmid(
                     "messages_msgid_cache_size": len(msg_by_msgid),
                 }
             )
-        if len(rows) >= batch and cursor == prev_cursor:
-            log(
-                "Предупреждение: EGISZ_MESSAGES — полная страница, но курсор EGMID не сдвинулся; "
-                "останавливаем загрузку (проверьте EGMID в Firebird и charset)."
-            )
-            break
         if page_n == 1 or page_n % 20 == 0:
             log(f"EGISZ_MESSAGES: страница {page_n}, всего строк {total}, курсор EGMID={cursor}")
         if len(rows) < batch:
@@ -801,7 +873,7 @@ def _process_exchangelog_pages(
     pipeline = cfg.etl.pipeline_name
     batch = max(1, cfg.etl.batch_size)
     parser = EgiszMonitorParser()
-    staging_buffer: list[tuple[str | None, str, str, str | None]] = []
+    staging_buffer: list[tuple] = []
     fact_buffer: list[dict[str, Any]] = []
     stats = _PageStats(last_id=last_id)
 
@@ -985,7 +1057,7 @@ def _run_interleaved_messages_and_journal(
     egmid_cursor = int(last_egmid)
     pipeline = cfg.etl.pipeline_name
     parser = EgiszMonitorParser()
-    staging_buffer: list[tuple[str | None, str, str, str | None]] = []
+    staging_buffer: list[tuple] = []
     fact_buffer: list[dict[str, Any]] = []
     stats = _PageStats(last_id=last_log_id)
     lic_md_iso = (
@@ -1034,7 +1106,7 @@ def _run_interleaved_messages_and_journal(
                     rows_m, new_c, prev_c = fut_next_messages.result()
                     fut_next_messages = None
                 else:
-                    rows_m, new_c, prev_c = _messages_page_after_egmid(cfg, egmid_cursor, chunk)
+                    rows_m, new_c, prev_c = _messages_page_after_egmid(cfg, egmid_cursor, chunk, log)
                 if not rows_m:
                     msg_done = True
                     log("EGISZ_MESSAGES: выше курсора EGMID строк нет (конец инкремента).")
@@ -1047,10 +1119,6 @@ def _run_interleaved_messages_and_journal(
                     if msg_page == 1 or msg_page % 3 == 0 or len(rows_m) < chunk:
                         msg_detail()
                     if len(rows_m) >= chunk and new_c == prev_c:
-                        log(
-                            "Предупреждение: EGISZ_MESSAGES — полный пакет, курсор EGMID не сдвинулся; "
-                            "останавливаем выгрузку сообщений (проверьте EGMID в Firebird и charset)."
-                        )
                         msg_done = True
                     elif len(rows_m) < chunk:
                         msg_done = True
@@ -1068,7 +1136,7 @@ def _run_interleaved_messages_and_journal(
                         _backfill_messages_for_msgids(cfg, miss, msg_by_msgid, log)
                     if not msg_done:
                         fut_next_messages = pool.submit(
-                            _messages_page_after_egmid, cfg, egmid_cursor, chunk
+                            _messages_page_after_egmid, cfg, egmid_cursor, chunk, log
                         )
                     journal_page += 1
                     detail(
@@ -1079,6 +1147,7 @@ def _run_interleaved_messages_and_journal(
                             "journal_facts": stats.facts,
                             "staging_errors": stats.staging_n,
                             "page": journal_page,
+                            "journal_batch_rows": len(rows_j),
                             "cursor_log_id": stats.last_id,
                             "licenses_modifydate_iso": lic_md_iso,
                             **_progress_payload_total_rows(total_exchangelog),
@@ -1102,8 +1171,6 @@ def _run_interleaved_messages_and_journal(
                         log=log,
                         licenses_modifydate_iso=lic_md_iso,
                     )
-                    if len(rows_j) < chunk:
-                        journal_done = True
 
     if pg is not None and fact_buffer:
         _upsert_facts_from_buffer(pg, fact_buffer, cfg)
@@ -1184,7 +1251,7 @@ def run_sync(
         _detail_last_mono = now
         progress_detail_cb(payload)
 
-    base_sql = default_exchangelog_select()
+    base_sql = exchangelog_inner_sql_for_etl(sync_window_days=cfg.etl.sync_window_days)
     pipeline = cfg.etl.pipeline_name
 
     pg = None if dry_run else connect_pg(cfg.postgres)

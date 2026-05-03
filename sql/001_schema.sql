@@ -40,8 +40,24 @@ CREATE TABLE IF NOT EXISTS fact_egisz_transactions (
 
 COMMENT ON TABLE fact_egisz_transactions IS 'Normalized SOAP registerDocumentResult keyed by relatesToMessage';
 COMMENT ON COLUMN fact_egisz_transactions.local_uid_semd IS 'localUid СЭМД: EGISZ_MESSAGES.DOCUMENTID и/или тег localUid в SOAP (EXCHANGELOG.MSGTEXT)';
-COMMENT ON COLUMN fact_egisz_transactions.gost_jid_token IS 'Lowercased host segment from gost-<jid>.infoclinica.lan when numeric JID is not resolved';
-COMMENT ON COLUMN fact_egisz_transactions.jid IS 'Internal clinic JID: from LOGTEXT URL, EGISZ_LICENSES row, or OID→EGISZ_LICENSES.MO_UID→JID';
+COMMENT ON COLUMN fact_egisz_transactions.gost_jid_token IS 'Нецифровой сегмент gost-* из LOGTEXT/REPLYTO (если числовой JID извлечён — обычно NULL); исторически также дублирует отображение токена';
+
+ALTER TABLE fact_egisz_transactions ADD COLUMN IF NOT EXISTS jid_from_license BIGINT;
+ALTER TABLE fact_egisz_transactions ADD COLUMN IF NOT EXISTS jid_from_gost_log BIGINT;
+ALTER TABLE fact_egisz_transactions ADD COLUMN IF NOT EXISTS jid_from_gost_reply BIGINT;
+ALTER TABLE fact_egisz_transactions ADD COLUMN IF NOT EXISTS gost_token_logtext TEXT;
+ALTER TABLE fact_egisz_transactions ADD COLUMN IF NOT EXISTS gost_token_replyto TEXT;
+ALTER TABLE fact_egisz_transactions ADD COLUMN IF NOT EXISTS jid_sources_mismatch BOOLEAN NOT NULL DEFAULT false;
+
+COMMENT ON COLUMN fact_egisz_transactions.jid_from_license IS 'JID из строки EGISZ_LICENSES по REPLYTO (если журнал сопоставлен с EGISZ_MESSAGES)';
+COMMENT ON COLUMN fact_egisz_transactions.jid_from_gost_log IS 'Числовой JID из первого gost-* в EXCHANGELOG.LOGTEXT';
+COMMENT ON COLUMN fact_egisz_transactions.jid_from_gost_reply IS 'Числовой JID из первого gost-* в EGISZ_MESSAGES.REPLYTO';
+COMMENT ON COLUMN fact_egisz_transactions.gost_token_logtext IS 'Сегмент токена gost-* в LOGTEXT (включая нецифровой)';
+COMMENT ON COLUMN fact_egisz_transactions.gost_token_replyto IS 'Сегмент токена gost-* в REPLYTO (включая нецифровой)';
+COMMENT ON COLUMN fact_egisz_transactions.jid_sources_mismatch IS 'Несовпадение JID между лицензией и gost в LOGTEXT/REPLYTO (или разные токены gost)';
+COMMENT ON COLUMN fact_egisz_transactions.jid IS 'Итоговый JID в витрине: resolve (gost LOGTEXT/REPLYTO, EGISZ_LICENSES, OID); имя клиники — dim_clinics/JPERSONS по этому JID';
+
+CREATE INDEX IF NOT EXISTS idx_fact_jid_sources_mismatch ON fact_egisz_transactions (jid_sources_mismatch) WHERE jid_sources_mismatch;
 
 CREATE INDEX IF NOT EXISTS idx_fact_egisz_local_uid ON fact_egisz_transactions (local_uid_semd);
 CREATE INDEX IF NOT EXISTS idx_fact_egisz_jid ON fact_egisz_transactions (jid);
@@ -73,7 +89,35 @@ CREATE TABLE IF NOT EXISTS stg_parse_errors (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-COMMENT ON TABLE stg_parse_errors IS 'Rows where MSGTEXT could not yield relates_to_id or XML is unusable';
+ALTER TABLE stg_parse_errors ADD COLUMN IF NOT EXISTS exchangelog_log_id BIGINT;
+ALTER TABLE stg_parse_errors ADD COLUMN IF NOT EXISTS egisz_messages_egmid BIGINT;
+ALTER TABLE stg_parse_errors ADD COLUMN IF NOT EXISTS journal_msgid VARCHAR(256);
+ALTER TABLE stg_parse_errors ADD COLUMN IF NOT EXISTS relates_to_hint VARCHAR(512);
+ALTER TABLE stg_parse_errors ADD COLUMN IF NOT EXISTS local_uid_hint VARCHAR(512);
+ALTER TABLE stg_parse_errors ADD COLUMN IF NOT EXISTS emdr_id_hint VARCHAR(512);
+
+COMMENT ON TABLE stg_parse_errors IS 'Rows where MSGTEXT could not yield relates_to_id or XML is unusable; see relates_to_hint / local_uid_hint / emdr_id_hint and EXCHANGELOG keys for document-level reporting';
+COMMENT ON COLUMN stg_parse_errors.exchangelog_log_id IS 'EXCHANGELOG.LOGID — исходная строка прокси-журнала (трассировка)';
+COMMENT ON COLUMN stg_parse_errors.egisz_messages_egmid IS 'EGISZ_MESSAGES.EGMID при джойне по MSGID (трассировка)';
+COMMENT ON COLUMN stg_parse_errors.journal_msgid IS 'EXCHANGELOG.MSGID (трассировка к исходящему сообщению)';
+COMMENT ON COLUMN stg_parse_errors.relates_to_hint IS 'Регексп по тегу relatesToMessage в сыром MSGTEXT, если факт не построен';
+COMMENT ON COLUMN stg_parse_errors.local_uid_hint IS 'Регексп по localUid в сыром MSGTEXT (экземпляр СЭМД в МИС)';
+COMMENT ON COLUMN stg_parse_errors.emdr_id_hint IS 'Регексп по emdrId в сыром MSGTEXT (рег. номер в РЭМД, если уже фигурирует в теле)';
+
+-- Ключ для агрегации «один документ — одна ошибка» в Metabase/healthcheck: coalesce идентификаторов, иначе уникальный id строки.
+CREATE OR REPLACE VIEW v_stg_parse_errors_by_document AS
+SELECT
+    s.*,
+    COALESCE(
+        NULLIF(TRIM(s.relates_to_hint), ''),
+        NULLIF(TRIM(s.local_uid_hint), ''),
+        NULLIF(TRIM(s.emdr_id_hint), ''),
+        NULLIF(TRIM(s.relates_to_id), ''),
+        'id:' || s.id::text
+    ) AS document_group_key
+FROM stg_parse_errors s;
+
+COMMENT ON VIEW v_stg_parse_errors_by_document IS 'stg_parse_errors + document_group_key: агрегация по уникальным документам (document_group_key), а не по числу строк EXCHANGELOG';
 
 -- Агрегированная «человекочитаемая» сводка по errors_json: одна строка на факт, без перезаписи уже ясных сообщений (ГИП и т.п.).
 -- Разбор нескольких блоков Schematron в одном message: разделитель внутри элемента — " — ".
@@ -229,10 +273,20 @@ SELECT
     f.local_uid_semd,
     f.jid,
     f.gost_jid_token,
-    CASE
-        WHEN f.gost_jid_token IS NOT NULL AND TRIM(f.gost_jid_token) <> ''
-            THEN 'gost-' || f.gost_jid_token || '.infoclinica.lan'
-    END AS gost_host,
+    COALESCE(
+        CASE
+            WHEN f.gost_token_logtext IS NOT NULL AND TRIM(f.gost_token_logtext) <> ''
+                THEN 'gost-' || f.gost_token_logtext || '.infoclinica.lan'
+        END,
+        CASE
+            WHEN f.gost_token_replyto IS NOT NULL AND TRIM(f.gost_token_replyto) <> ''
+                THEN 'gost-' || f.gost_token_replyto || '.infoclinica.lan'
+        END,
+        CASE
+            WHEN f.gost_jid_token IS NOT NULL AND TRIM(f.gost_jid_token) <> ''
+                THEN 'gost-' || f.gost_jid_token || '.infoclinica.lan'
+        END
+    ) AS gost_host,
     f.org_oid,
     f.kind_code,
     dt.kind_name AS kind_name,
@@ -246,7 +300,13 @@ SELECT
     DATE(COALESCE(f.registration_date, f.processed_at)) AS chart_day,
     COALESCE(NULLIF(TRIM(dc.jname), ''), 'Клиника JID: ' || COALESCE(f.jid::varchar, 'неизвестен')) AS clinic_name,
     dc.jinn AS clinic_inn,
-    dc.fir_oid AS clinic_mo_oid
+    dc.fir_oid AS clinic_mo_oid,
+    f.jid_from_license,
+    f.jid_from_gost_log,
+    f.jid_from_gost_reply,
+    f.gost_token_logtext,
+    f.gost_token_replyto,
+    f.jid_sources_mismatch
 FROM fact_egisz_transactions f
 LEFT JOIN dim_semd_types dt ON dt.kind_code = f.kind_code
 LEFT JOIN dim_clinics dc ON dc.jid = f.jid;
@@ -346,7 +406,7 @@ INSERT INTO dim_column_display_labels (source_object, source_column, display_lab
     ('v_egisz_transactions_enriched', 'egisz_messages_egmid', 'EGMID сообщения EGISZ_MESSAGES'),
     ('v_egisz_transactions_enriched', 'local_uid_semd', 'localUid СЭМД'),
     ('v_egisz_transactions_enriched', 'jid', 'JID клиники'),
-    ('v_egisz_transactions_enriched', 'gost_jid_token', 'Фрагмент токена gost (LOGTEXT)'),
+    ('v_egisz_transactions_enriched', 'gost_jid_token', 'Токен gost (нецифр., для отображения)'),
     ('v_egisz_transactions_enriched', 'gost_host', 'Хост клиники (VPN ГОСТ)'),
     ('v_egisz_transactions_enriched', 'org_oid', 'OID организации'),
     ('v_egisz_transactions_enriched', 'kind_code', 'Код СЭМД'),
@@ -370,6 +430,12 @@ INSERT INTO dim_column_display_labels (source_object, source_column, display_lab
     ('v_egisz_transactions_enriched', 'clinic_name', 'Наименование клиники'),
     ('v_egisz_transactions_enriched', 'clinic_inn', 'ИНН клиники'),
     ('v_egisz_transactions_enriched', 'clinic_mo_oid', 'OID клиники'),
+    ('v_egisz_transactions_enriched', 'jid_from_license', 'JID (EGISZ_LICENSES)'),
+    ('v_egisz_transactions_enriched', 'jid_from_gost_log', 'JID из gost в LOGTEXT'),
+    ('v_egisz_transactions_enriched', 'jid_from_gost_reply', 'JID из gost в REPLYTO'),
+    ('v_egisz_transactions_enriched', 'gost_token_logtext', 'Сегмент токена gost (LOGTEXT)'),
+    ('v_egisz_transactions_enriched', 'gost_token_replyto', 'Сегмент токена gost (REPLYTO)'),
+    ('v_egisz_transactions_enriched', 'jid_sources_mismatch', 'Расхождение источников JID'),
     ('v_rpt_documents_no_response', 'local_uid_semd', 'localUid СЭМД'),
     ('v_rpt_documents_no_response', 'kind_code', 'Код СЭМД'),
     ('v_rpt_documents_no_response', 'kind_name', 'Наименование СЭМД'),
@@ -401,6 +467,12 @@ SELECT
     clinic_name AS "Наименование клиники",
     clinic_inn AS "ИНН клиники",
     clinic_mo_oid AS "OID клиники",
+    jid_from_license::text AS "JID (EGISZ_LICENSES)",
+    jid_from_gost_log::text AS "JID из gost в LOGTEXT",
+    jid_from_gost_reply::text AS "JID из gost в REPLYTO",
+    gost_token_logtext AS "Токен gost (LOGTEXT)",
+    gost_token_replyto AS "Токен gost (REPLYTO)",
+    jid_sources_mismatch AS "Расхождение источников JID",
     relates_to_id AS "Связанное сообщение"
 FROM v_egisz_transactions_enriched;
 

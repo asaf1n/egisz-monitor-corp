@@ -13,6 +13,8 @@ _state: dict[str, Any] = {
     "error": None,
     "last_stats": None,
     "progress": None,
+    # True после первого успешного try_start_sync в жизни процесса (до рестарта воркера).
+    "sync_attempted": False,
 }
 
 
@@ -61,18 +63,24 @@ def _run_sync_job(config_path: str, merged_dict: dict[str, Any] | None = None) -
                 "cursor_after": stats.last_cursor_after,
             }
             _state["error"] = None
-            _state["message"] = "Готово."
+            _state["message"] = (
+                "Синхронизация успешно завершена: полный проход конвейера "
+                "(JPERSONS, EGISZ_LICENSES, EGISZ_MESSAGES, журнал EXCHANGELOG, "
+                "исходящие документы и витрина в PostgreSQL)."
+            )
     except PipelineLockBusyError as e:  # pragma: no cover - конфликт CronJob ↔ UI
         with _state_lock:
             _state["error"] = str(e)
+            _state["last_stats"] = None
             _state["message"] = (
-                "Параллельный sync уже идёт (возможно, его запустил CronJob egisz-monitor-sync). "
-                "Подождите 1–2 минуты и повторите."
+                "Синхронизация не выполнена: параллельный sync уже идёт "
+                "(например, CronJob egisz-monitor-sync). Подождите 1–2 минуты и повторите."
             )
     except Exception as e:  # pragma: no cover
         with _state_lock:
             _state["error"] = str(e)
-            _state["message"] = f"Ошибка: {e}"
+            _state["last_stats"] = None
+            _state["message"] = f"Синхронизация завершилась с ошибкой: {e}"
     finally:
         with _state_lock:
             _state["running"] = False
@@ -85,6 +93,7 @@ def try_start_sync(
         if _state["running"]:
             return False, "Синхронизация уже выполняется."
         _state["running"] = True
+        _state["sync_attempted"] = True
         _state["error"] = None
         _state["message"] = "Запуск..."
         _state["last_stats"] = None
@@ -106,6 +115,7 @@ def get_sync_state() -> dict[str, Any]:
             "error": _state["error"],
             "last_stats": _state["last_stats"],
             "progress": _state["progress"],
+            "sync_attempted": bool(_state["sync_attempted"]),
         }
 
 

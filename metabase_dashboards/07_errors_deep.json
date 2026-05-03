@@ -14,13 +14,18 @@
   "cards": [
     {
       "name": "07 · Топ причин отказов ЕГИСЗ",
-      "description": "Самые частые смысловые сводки по первому элементу «Ошибки JSON» на транзакцию (egisz_friendly_error_item; один документ = один учёт).",
+      "description": "Самые частые смысловые сводки по первому элементу «Ошибки JSON» **на документ** (`egisz_friendly_error_item`; один `relates_to_id` = один учёт).",
       "table_ref": "v_egisz_transactions_enriched_ui",
-      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано IPS" } },
+      "metabase-field-filters": {
+        "dwh_date": {
+          "table_ref": "v_egisz_transactions_enriched_ui",
+          "field_name": "Обработано IPS"
+        }
+      },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT COALESCE( ( SELECT LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 200) FROM jsonb_array_elements(COALESCE(env.\"Ошибки JSON\", '[]'::jsonb)) AS e(err) WHERE NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL LIMIT 1 ), '(ошибка без деталей)' ) AS \"Сводка ошибки\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui env WHERE env.\"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ORDER BY 2 DESC LIMIT 20",
+          "query": "SELECT COALESCE( ( SELECT LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 200) FROM jsonb_array_elements(COALESCE(env.\"Ошибки JSON\", '[]'::jsonb)) AS e(err) WHERE NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL LIMIT 1 ), '(ошибка без деталей)' ) AS \"Сводка ошибки\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM public.v_egisz_transactions_enriched_ui env WHERE env.\"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ORDER BY 2 DESC LIMIT 20",
           "template-tags": {
             "dwh_date": {
               "id": "f7000001-0001-4001-8001-000000000001",
@@ -39,14 +44,14 @@
           "Сводка ошибки"
         ],
         "graph.metrics": [
-          "Количество"
+          "Документов"
         ],
         "graph.show_values": true,
         "column_settings": {
           "[\"name\",\"Сводка ошибки\"]": {
             "column_title": "Сводка ошибки"
           },
-          "[\"name\",\"Количество\"]": {
+          "[\"name\",\"Документов\"]": {
             "column_title": "Количество",
             "number_separators": ".",
             "decimals": 0
@@ -60,13 +65,18 @@
     },
     {
       "name": "07 · Ошибки по клиникам и СЭМД",
-      "description": "Частые смысловые сводки в разрезе клиник и типов СЭМД: по первому элементу «Ошибки JSON» на транзакцию (один документ = один учёт).",
+      "description": "Частые смысловые сводки в разрезе клиник и типов СЭМД: по первому элементу «Ошибки JSON» **на документ** (один `relates_to_id` = один учёт).",
       "table_ref": "v_egisz_transactions_enriched_ui",
-      "metabase-field-filters": { "dwh_date": { "table_ref": "v_egisz_transactions_enriched_ui", "field_name": "Обработано IPS" } },
+      "metabase-field-filters": {
+        "dwh_date": {
+          "table_ref": "v_egisz_transactions_enriched_ui",
+          "field_name": "Обработано IPS"
+        }
+      },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH per_doc AS ( SELECT env.\"JID клиники\", env.\"Наименование клиники\", COALESCE(NULLIF(TRIM(env.\"Код СЭМД\"), ''), '(пусто)') AS kod_semd, COALESCE(NULLIF(TRIM(env.\"Наименование СЭМД\"), ''), '(пусто)') AS name_semd, COALESCE( ( SELECT LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 120) FROM jsonb_array_elements(COALESCE(env.\"Ошибки JSON\", '[]'::jsonb)) AS e(err) WHERE NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL LIMIT 1 ), '(ошибка без деталей)' ) AS err_summary FROM public.v_egisz_transactions_enriched_ui env WHERE env.\"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] ) SELECT \"JID клиники\", \"Наименование клиники\", kod_semd AS \"Код СЭМД\", name_semd AS \"Наименование СЭМД\", err_summary AS \"Сводка ошибки\", COUNT(*)::bigint AS \"Количество\" FROM per_doc GROUP BY 1, 2, 3, 4, 5 ORDER BY 6 DESC LIMIT 50",
+          "query": "WITH per_doc AS ( SELECT env.\"JID клиники\", env.\"Наименование клиники\", COALESCE(NULLIF(TRIM(env.\"Код СЭМД\"), ''), '(пусто)') AS kod_semd, COALESCE(NULLIF(TRIM(env.\"Наименование СЭМД\"), ''), '(пусто)') AS name_semd, COALESCE( ( SELECT LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 120) FROM jsonb_array_elements(COALESCE(env.\"Ошибки JSON\", '[]'::jsonb)) AS e(err) WHERE NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL LIMIT 1 ), '(ошибка без деталей)' ) AS err_summary FROM public.v_egisz_transactions_enriched_ui env WHERE env.\"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] ) SELECT \"JID клиники\", \"Наименование клиники\", kod_semd AS \"Код СЭМД\", name_semd AS \"Наименование СЭМД\", err_summary AS \"Сводка ошибки\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM per_doc GROUP BY 1, 2, 3, 4, 5 ORDER BY 6 DESC LIMIT 50",
           "template-tags": {
             "dwh_date": {
               "id": "f7000002-0002-4002-8002-000000000001",
@@ -97,7 +107,7 @@
           "[\"name\",\"Сводка ошибки\"]": {
             "column_title": "Сводка ошибки"
           },
-          "[\"name\",\"Количество\"]": {
+          "[\"name\",\"Документов\"]": {
             "column_title": "Количество",
             "number_separators": ".",
             "decimals": 0

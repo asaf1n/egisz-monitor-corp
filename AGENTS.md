@@ -33,11 +33,11 @@
 
 | Файл | Содержимое |
 |------|------------|
-| `001_schema.sql` | Таблицы факта/измерений, `stg_jpersons_import`, `stg_egisz_licenses_import`, `stg_egisz_outbound_documents`, представления `v_*`, функции `egisz_friendly_*`, `dim_column_display_labels` |
+| `001_schema.sql` | Таблицы факта/измерений, `stg_jpersons_import`, `stg_egisz_licenses_import`, `stg_egisz_outbound_documents`, представления `v_*`, **`v_stg_parse_errors_by_document`** (ключ документа для ошибок парсинга), функции `egisz_friendly_*`, `dim_column_display_labels` |
 | `002_etl_state.sql` | Таблица `etl_state`: курсоры `last_log_id` (EXCHANGELOG.LOGID), `last_egmid` (EGISZ_MESSAGES.EGMID), пики FB |
 | `003_diagnostic_counts_firebird.sql` | Шаблоны диагностики FB |
 | `004_diagnostic_counts_postgres.sql` | Шаблоны диагностики PG |
-| `005_healthcheck.sql` | Healthcheck-витрина: `v_health_by_clinic` (агрегаты за 24ч), `v_health_signals` (5 сигналов), `v_health_proxy_db` (сводка staging исходящих + курсор ETL) + UI-обёртки `*_ui` для дашборда `11_healthcheck.json` |
+| `005_healthcheck.sql` | Healthcheck-витрина: `v_health_by_clinic` (агрегаты за 24ч по **уникальным** `relates_to_id`, очередь по **уникальным** `local_uid_semd`), `v_health_signals` (5 сигналов), `v_health_proxy_db` (сводка staging исходящих + курсор ETL) + UI-обёртки `*_ui` для дашборда `11_healthcheck.json` |
 | `006_firebird_proxy_export.sql` | Ручные выгрузки с прокси Firebird (пики, outbound, журнал 65k / инкремент после `LOGID`); не применяется Job'ом схемы |
 
 Схема на кластере: Job `egisz-reports-schema-init` (порядок файлов — `sql/schema_apply_order.txt`, по умолчанию `001 + 002 + 005`), локально — `egisz-monitor apply-schema`. ETL `run_sync` идемпотентно применяет тот же набор при каждом запуске.
@@ -48,11 +48,13 @@
 
 ## Metabase
 
+Агрегаты в `metabase_dashboards/*.json`: **документная единица** — `COUNT(DISTINCT "Связанное сообщение")` на витрине колбэков (`relates_to_id`), для очереди без ответа — `COUNT(DISTINCT "localUid СЭМД")`; см. `metabase_dashboards/README.md`.
+
 | Путь | Назначение |
 |------|------------|
 | `metabase_dashboards/*.json` | Дашборды как код; имена и native-SQL карточек |
 | `metabase_dashboards/README.md` | Соответствие файлов (`01_operational.json` … `11_healthcheck.json`) и имён в UI |
-| `metabase/Dockerfile` | Образ **`egisz-monitor-metabase`** (теги `:k8s-v15`, `:local` — см. `start.ps1 -Action build`; non-root UID 1500, multi-stage `--virtual` apk-deps, HEALTHCHECK; bump при смене JSON/скриптов) |
+| `metabase/Dockerfile` | Образ **`egisz-monitor-metabase`** (теги `:k8s-v16`, `:local` — см. `start.ps1 -Action build`; non-root UID 1500, multi-stage `--virtual` apk-deps, HEALTHCHECK; bump при смене JSON/скриптов) |
 | `metabase/provision.sh` | Старт пода: провижининг из `/app/metabase_dashboards/` |
 | `metabase/setup-dashboards.sh` | Импорт JSON в коллекцию администратора |
 | `metabase/provision-local.ps1` | Локальный провижининг к Metabase на `localhost:3000` |
@@ -69,7 +71,7 @@
 |------|------------|
 | `k8s/` | Обзор: [`k8s/README.md`](k8s/README.md) — Postgres, Metabase, conf-ui, примеры секретов |
 | `k8s/postgres/` | StatefulSet, сервисы, Job **`egisz-reports-schema-init`** (DDL по `sql/schema_apply_order.txt`), Job’ы Metabase app DB и (при необходимости) Airflow metadata |
-| `k8s/metabase.yaml` | Deployment Metabase (образ `egisz-monitor-metabase:k8s-v15`); `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75 -XX:+UseG1GC`, startupProbe (240s), `METABASE_FORCE_PROVISION=auto` (идемпотентный provision — dashboard ID не меняются) |
+| `k8s/metabase.yaml` | Deployment Metabase (образ `egisz-monitor-metabase:k8s-v16`); `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75 -XX:+UseG1GC`, startupProbe (240s), `METABASE_FORCE_PROVISION=auto` (идемпотентный provision — dashboard ID не меняются) |
 | `k8s/conf-ui.yaml` | Config UI (gunicorn 1×16t + `sync_routes`); non-root UID 10001, `/healthz`, RollingUpdate `maxUnavailable=0` |
 | `k8s/etl-cron.yaml` | **CronJob `egisz-monitor-sync`**: `*/15 * * * *`, тот же образ `egisz-conf-ui:sync-web`, CLI `egisz-monitor sync`, `concurrencyPolicy: Forbid` + advisory lock в Postgres против гонки с UI-кнопкой |
 | `k8s/local/egisz_monitor.yaml` | Пример фрагмента конфига для секрета conf-ui |
@@ -90,7 +92,7 @@
 | `egisz_monitor_corp/pg_warehouse.py` → `fetch_healthcheck_snapshot(con)` | Чтение трёх view + агрегаты для UI/JSON; `statement_timeout = 10s` на каждый блок. |
 | `GET /api/healthcheck` (`egisz_monitor_corp/config_app.py`) | JSON-снимок `{signals, by_clinic_top, proxy_db, level_summary}`. При недоступной PG — `ok: false` и `errors[]` (graceful). |
 | Config UI: вкладки **Snapshot / Healthcheck** | Snapshot — текущие `EGMID/LOGID/MODIFYDATE` (как раньше). Healthcheck — сигналы, top-3 клиники, прокси-БД (опрос `/api/healthcheck` каждые 30 c). |
-| Дашборд `metabase_dashboards/11_healthcheck.json` | «11 Healthcheck интеграции»: сигналы, heatmap клиник × дни, age-buckets очереди, тренд parse-errors, сводка прокси-БД. |
+| Дашборд `metabase_dashboards/11_healthcheck.json` | «11 Healthcheck интеграции»: сигналы, heatmap клиник × дни, age-buckets очереди, тренд ошибок парсинга по **уникальным документам** (`v_stg_parse_errors_by_document`), сводка прокси-БД. |
 | Полный аудит | `docs/INTEGRATION_AUDIT.md` (3 фокуса: техника/бизнес/healthcheck). |
 | Операторам Config UI (лог, прогресс, курсоры, Metabase vs веб) | `README.md` → [Синхронизация Firebird → PostgreSQL](README.md#синхронизация-firebird--postgresql) |
 

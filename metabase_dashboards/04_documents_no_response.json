@@ -1,6 +1,6 @@
 {
   "name": "04 Документы без ответа",
-  "description": "Поиск «зависших» транзакций. [Field filter](https://www.metabase.com/docs/v0.60/questions/native-editor/field-filters) по **«Отправлено»** (дата/диапазон). Фильтры **Код СЭМД** и **JID клиники** — те же слаги `top_semd_filter` / `top_clinic_filter`, что на «01 Оперативный мониторинг» (общий query string в URL).",
+  "description": "Поиск исходящих **документов** без callback (очередь). [Field filter](https://www.metabase.com/docs/v0.60/questions/native-editor/field-filters) по **«Отправлено»** (дата/диапазон). Фильтры **Код СЭМД** и **JID клиники** — те же слаги `top_semd_filter` / `top_clinic_filter`, что на «01 Оперативный мониторинг» (общий query string в URL).",
   "width": "full",
   "parameters": [
     {

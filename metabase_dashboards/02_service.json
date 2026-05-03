@@ -39,7 +39,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID клиники\"::text = {{top_clinic}}]] GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 25",
+          "query": "SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID клиники\"::text = {{top_clinic}}]] GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 25",
           "template-tags": {
             "dwh_date": {
               "id": "f2000001-0001-4001-8001-000000000001",
@@ -74,7 +74,7 @@
           "Наименование СЭМД"
         ],
         "graph.metrics": [
-          "Количество"
+          "Документов"
         ],
         "graph.show_values": true,
         "column_settings": {
@@ -84,7 +84,7 @@
           "[\"name\",\"Наименование СЭМД\"]": {
             "column_title": "Наименование СЭМД"
           },
-          "[\"name\",\"Количество\"]": {
+          "[\"name\",\"Документов\"]": {
             "column_title": "Количество",
             "number_separators": ".",
             "decimals": 0
@@ -98,7 +98,7 @@
     },
     {
       "name": "02 · Объём по клиникам (поток)",
-      "description": "Топ клиник по числу записей (все статусы); JID в подписи — как на оперативном мониторинге.",
+      "description": "Топ клиник по числу **документов** (DISTINCT «Связанное сообщение»), все статусы; JID в подписи — как на оперативном мониторинге.",
       "table_ref": "v_egisz_transactions_enriched_ui",
       "metabase-field-filters": {
         "dwh_date": {
@@ -109,7 +109,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT \"JID клиники\", \"Наименование клиники\", COUNT(*)::bigint AS \"Количество\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID клиники\"::text = {{top_clinic}}]] GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20",
+          "query": "SELECT \"JID клиники\", \"Наименование клиники\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID клиники\"::text = {{top_clinic}}]] GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20",
           "template-tags": {
             "dwh_date": {
               "id": "f2000002-0002-4002-8002-000000000001",
@@ -144,7 +144,7 @@
           "Наименование клиники"
         ],
         "graph.metrics": [
-          "Количество"
+          "Документов"
         ],
         "graph.show_values": true,
         "column_settings": {
@@ -154,7 +154,7 @@
           "[\"name\",\"Наименование клиники\"]": {
             "column_title": "Наименование клиники"
           },
-          "[\"name\",\"Количество\"]": {
+          "[\"name\",\"Документов\"]": {
             "column_title": "Количество",
             "number_separators": ".",
             "decimals": 0
