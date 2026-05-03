@@ -18,6 +18,17 @@ log_info() {
   echo "[provision] $1"
 }
 
+# Совпадает с verify-corp-stack.sh / smoke-metabase-ui: Metabase 0.49+ отдаёт списки в обёртке.
+mb_list() {
+  jq -c '
+    if type == "array" then .
+    elif (.data | type == "array") then .data
+    elif (.items | type == "array") then .items
+    elif (.data | type == "object") and (.data.items | type == "array") then .data.items
+    else [] end
+  '
+}
+
 if [ -z "${ADMIN_EMAIL}" ] || [ -z "${ADMIN_PASSWORD}" ]; then
   echo "Metabase admin credentials are not configured"
   exit 1
@@ -104,11 +115,11 @@ if [ -z "${SESSION_TOKEN}" ] || [ "${SESSION_TOKEN}" = "null" ]; then
   exit 1
 fi
 
-# Идемпотентный provisioning: setup-dashboards.sh при каждом старте пересоздаёт дашборды
-# с новыми id'ами — это ломает закладки в браузере и ссылки в документации после rollout
-# restart. Вместо этого считаем количество существующих "EGISZ" дашбордов (имя начинается
-# с "01 ".."11 ") и пропускаем provisioning, если он уже выполнен. Принудительная пере-
-# заливка — env METABASE_FORCE_PROVISION=true или deploy/reset-deploy (DROP/CREATE БД).
+# Идемпотентный provisioning: setup-dashboards.sh делает wipe личной коллекции и полный
+# реимпорт — после переименования дашбордов в UI старый детект по префиксу «01 » в имени
+# давал 0 и запускал провижининг заново (restart-metabase / rollout). Считаем дашборды
+# в personal / is_personal коллекциях (как verify-corp-stack), с пагинацией GET /api/dashboard.
+# Принудительная перезаливка: METABASE_FORCE_PROVISION=true или deploy/reset-deploy (DROP/CREATE БД).
 EXPECTED_DASHBOARDS=0
 if [ -d /app/metabase_dashboards ]; then
   for _f in /app/metabase_dashboards/*.json; do
@@ -116,12 +127,58 @@ if [ -d /app/metabase_dashboards ]; then
   done
 fi
 
-EXISTING_DASHBOARDS="$(curl -sS "${MB_URL}/api/dashboard" \
-  -H "X-Metabase-Session: ${SESSION_TOKEN}" \
-  | jq -r '
-      (if type == "array" then . elif (.data | type == "array") then .data else [] end)
-      | [.[] | select(.archived != true) | select(.name | test("^[0-9][0-9] "))] | length
-    ' 2>/dev/null || echo 0)"
+ME_JSON="$(curl -sS "${MB_URL}/api/user/current" -H "X-Metabase-Session: ${SESSION_TOKEN}")"
+ROOT_ID="$(echo "${ME_JSON}" | jq -r '.personal_collection_id // empty')"
+PERSONAL_IDS_JSON='[]'
+if [ -n "${ROOT_ID}" ] && [ "${ROOT_ID}" != "null" ]; then
+  PERSONAL_IDS_JSON="$(curl -sS "${MB_URL}/api/collection" -H "X-Metabase-Session: ${SESSION_TOKEN}" \
+    | mb_list \
+    | jq -c --arg rid "${ROOT_ID}" '
+        (
+          [.[] | select((.is_personal == true) or ((.id | tostring) == ($rid | tostring))) | .id | tostring]
+          + [($rid | tostring)]
+        ) | unique
+      ')"
+fi
+PERSONAL_IDS_JSON="${PERSONAL_IDS_JSON:-[]}"
+
+EXISTING_DASHBOARDS=0
+_limit=200
+_offset=0
+_first_page_first_id=""
+while true; do
+  _page="$(curl -sS "${MB_URL}/api/dashboard?limit=${_limit}&offset=${_offset}" \
+    -H "X-Metabase-Session: ${SESSION_TOKEN}" 2>/dev/null || echo '{}')"
+  _arr="$(echo "${_page}" | mb_list)"
+  _n="$(echo "${_arr}" | jq 'length')"
+  if [ "${_n:-0}" -eq 0 ]; then
+    break
+  fi
+  _first_id="$(echo "${_arr}" | jq -r '.[0].id // empty')"
+  if [ "${_offset}" -gt 0 ] && [ -n "${_first_page_first_id}" ] && [ "${_first_id}" = "${_first_page_first_id}" ]; then
+    log_info "WARN: /api/dashboard pagination ignored by server; stop to avoid double-count."
+    break
+  fi
+  if [ "${_offset}" -eq 0 ]; then
+    _first_page_first_id="${_first_id}"
+  fi
+  _chunk="$(echo "${_arr}" | jq --argjson pids "${PERSONAL_IDS_JSON}" '
+    [.[]
+      | select((.archived == false) or (.archived == null))
+      | select(.collection_id != null and ((.collection_id | tostring) | IN($pids[])))
+    ] | length
+  ')"
+  _chunk="${_chunk:-0}"
+  EXISTING_DASHBOARDS=$((EXISTING_DASHBOARDS + _chunk))
+  if [ "${_n}" -lt "${_limit}" ]; then
+    break
+  fi
+  _offset=$((_offset + _limit))
+  if [ "${_offset}" -gt 20000 ]; then
+    log_info "WARN: dashboard list offset >20000; stop counting."
+    break
+  fi
+done
 EXISTING_DASHBOARDS="${EXISTING_DASHBOARDS:-0}"
 
 PROVISION_DASHBOARDS=1
@@ -137,7 +194,7 @@ case "${FORCE_FLAG}" in
     ;;
   auto|*)
     if [ "${EXPECTED_DASHBOARDS}" -gt 0 ] && [ "${EXISTING_DASHBOARDS}" -ge "${EXPECTED_DASHBOARDS}" ]; then
-      log_info "Skipping provisioning: ${EXISTING_DASHBOARDS}/${EXPECTED_DASHBOARDS} EGISZ dashboards already in Metabase application DB. Set METABASE_FORCE_PROVISION=true (or deploy/reset-deploy for DROP/CREATE app DB) to re-create."
+      log_info "Skipping provisioning: ${EXISTING_DASHBOARDS} non-archived dashboard(s) in admin personal scope vs ${EXPECTED_DASHBOARDS} JSON in image (rename-safe). Set METABASE_FORCE_PROVISION=true (or deploy/reset-deploy for DROP/CREATE app DB) to re-import from image."
       PROVISION_DASHBOARDS=0
     else
       log_info "Provisioning dashboards: have ${EXISTING_DASHBOARDS} of ${EXPECTED_DASHBOARDS} expected EGISZ dashboards in Metabase."
