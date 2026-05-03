@@ -64,6 +64,7 @@ from egisz_monitor_corp.sql_util import (
     paginated_exchangelog_sql,
 )
 
+CancelCheck = Callable[[], None] | None
 
 # Минимальный интервал между одинаковыми фазами в progress_detail_cb (сек.): UI не должен замедлять ETL.
 _DETAIL_THROTTLE_SEC = 0.22
@@ -120,6 +121,15 @@ class EtlRunStats:
     staging_errors: int
     max_log_id: int
     last_cursor_after: int
+
+
+class EtlCancelledError(Exception):
+    """Остановка синхронизации по запросу оператора (Config UI)."""
+
+
+def _raise_if_cancel(cancel_check: CancelCheck) -> None:
+    if cancel_check is not None:
+        cancel_check()
 
 
 @dataclass(frozen=True)
@@ -304,12 +314,14 @@ def _fetch_jpersons_and_licenses_separate(
     *,
     before_jpersons: Callable[[], None] | None = None,
     before_licenses: Callable[[], None] | None = None,
+    cancel_check: CancelCheck = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     if before_jpersons:
         before_jpersons()
     log("Firebird [1/2]: выгрузка JPERSONS (все JID)…")
     jp_rows = _etl_fb_fetch(cfg, jpersons_all_sql())
     log(f"JPERSONS: прочитано {len(jp_rows)} строк из Firebird.")
+    _raise_if_cancel(cancel_check)
     if before_licenses:
         before_licenses()
     log("Firebird [2/2]: выгрузка EGISZ_LICENSES (без JOIN)…")
@@ -406,6 +418,7 @@ def _export_egisz_licenses_full(
     before_jpersons: Callable[[], None] | None = None,
     before_licenses: Callable[[], None] | None = None,
     before_pg_staging: Callable[[], None] | None = None,
+    cancel_check: CancelCheck = None,
 ) -> EnrichmentCache:
     """Полная выгрузка JPERSONS и EGISZ_LICENSES с Firebird; при PG — staging, сшивка JNAME/JINN/FIR_OID в SQL, merge dim_clinics."""
     jp_rows, lic_rows = _fetch_jpersons_and_licenses_separate(
@@ -413,8 +426,10 @@ def _export_egisz_licenses_full(
         log,
         before_jpersons=before_jpersons,
         before_licenses=before_licenses,
+        cancel_check=cancel_check,
     )
     if pg is not None:
+        _raise_if_cancel(cancel_check)
         if before_pg_staging:
             before_pg_staging()
         log(
@@ -514,12 +529,15 @@ def _backfill_messages_for_msgids(
     msgids: list[str],
     msg_by_msgid: dict[str, dict[str, Any]],
     log: Callable[[str], None],
+    *,
+    cancel_check: CancelCheck = None,
 ) -> None:
     need = [m for m in msgids if m and m not in msg_by_msgid]
     if not need:
         return
     n = 0
     for i in range(0, len(need), _MSGBACKFILL_IN_CHUNK):
+        _raise_if_cancel(cancel_check)
         chunk = need[i : i + _MSGBACKFILL_IN_CHUNK]
         ph = ",".join("?" * len(chunk))
         sql = egisz_messages_by_msgids_sql(ph)
@@ -931,6 +949,7 @@ def _refresh_outbound_documents(
     progress_detail_cb: Callable[[EtlProgressPayload], None] | None,
     log: Callable[[str], None],
     detail: Callable[[EtlProgressPayload], None],
+    cancel_check: CancelCheck = None,
 ) -> None:
     """Полная перезапись `stg_egisz_outbound_documents`: FB только DOCUMENTID/EGMID/даты/REPLYTO; KIND/JID — в Python."""
     log("Refreshing stg_egisz_outbound_documents (v_rpt_documents_no_response)...")
@@ -956,6 +975,7 @@ def _refresh_outbound_documents(
     base_progress.update(_progress_payload_total_rows(progress_state["total_exchangelog"]))
     detail({"phase": "outbound_firebird", **base_progress, **metrics_ui})  # type: ignore[arg-type]
 
+    _raise_if_cancel(cancel_check)
     omsg = _etl_fb_fetch(
         cfg, outbound_documents_staging_select(min_egmid=outbound_min_egmid)
     )
@@ -976,6 +996,8 @@ def _refresh_outbound_documents(
     stg_out: list[dict[str, Any]] = []
     seen_doc: set[str] = set()
     for oi, r in enumerate(omsg_sorted, start=1):
+        if oi == 1 or oi % 400 == 0:
+            _raise_if_cancel(cancel_check)
         did = _to_str(r.get("documentid"))
         skip = not did or did in seen_doc
         reply_to = _to_str(r.get("replyto"))
@@ -1050,6 +1072,7 @@ def _run_interleaved_messages_and_journal(
     progress_detail_cb: Callable[[EtlProgressPayload], None] | None,
     log: Callable[[str], None],
     detail: Callable[[EtlProgressPayload], None],
+    cancel_check: CancelCheck = None,
 ) -> tuple[_PageStats, int]:
     """Пакеты EGISZ_MESSAGES (EGMID) / EXCHANGELOG (LOGID) размером interleave_page_rows; дозагрузка MSGID; параллельный SELECT."""
     chunk = int(cfg.etl.interleave_page_rows)
@@ -1098,14 +1121,19 @@ def _run_interleaved_messages_and_journal(
         fut_next_messages: Future | None = None
 
         while not (msg_done and journal_done):
+            _raise_if_cancel(cancel_check)
             if not msg_done:
                 rows_m: list[dict[str, Any]]
                 new_c: int
                 prev_c: int
                 if fut_next_messages is not None:
+                    # UI/логи: фаза «сообщения» до ожидания future — иначе после exchangelog_ready
+                    # кажется, что «зависли на журнале/LOGID», пока идёт долгий SELECT EGISZ_MESSAGES.
+                    msg_detail()
                     rows_m, new_c, prev_c = fut_next_messages.result()
                     fut_next_messages = None
                 else:
+                    msg_detail()
                     rows_m, new_c, prev_c = _messages_page_after_egmid(cfg, egmid_cursor, chunk, log)
                 if not rows_m:
                     msg_done = True
@@ -1133,7 +1161,9 @@ def _run_interleaved_messages_and_journal(
                 else:
                     miss = _collect_missing_msgids_for_journal_rows(rows_j, msg_by_msgid)
                     if miss:
-                        _backfill_messages_for_msgids(cfg, miss, msg_by_msgid, log)
+                        _backfill_messages_for_msgids(
+                            cfg, miss, msg_by_msgid, log, cancel_check=cancel_check
+                        )
                     if not msg_done:
                         fut_next_messages = pool.submit(
                             _messages_page_after_egmid, cfg, egmid_cursor, chunk, log
@@ -1222,6 +1252,7 @@ def run_sync(
     dry_run: bool = False,
     progress_cb: Callable[[str], None] | None = None,
     progress_detail_cb: Callable[[EtlProgressPayload], None] | None = None,
+    cancel_check: CancelCheck = None,
 ) -> EtlRunStats:
     """Оркестрация Firebird → Postgres: полная выгрузка лицензий (очистка в PostgreSQL); журнал EXCHANGELOG по LOGID;
     EGISZ_MESSAGES по EGMID; парсинг/UPSERT с сопоставлением MSGID в памяти."""
@@ -1288,6 +1319,7 @@ def run_sync(
                 )
             log("PostgreSQL: lock получен; полная выгрузка JPERSONS и EGISZ_LICENSES из Firebird…")
 
+        _raise_if_cancel(cancel_check)
         if pg is not None:
             enrichment = _export_egisz_licenses_full(
                 cfg,
@@ -1296,6 +1328,7 @@ def run_sync(
                 before_jpersons=lambda: boot_detail(3, "firebird_jpersons_fetch"),
                 before_licenses=lambda: boot_detail(4, "firebird_licenses_fetch"),
                 before_pg_staging=lambda: boot_detail(5, "pg_license_staging"),
+                cancel_check=cancel_check,
             )
         else:
             enrichment = _export_egisz_licenses_full(
@@ -1304,6 +1337,7 @@ def run_sync(
                 pg=None,
                 before_jpersons=lambda: boot_detail(1, "firebird_jpersons_fetch"),
                 before_licenses=lambda: boot_detail(2, "firebird_licenses_fetch"),
+                cancel_check=cancel_check,
             )
         lic_iso = (
             enrichment.max_licenses_modifydate.isoformat()
@@ -1329,10 +1363,15 @@ def run_sync(
             {
                 "phase": "counting",
                 "cursor_log_id": last_id,
+                "messages_cursor_egmid": last_egmid,
                 "licenses_modifydate_iso": lic_iso,
             }
         )
-        log("EXCHANGELOG: инкремент по LOGID; COUNT в Firebird для прогресса не выполняется.")
+        log(
+            "Инкремент: пакеты EGISZ_MESSAGES (EGMID) и EXCHANGELOG (LOGID); "
+            "COUNT журнала в Firebird для прогресса не выполняется."
+        )
+        _raise_if_cancel(cancel_check)
         total_exchangelog = _count_exchangelog_total()
 
         detail(
@@ -1343,6 +1382,7 @@ def run_sync(
                 "journal_facts": 0,
                 "staging_errors": 0,
                 "cursor_log_id": last_id,
+                "messages_cursor_egmid": last_egmid,
                 "licenses_modifydate_iso": lic_iso,
                 **_progress_payload_total_rows(total_exchangelog),
             }
@@ -1359,8 +1399,10 @@ def run_sync(
             progress_detail_cb=progress_detail_cb,
             log=log,
             detail=detail,
+            cancel_check=cancel_check,
         )
 
+        _raise_if_cancel(cancel_check)
         detail(
             {
                 "phase": "exchangelog_done",
@@ -1389,6 +1431,7 @@ def run_sync(
                 progress_detail_cb=progress_detail_cb,
                 log=log,
                 detail=detail,
+                cancel_check=cancel_check,
             )
             eg_peak = egmid_after_export if egmid_after_export > 0 else None
             set_etl_source_peaks(

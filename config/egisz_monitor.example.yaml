@@ -48,7 +48,8 @@ etl:
   interleave_page_rows: 8192
 
 auto_sync:
-  # Intent для CronJob k8s (egisz-monitor-sync); по умолчанию в манифесте suspend: true.
+  # В k8s: при «Сохранить в YAML» и при `start.ps1` apply патчится CronJob `egisz-monitor-sync`:
+  # spec.suspend = not enabled, плюс schedule_cron и timezone. RBAC: ServiceAccount `conf-ui` (см. k8s/conf-ui.yaml).
   enabled: false
   schedule_cron: "*/15 * * * *"
   timezone: "Etc/UTC"

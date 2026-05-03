@@ -1,6 +1,45 @@
 # Config UI (Flask): редактирование YAML конфигурации EGISZ Monitor.
 # Service conf-ui: LoadBalancer — доступ с хоста без port-forward при поддерживаемом LB (Docker Desktop и т.п.).
 # Рабочая копия YAML в emptyDir (запись из UI); при новом поде init снова копирует из Secret. Другие Job'ы читают Secret — обновляйте его при необходимости (deploy / kubectl apply).
+#
+# ServiceAccount + Role: POST /save применяет auto_sync к CronJob egisz-monitor-sync (suspend/schedule/timeZone).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: conf-ui
+  namespace: egisz-monitor
+  labels:
+    app.kubernetes.io/name: conf-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: conf-ui-patch-sync-cronjob
+  namespace: egisz-monitor
+  labels:
+    app.kubernetes.io/name: conf-ui
+rules:
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    resourceNames: ["egisz-monitor-sync"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: conf-ui-patch-sync-cronjob
+  namespace: egisz-monitor
+  labels:
+    app.kubernetes.io/name: conf-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: conf-ui-patch-sync-cronjob
+subjects:
+  - kind: ServiceAccount
+    name: conf-ui
+    namespace: egisz-monitor
+---
 apiVersion: v1
 kind: Service
 metadata:
@@ -51,6 +90,7 @@ spec:
       labels:
         app.kubernetes.io/name: conf-ui
     spec:
+      serviceAccountName: conf-ui
       # preStop sleep + grace 45s: даём kube-proxy убрать endpoint до SIGTERM Flask и закрыть
       # текущие fetch'и без TypeError: Failed to fetch.
       terminationGracePeriodSeconds: 45

@@ -64,6 +64,137 @@ api_request() {
   printf '%s' "${RESPONSE_BODY}"
 }
 
+# Metabase 0.48–0.60: иногда PUT /api/dashboard/:id/cards не сохраняет parameter_mappings (фильтры в шапке есть,
+# карточки показывают «выберите столбец»). Тогда пересобираем связи с серверных template-tags и шлём PUT целого дашборда.
+# GET /api/dashboard/:id иногда отдаёт dashcards только с card_id без вложенного .card — jq-ремонт не сработает без подгрузки.
+enrich_dashboard_json_with_cards() {
+  local j="$1"
+  local cid merged
+
+  for cid in $(echo "${j}" | jq -r '
+    [(.dashcards // .ordered_cards // [])[]?
+      | select((.card | type) != "object")
+      | .card_id
+    ] | map(select(. != null)) | unique | .[]?
+  '); do
+    [ -z "${cid}" ] || [ "${cid}" = "null" ] && continue
+    merged="$(api_request GET "/api/card/${cid}")"
+    j="$(echo "${j}" | jq --argjson card "${merged}" --argjson cid "${cid}" '
+      if (.dashcards | type) == "array" then
+        .dashcards |= map(
+          if (.card_id == $cid) and ((.card | type) != "object") then . + { card: $card } else . end
+        )
+      else . end
+      | if (.ordered_cards | type) == "array" then
+          .ordered_cards |= map(
+            if (.card_id == $cid) and ((.card | type) != "object") then . + { card: $card } else . end
+          )
+        else . end
+    ')"
+  done
+
+  printf '%s' "${j}"
+}
+
+repair_dashboard_parameter_links_if_needed() {
+  local dashboard_id="$1"
+  local dash_json maps_total params_len repaired
+
+  dash_json="$(api_request GET "/api/dashboard/${dashboard_id}")"
+  maps_total="$(echo "${dash_json}" | jq '([ (.dashcards // .ordered_cards // [])[]? | (.parameter_mappings // []) | length ] | add) // 0')"
+  params_len="$(echo "${dash_json}" | jq '(.parameters // []) | length')"
+  if [ "${params_len}" -eq 0 ] || [ "${maps_total}" -gt 0 ]; then
+    return 0
+  fi
+
+  log_info "Repairing parameter_mappings on dashboard id=${dashboard_id} (had params=${params_len}, mappings=0)…"
+  dash_json="$(enrich_dashboard_json_with_cards "${dash_json}")"
+  repaired="$(echo "${dash_json}" | jq '
+    (.parameters // []) as $params
+    | if (.dashcards | type) == "array" then
+        (.dashcards) as $dcs
+        | .dashcards = (
+            $dcs
+            | map(
+                . as $dc
+                | if ($dc.card | type) != "object"
+                     or ($dc.card.dataset_query | type) != "object"
+                     or ($dc.card.dataset_query.native | type) != "object" then
+                    $dc
+                  elif (($dc.card.dataset_query.native["template-tags"] // {}) | type) != "object" then
+                    $dc
+                  else
+                    ($dc.card.dataset_query.native["template-tags"]) as $tags
+                    | ($tags | keys) as $tagKeys
+                    | $dc + {
+                        "parameter_mappings": [
+                          $params[] as $p
+                          | ($p.slug // "") as $raw
+                          | (if $raw == "" then empty elif ($raw | endswith("_filter")) then ($raw | sub("_filter$"; "")) else $raw end) as $tn
+                          | select(($tagKeys | index($tn)) != null)
+                          | ($tags[$tn].type // "") as $ttype
+                          | {
+                              parameter_id: $p.id,
+                              card_id: $dc.card_id,
+                              target: (
+                                if $ttype == "dimension" then
+                                  ["dimension", ["template-tag", $tn]]
+                                else
+                                  ["variable", ["template-tag", $tn]]
+                                end
+                              )
+                            }
+                        ]
+                      }
+                  end
+              )
+          )
+      elif (.ordered_cards | type) == "array" then
+        (.ordered_cards) as $dcs
+        | .ordered_cards = (
+            $dcs
+            | map(
+                . as $dc
+                | if ($dc.card | type) != "object"
+                     or ($dc.card.dataset_query | type) != "object"
+                     or ($dc.card.dataset_query.native | type) != "object" then
+                    $dc
+                  elif (($dc.card.dataset_query.native["template-tags"] // {}) | type) != "object" then
+                    $dc
+                  else
+                    ($dc.card.dataset_query.native["template-tags"]) as $tags
+                    | ($tags | keys) as $tagKeys
+                    | $dc + {
+                        "parameter_mappings": [
+                          $params[] as $p
+                          | ($p.slug // "") as $raw
+                          | (if $raw == "" then empty elif ($raw | endswith("_filter")) then ($raw | sub("_filter$"; "")) else $raw end) as $tn
+                          | select(($tagKeys | index($tn)) != null)
+                          | ($tags[$tn].type // "") as $ttype
+                          | {
+                              parameter_id: $p.id,
+                              card_id: $dc.card_id,
+                              target: (
+                                if $ttype == "dimension" then
+                                  ["dimension", ["template-tag", $tn]]
+                                else
+                                  ["variable", ["template-tag", $tn]]
+                                end
+                              )
+                            }
+                        ]
+                      }
+                  end
+              )
+          )
+      else . end
+  ')"
+
+  if ! api_request PUT "/api/dashboard/${dashboard_id}" "${repaired}" >/dev/null; then
+    log_info "WARN: repair PUT /api/dashboard/${dashboard_id} failed (check Metabase logs)"
+  fi
+}
+
 authenticate() {
   SESSION_TOKEN="$(curl -sS -X POST "${METABASE_URL}/api/session" \
     -H "Content-Type: application/json" \
@@ -490,7 +621,10 @@ create_dashboard() {
       local col="$(echo "$parsed_json" | jq -r ".cards[$i].col // 0")"
       
       local mappings
-      mappings="$(echo "$parsed_json" | jq -c --argjson cardIndex "$i" --argjson dashParams "${resolved_parameters_json}" '
+      mappings="$(echo "$parsed_json" | jq -c \
+        --argjson cardIndex "$i" \
+        --argjson dashParams "${resolved_parameters_json}" \
+        --argjson cardDbId "${card_id}" '
         (.cards[$cardIndex].dataset_query.native["template-tags"] // {}) as $cardTemplateTags
         | ($cardTemplateTags | keys) as $cardTags
         | [
@@ -505,9 +639,9 @@ create_dashboard() {
             | if (($cardTags | index($tagName)) != null) then
                 ($cardTemplateTags[$tagName].type // "") as $ttype
                 | if $ttype == "dimension" then
-                    { parameter_id: $param.id, target: ["dimension", ["template-tag", $tagName]] }
+                    { parameter_id: $param.id, card_id: $cardDbId, target: ["dimension", ["template-tag", $tagName]] }
                   else
-                    { parameter_id: $param.id, target: ["variable", ["template-tag", $tagName]] }
+                    { parameter_id: $param.id, card_id: $cardDbId, target: ["variable", ["template-tag", $tagName]] }
                   end
               else
                 empty
@@ -528,6 +662,8 @@ create_dashboard() {
         '{
           id: ($dashcardId | tonumber),
           card_id: ($cardId | tonumber),
+          dashboard_tab_id: null,
+          action_id: null,
           size_x: ($sizeX | tonumber),
           size_y: ($sizeY | tonumber),
           row: ($row | tonumber),
@@ -543,8 +679,10 @@ create_dashboard() {
 
   if [ "$num_cards" -gt 0 ]; then
     local cards_payload
-    cards_payload="$(jq -n --arg cards "${cards}" '{cards: ($cards | fromjson)}')"
+    cards_payload="$(jq -n --arg cards "${cards}" '{ordered_tabs: [], cards: ($cards | fromjson)}')"
     api_request PUT "/api/dashboard/${dashboard_id}/cards" "${cards_payload}" >/dev/null
+
+    repair_dashboard_parameter_links_if_needed "${dashboard_id}"
 
     # Полное тело как после GET (уже с parameter_mappings), с auto_apply_filters — обходит сброс при PUT …/cards в MB 0.48+.
     local dash_after fix_payload
@@ -553,6 +691,8 @@ create_dashboard() {
     if ! api_request PUT "/api/dashboard/${dashboard_id}" "${fix_payload}" >/dev/null; then
       log_info "WARN: PUT /api/dashboard/${dashboard_id} after dashcards failed (filters may need Apply in UI)"
     fi
+    # PUT целого дашборда иногда сбрасывает связи фильтров — повторная проверка/ремонт.
+    repair_dashboard_parameter_links_if_needed "${dashboard_id}"
   fi
 
   printf '%s' "${dashboard_id}"

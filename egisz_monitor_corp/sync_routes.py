@@ -6,6 +6,9 @@ import threading
 from pathlib import Path
 from typing import Any, Callable
 
+from egisz_monitor_corp.etl import EtlCancelledError
+from egisz_monitor_corp.pg_warehouse import PipelineLockBusyError
+
 _state_lock = threading.Lock()
 _state: dict[str, Any] = {
     "running": False,
@@ -16,6 +19,51 @@ _state: dict[str, Any] = {
     # True после первого успешного try_start_sync в жизни процесса (до рестарта воркера).
     "sync_attempted": False,
 }
+
+_cancel_evt = threading.Event()
+
+_SYNC_FAILED_WATERMARK_NOTE_RU = (
+    "last_log_id двигается по пакетам журнала; last_egmid — после полного успешного sync. "
+    "При обрыве LOGID часто впереди EGMID."
+)
+
+
+def _build_sync_failed_progress(
+    cfg: Any | None,
+    *,
+    extra_diag: str | None = None,
+) -> dict[str, Any]:
+    """Фаза sync_failed + снимок etl_state для UI (асимметрия курсоров при сбое)."""
+    progress: dict[str, Any] = {
+        "phase": "sync_failed",
+        "watermark_note": _SYNC_FAILED_WATERMARK_NOTE_RU,
+    }
+    if extra_diag:
+        progress["diag_error"] = extra_diag[:500]
+    if cfg is None:
+        return progress
+    try:
+        from egisz_monitor_corp.pg_warehouse import connect_pg, fetch_etl_watermark_row
+
+        pg = connect_pg(cfg.postgres)
+        try:
+            row = fetch_etl_watermark_row(pg, cfg.etl.pipeline_name)
+            if row:
+                progress["cursor_log_id"] = row["last_log_id"]
+                progress["messages_cursor_egmid"] = row["last_egmid"]
+                progress["source_max_egmid"] = row["source_max_egmid"]
+            else:
+                miss = "etl_state: нет строки для пайплайна"
+                progress["diag_error"] = (
+                    f"{progress['diag_error']} · {miss}" if progress.get("diag_error") else miss
+                )
+        finally:
+            pg.close()
+    except Exception as e2:  # pragma: no cover - сеть/PG при диагностике
+        tail = str(e2)[:400]
+        prev = progress.get("diag_error")
+        progress["diag_error"] = f"{prev + ' · ' if prev else ''}PG: {tail}"
+    return progress
 
 
 def _run_sync_job(config_path: str, merged_dict: dict[str, Any] | None = None) -> None:
@@ -29,13 +77,17 @@ def _run_sync_job(config_path: str, merged_dict: dict[str, Any] | None = None) -
 
     log("Синхронизация: фоновый поток стартовал; загрузка модулей и конфигурации…")
     boot_progress("pipeline_bootstrap")
+    cfg: Any = None
     try:
         import os
 
         os.environ["EGISZ_MONITOR_CONFIG"] = config_path
         from egisz_monitor_corp.config_loader import load_corp_config, parse_corp_config_dict
         from egisz_monitor_corp.etl import run_sync
-        from egisz_monitor_corp.pg_warehouse import PipelineLockBusyError
+
+        def cancel_if_requested() -> None:
+            if _cancel_evt.is_set():
+                raise EtlCancelledError("Остановка по запросу оператора.")
 
         if merged_dict is not None:
             cfg = parse_corp_config_dict(merged_dict)
@@ -53,6 +105,7 @@ def _run_sync_job(config_path: str, merged_dict: dict[str, Any] | None = None) -
             dry_run=False,
             progress_cb=log,
             progress_detail_cb=on_progress_detail,
+            cancel_check=cancel_if_requested,
         )
         with _state_lock:
             _state["last_stats"] = {
@@ -76,14 +129,35 @@ def _run_sync_job(config_path: str, merged_dict: dict[str, Any] | None = None) -
                 "Синхронизация не выполнена: параллельный sync уже идёт "
                 "(например, CronJob egisz-monitor-sync). Подождите 1–2 минуты и повторите."
             )
+            _state["progress"] = _build_sync_failed_progress(cfg)
+    except EtlCancelledError:
+        with _state_lock:
+            _state["error"] = None
+            _state["last_stats"] = None
+            _state["message"] = (
+                "Синхронизация остановлена по запросу. Прогресс мог сохраниться частично; "
+                "курсоры в PostgreSQL — по последнему успешному коммиту."
+            )
+            _state["progress"] = _build_sync_failed_progress(cfg, extra_diag="остановка оператором")
     except Exception as e:  # pragma: no cover
         with _state_lock:
             _state["error"] = str(e)
             _state["last_stats"] = None
             _state["message"] = f"Синхронизация завершилась с ошибкой: {e}"
+            _state["progress"] = _build_sync_failed_progress(cfg, extra_diag=str(e))
     finally:
         with _state_lock:
             _state["running"] = False
+        _cancel_evt.clear()
+
+
+def try_request_cancel_sync() -> tuple[bool, str]:
+    """Запрос кооперативной остановки UI-синка (флаг проверяется внутри run_sync)."""
+    with _state_lock:
+        if not _state["running"]:
+            return False, "Синхронизация не выполняется."
+    _cancel_evt.set()
+    return True, "Запрос на остановку принят; ETL завершит текущий шаг и выйдет."
 
 
 def try_start_sync(
@@ -98,6 +172,7 @@ def try_start_sync(
         _state["message"] = "Запуск..."
         _state["last_stats"] = None
         _state["progress"] = None
+        _cancel_evt.clear()
     # daemon=False: фоновый ETL — долгоживущий поток; при daemon=True он обрывается вместе с процессом
     # при жёстком завершении воркера. Не-daemon даёт шанс завершить поток при обычном shutdown интерпретатора.
     t = threading.Thread(
@@ -159,6 +234,11 @@ def register_sync_routes(
                 ), 400
 
         ok, msg = try_start_sync(str(p), merged)
+        return jsonify({"ok": ok, "message": msg})
+
+    @app.post("/api/sync/stop")
+    def api_sync_stop():  # type: ignore[no-untyped-def]
+        ok, msg = try_request_cancel_sync()
         return jsonify({"ok": ok, "message": msg})
 
     @app.get("/api/sync/status")

@@ -90,8 +90,8 @@ jq -e '."has-user-setup"' /tmp/smoke_props.json >/dev/null || die "unexpected se
 step 10 "POST /api/card/:id/query — выполнение SQL карточки (результат как в UI)"
 CARD_ID="$(echo "${DEX}" | jq -r '(.dashcards // .ordered_cards // [])[0].card_id // empty')"
 [[ -n "${CARD_ID}" && "${CARD_ID}" != "null" ]] || die "no card_id on first dashcard Управленческого дашборда"
-# Только параметры со slug «period»: у карточек 09 шаблон {{period}}, остальные id дают Metabase «нет шаблонного тега … nil».
-QBODY="$(echo "${DEX}" | jq -c --argjson did "${EXEC_ID}" '{ignore_cache: false, dashboard_id: $did, parameters: [.parameters[]? | select((.slug // "") == "period") | {id: .id, value: (.default // 30)}]}')"
+# Карточки 09 используют {{dwh_date}} и др.; без значения по умолчанию у фильтра передаём пустой список — запрос как в UI до выбора даты.
+QBODY="$(echo "${DEX}" | jq -c --argjson did "${EXEC_ID}" '{ignore_cache: false, dashboard_id: $did, parameters: []}')"
 HTTP_Q="$(curl -sS -o /tmp/smoke_card_query.json -w '%{http_code}' -X POST "${MB_URL}/api/card/${CARD_ID}/query" \
   "${HDR[@]}" -d "${QBODY}")"
 [[ "${HTTP_Q}" =~ ^2 ]] || { cat /tmp/smoke_card_query.json >&2 || true; die "card query HTTP ${HTTP_Q}"; }

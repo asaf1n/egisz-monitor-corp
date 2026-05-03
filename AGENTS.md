@@ -9,7 +9,7 @@
 | Путь | Назначение |
 |------|------------|
 | `pyproject.toml` | Пакет `egisz-monitor-corp`, зависимости; CLI: **`egisz-corp`** и **`egisz-monitor`** (оба → `egisz_monitor_corp.cli`) |
-| `start.ps1` | Локальный стек в K8s (**namespace `egisz-monitor`**): по умолчанию **`apply`** / **`start`** (без сброса БД Metabase); **`deploy`** — полная пересборка образов + DROP/CREATE БД Metabase; также `reset-deploy`, `build`, `apply-rebuild`, `restart-*`, `reset-metabase`, `verify`, `web`, `forward`, `metabase-provision-local`, `test` — см. **`docs/KUBERNETES_LOCAL.md`** |
+| `start.ps1` | Локальный стек в K8s (**namespace `egisz-monitor`**): по умолчанию **`apply`** / **`start`** (без сброса БД Metabase); **`deploy`** — полная пересборка образов + DROP/CREATE БД Metabase; также `reset-deploy`, `build`, `apply-rebuild`, `restart-*`, `reset-metabase`, `verify` (витрина + дашборды Metabase **01–11**), `web`, `forward`, `metabase-provision-local`, `test` — см. **`docs/KUBERNETES_LOCAL.md`**. Скрипт сохраняется в **UTF-8 с BOM** для корректной кириллицы в Windows PowerShell. |
 | `README.md` | Обзор продукта, ETL, маппинг полей, таблица дашбордов Metabase |
 | `.cursorrules` | Парсинг SOAP/XML, витрина, отчёты, критичные статусы и сигналы для мониторинга интеграции |
 | `AGENTS.md` | Этот файл |
@@ -73,7 +73,7 @@
 | `k8s/postgres/` | StatefulSet, сервисы, Job **`egisz-reports-schema-init`** (DDL по `sql/schema_apply_order.txt`), Job’ы Metabase app DB и (при необходимости) Airflow metadata |
 | `k8s/metabase.yaml` | Deployment Metabase (образ `egisz-monitor-metabase:k8s-v16`); `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75 -XX:+UseG1GC`, startupProbe (240s), `METABASE_FORCE_PROVISION=auto` (идемпотентный provision — dashboard ID не меняются) |
 | `k8s/conf-ui.yaml` | Config UI (gunicorn 1×16t + `sync_routes`); non-root UID 10001, `/healthz`, RollingUpdate `maxUnavailable=0` |
-| `k8s/etl-cron.yaml` | **CronJob `egisz-monitor-sync`**: `*/15 * * * *`, тот же образ `egisz-conf-ui:sync-web`, CLI `egisz-monitor sync`, `concurrencyPolicy: Forbid` + advisory lock в Postgres против гонки с UI-кнопкой |
+| `k8s/etl-cron.yaml` | **CronJob `egisz-monitor-sync`**: `*/15 * * * *`, тот же образ `egisz-conf-ui:sync-web`, CLI `egisz-monitor sync`, `concurrencyPolicy: Forbid` + advisory lock в Postgres против гонки с UI-кнопкой. **`spec.suspend` / `schedule` / `timeZone`** выравниваются с **`auto_sync`** в YAML (POST /save в Config UI, `egisz-monitor k8s-reconcile-cronjob`, шаг `start.ps1` после apply). В манифесте стартово `suspend: true`. |
 | `k8s/local/egisz_monitor.yaml` | Пример фрагмента конфига для секрета conf-ui |
 | `k8s/airflow/` | Helm/values для DAG `egisz_monitor_firebird_to_postgres` |
 | `airflow/dags/egisz_monitor_etl_dag.py` | Вызов `run_sync` |
@@ -91,7 +91,7 @@
 | `sql/005_healthcheck.sql` | Витрины `v_health_by_clinic` / `v_health_signals` / `v_health_proxy_db` + UI-обёртки `*_ui` (русские подписи через `dim_column_display_labels`). Входит в `schema_apply_order.txt`; применяется ETL `run_sync` и Job `egisz-reports-schema-init`. |
 | `egisz_monitor_corp/pg_warehouse.py` → `fetch_healthcheck_snapshot(con)` | Чтение трёх view + агрегаты для UI/JSON; `statement_timeout = 10s` на каждый блок. |
 | `GET /api/healthcheck` (`egisz_monitor_corp/config_app.py`) | JSON-снимок `{signals, by_clinic_top, proxy_db, level_summary}`. При недоступной PG — `ok: false` и `errors[]` (graceful). |
-| Config UI: вкладки **Snapshot / Healthcheck** | Snapshot — текущие `EGMID/LOGID/MODIFYDATE` (как раньше). Healthcheck — сигналы, top-3 клиники, прокси-БД (опрос `/api/healthcheck` каждые 30 c). |
+| Config UI: вкладки **Snapshot / Healthcheck** | Snapshot — текущие `EGMID/LOGID/MODIFYDATE` (как раньше). Healthcheck — сигналы, top-3 клиники, прокси-БД (опрос `/api/healthcheck` каждые 30 c). **Сохранить в YAML** также патчит CronJob `egisz-monitor-sync` по `auto_sync` (RBAC SA `conf-ui`). |
 | Дашборд `metabase_dashboards/11_healthcheck.json` | «11 Healthcheck интеграции»: сигналы, heatmap клиник × дни, age-buckets очереди, тренд ошибок парсинга по **уникальным документам** (`v_stg_parse_errors_by_document`), сводка прокси-БД. |
 | Полный аудит | `docs/INTEGRATION_AUDIT.md` (3 фокуса: техника/бизнес/healthcheck). |
 | Операторам Config UI (лог, прогресс, курсоры, Metabase vs веб) | `README.md` → [Синхронизация Firebird → PostgreSQL](README.md#синхронизация-firebird--postgresql) |

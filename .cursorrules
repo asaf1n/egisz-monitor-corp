@@ -124,7 +124,7 @@
 
 `run_sync` берёт session-level **`pg_try_advisory_lock(hash(pipeline_name))`** в начале и освобождает в `finally`. Это устраняет гонку между:
 
-- **CronJob `egisz-monitor-sync`** (`k8s/etl-cron.yaml`, по умолчанию `suspend: true`; расписание `*/15 * * * *`, `concurrencyPolicy: Forbid`, тот же образ что conf-ui),
+- **CronJob `egisz-monitor-sync`** (`k8s/etl-cron.yaml`; `spec.suspend`/`schedule`/`timeZone` синхронизируются с **`auto_sync`** при сохранении YAML в UI, `egisz-monitor k8s-reconcile-cronjob` и `start.ps1` apply; стартово в манифесте `suspend: true`), расписание `*/15 * * * *`, `concurrencyPolicy: Forbid`, тот же образ что conf-ui,
 - **UI-кнопкой «Синхронизировать сейчас»** в Config UI (`sync_routes._state` единый процесс под gunicorn).
 
 Если оба стартуют одновременно — второй получает `PipelineLockBusyError`:
@@ -144,3 +144,13 @@ Lock — **session-level**: автоматически снимается при
 - `_refresh_outbound_documents(cfg, pg, …)` (снимок `stg_egisz_outbound_documents`).
 
 Юнит-тесты — `tests/test_etl_helpers.py` (без живого Firebird/Postgres, с mock-fetch и FakeConn для advisory lock).
+
+---
+
+## Ответ агента после правок Config UI
+
+Если менялись **`egisz_monitor_corp/config_app.py`**, **`sync_routes.py`** или слой Docker/`Dockerfile` для conf-ui — **в конце ответа пользователю** добавляй одну строку (из корня репозитория, PowerShell):
+
+**`.\start.ps1 -Action apply`**
+
+(пересборка образа conf-ui, apply манифестов, rollout). При необходимости принудительной пересборки образа без кэша: **`.\start.ps1 -Action apply-rebuild`**. Локально без k8s — напомни про **`CONFIG_UI_RELOAD=1`** / перезапуск процесса Flask.

@@ -148,7 +148,14 @@ if [ -f "${EXEC_JSON}" ]; then
     log "FAIL: \"${EXEC_NAME}\" has ${GOT_CARDS} dashcards, image JSON expects ${EXP_CARDS} — пересоберите образ Metabase (metabase_dashboards внутри образа) и перезапустите deployment."
     exit 1
   fi
-  log "Dashboard \"${EXEC_NAME}\" OK (${GOT_CARDS} dashcards)"
+  MAPS="$(echo "${DASH_JSON}" | jq '([ (.dashcards // .ordered_cards // [])[]? | (.parameter_mappings // []) | length ] | add) // 0')"
+  MAPS="$(echo "${MAPS}" | tr -d '[:space:]')"
+  MAPS="${MAPS:-0}"
+  if ! [ "${MAPS}" -gt 0 ] 2>/dev/null; then
+    log "FAIL: \"${EXEC_NAME}\": нет parameter_mappings на карточках (нативные фильтры не связаны). Перезалейте дашборды: METABASE_FORCE_PROVISION=true или reset-metabase."
+    exit 1
+  fi
+  log "Dashboard \"${EXEC_NAME}\" OK (${GOT_CARDS} dashcards, parameter_mappings=${MAPS})"
 fi
 
 if [ -x /app/smoke-metabase-ui.sh ]; then

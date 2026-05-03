@@ -172,6 +172,29 @@ def set_last_egmid(con, pipeline: str, last_egmid: int) -> None:  # type: ignore
         )
 
 
+def fetch_etl_watermark_row(con, pipeline: str) -> dict[str, int] | None:  # type: ignore[no-untyped-def]
+    """Сырые водяные знаки etl_state для диагностики (без MAX по витрине). Нет строки — None."""
+    with con.cursor() as cur:
+        cur.execute(
+            """
+            SELECT last_log_id, COALESCE(last_egmid, 0), COALESCE(source_max_egmid, 0)
+            FROM etl_state
+            WHERE pipeline = %s
+            LIMIT 1
+            """,
+            (pipeline,),
+        )
+        row = cur.fetchone()
+    if not row:
+        return None
+    lid_raw, eg_raw, src_raw = row
+    return {
+        "last_log_id": int(lid_raw) if lid_raw is not None else 0,
+        "last_egmid": int(eg_raw) if eg_raw is not None else 0,
+        "source_max_egmid": int(src_raw) if src_raw is not None else 0,
+    }
+
+
 def fetch_etl_source_peaks_from_pg(con, pipeline: str) -> dict[str, Any]:  # type: ignore[no-untyped-def]
     """Последние source_max_* из etl_state (после успешного ETL), без опроса Firebird."""
     with con.cursor() as cur:

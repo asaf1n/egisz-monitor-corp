@@ -3,11 +3,11 @@
 # Requires: Docker, kubectl; optional: kind (https://kind.sigs.k8s.io/) for auto cluster create.
 #
 # deploy (-Action deploy): kind cluster egisz-local if needed, docker build (conf-ui + Metabase), load images,
-# apply manifests, schema for egisz_reports, airflow DB; DROP/CREATE �� ���������� Metabase (metabase) + provision ���������;
+# apply manifests, schema for egisz_reports, airflow DB; DROP/CREATE приложной БД Metabase (metabase) + provision дашбордов;
 # rollout restart; verify. Does not clear Firebird / ETL log export state.
-# �� ��������� ��� ����������: ��� apply � ��� ������ �� Metabase; ���������� ������ Config UI + kubectl apply ���������� ����������/��������.
+# По умолчанию без полного deploy: только образ Config UI пересобирается, БД Metabase не сбрасывается; kubectl apply сохраняет данные витрины и приложения Metabase.
 # apply: Config UI (Flask) + kubectl apply; does not reset Metabase app DB. Always rollout restart conf-ui and Metabase. Metabase DB reset only on deploy / reset-deploy / reset-metabase.
-# apply-rebuild: �� ��, ��� apply, �� docker build conf-ui ������ � --no-cache (������� �����).
+# apply-rebuild: как apply, но docker build conf-ui всегда с --no-cache (принудительный rebuild образа).
 
 param(
     [ValidateSet("deploy", "reset-deploy", "reset-metabase", "build", "apply", "apply-rebuild", "start", "restart-metabase", "restart-conf-ui", "restart-web", "status", "verify", "web", "forward", "stop-forward", "metabase-provision-local", "test", "help")]
@@ -17,32 +17,32 @@ param(
     [switch]$SkipPostgresPortForward,
     # With -Action web | forward | deploy | apply | apply-rebuild | start | reset-deploy | verify: pass -BackgroundPortForward:$false to open separate PowerShell windows for each kubectl port-forward instead of hidden background kubectl.
     [switch]$BackgroundPortForward,
-    # With deploy / apply / apply-rebuild / start / reset-deploy / verify: also forward Postgres to localhost:5432 (��� -Action web ��� ConfAndMetabaseOnly). �� ��������� ������ 8080+3000, ����� �� ������������� � ��������� Postgres.
+    # With deploy / apply / apply-rebuild / start / reset-deploy / verify: also forward Postgres to localhost:5432 (для -Action web без ConfAndMetabaseOnly). По умолчанию только 8080+3000, чтобы не занимать localhost:5432 у Postgres на хосте.
     [switch]$IncludePostgresPortForward,
-    # With -Action build or apply: docker build --no-cache (build: conf-ui + Metabase; apply: conf-ui only). apply-rebuild ������ --no-cache ��� conf-ui.
+    # With -Action build or apply: docker build --no-cache (build: conf-ui + Metabase; apply: conf-ui only). apply-rebuild всегда с --no-cache для conf-ui.
     [switch]$DockerNoCache
 )
 
 $ErrorActionPreference = "Stop"
-# PS 7.3+ ��� $ErrorActionPreference=Stop ������������ stderr �������� ������ (docker build,
-# kubectl exec, etc.) � terminating error, ���� ���� exit-code = 0. ���������������� buildkit
-# ����� �#0 building with desktop-linux� � stderr � ��� �������. ��������� ������: ���� ���
-# ��������� $LASTEXITCODE ����� ������ �������� �������.
+# PS 7.3+ при $ErrorActionPreference=Stop превращает stderr нативных команд (docker build,
+# kubectl exec, etc.) в terminating error, даже если exit-code = 0. Типичный случай: buildkit
+# пишет «#0 building with desktop-linux» в stderr при успехе. Обход: Invoke-Native и проверка
+# $LASTEXITCODE после каждой нативной команды.
 if ($PSVersionTable.PSVersion.Major -ge 7) {
     $PSNativeCommandUseErrorActionPreference = $false
 }
 $Root = $PSScriptRoot
 Set-Location $Root
 
-# ���������� ������ �������� ������� (docker, kubectl, kind): ��������� ��������� stderr
-# � RemoteException �� PS 5.1 + $ErrorActionPreference=Stop. ���������� exit-code � $LASTEXITCODE.
-# �������������: Invoke-Native docker build @nc -f docker/web/Dockerfile -t egisz-conf-ui:latest $Root
+# Обёртка для нативных команд (docker, kubectl, kind): не даём stderr превратиться
+# в RemoteException на PS 5.1 + $ErrorActionPreference=Stop. Проверяйте exit-code в $LASTEXITCODE.
+# Пример: Invoke-Native docker build @nc -f docker/web/Dockerfile -t egisz-conf-ui:latest $Root
 function Invoke-Native {
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        # 2>&1 ���������� stderr � �������� pipeline; ErrorRecord-������� �������� � ������� �����
-        # ToString() � ����� Write-Host ���������� �System.Management.Automation.RemoteException�.
+        # 2>&1 смешивает stderr с объектами pipeline; ErrorRecord превращается в строку через
+        # ToString() и иначе Write-Host показывает «System.Management.Automation.RemoteException».
         & $args[0] $args[1..($args.Count - 1)] 2>&1 | ForEach-Object {
             if ($_ -is [System.Management.Automation.ErrorRecord]) {
                 [Console]::Error.WriteLine($_.Exception.Message)
@@ -102,21 +102,21 @@ function Show-Help {
     Write-Host @'
 egisz-monitor-corp\start.ps1
 
-  apply | start (default)   ��� ���������� = ���� �����: kind (if needed) + docker build ������ Config UI + kubectl apply + �����/������� �� �����������; �� Metabase � Postgres �� ������������; rollout Metabase+conf-ui + smoke + verify + port-forward 8080/3000 (+ �������). ����� start �� �� �����.
-  deploy            kind + docker build (conf-ui + Metabase) + kubectl apply + DB schema + DROP/CREATE �� Metabase (metabase) + provision ��������� + restart + verify + port-forward 8080/3000 + browser � ������������ ��� �������� Metabase ��� ��������� ������� ��������� ��� �������������
-  reset-deploy      remove legacy Compose Postgres volume if present; delete namespace egisz-monitor; docker build --no-cache; then ��� deploy (������� ����� �� Metabase) + smoke + verify + port-forward
-  reset-metabase    ������ DROP/CREATE �� Metabase (��� ������� deploy). ������� egisz_reports �� ���������. ���� ������ JSON ���������: ������� .\start.ps1 -Action build
+  apply | start (default)   Одно и то же: kind при необходимости + docker build только Config UI + kubectl apply + схема/джобы по манифестам; БД Metabase и витрина Postgres не сбрасываются; rollout Metabase+conf-ui + smoke + verify + port-forward 8080/3000 (+ Postgres по -IncludePostgresPortForward). Имя start не меняет цепочку.
+  deploy            kind + docker build (conf-ui + Metabase) + kubectl apply + DB schema + DROP/CREATE БД Metabase (metabase) + provision дашбордов + restart + verify + port-forward 8080/3000 + браузер — полный подъём или сброс приложения Metabase; Firebird и данные egisz_reports на хосте не трогаются скриптом
+  reset-deploy      remove legacy Compose Postgres volume if present; delete namespace egisz-monitor; docker build --no-cache; затем как deploy (чистый namespace и БД Metabase) + smoke + verify + port-forward
+  reset-metabase    только DROP/CREATE БД приложения Metabase (без полного deploy). Витрина egisz_reports не затрагивается. После смены JSON дашбордов: .\start.ps1 -Action build
   build             docker build only (K8s images); use -DockerNoCache for --no-cache
-  apply-rebuild     ��� apply, �� conf-ui ������ � docker build --no-cache (���������� apply -DockerNoCache)
-  restart-metabase  ������ kubectl rollout restart deployment/metabase + �������� Ready (����� ��� � ��������; ����� build � apply ��� ���� action).
-  restart-conf-ui   ������ rollout restart deployment/conf-ui + �������� Ready.
-  restart-web       rollout restart Metabase � conf-ui + �������� ����� (��� docker build � ��� apply ����������).
-  metabase-provision-local  docker build Metabase + setup-dashboards.sh � Metabase �� localhost:3000 (��. metabase/provision-local.ps1 - ���������)
+  apply-rebuild     как apply, но conf-ui всегда с docker build --no-cache (эквивалент apply -DockerNoCache)
+  restart-metabase  только kubectl rollout restart deployment/metabase + ожидание Ready (образ уже в кластере; после build/apply или отдельным action).
+  restart-conf-ui   только rollout restart deployment/conf-ui + ожидание Ready.
+  restart-web       rollout restart Metabase и conf-ui + ожидание Ready (без docker build и без kubectl apply манифестов).
+  metabase-provision-local  docker build Metabase + setup-dashboards.sh к Metabase на localhost:3000 (см. metabase/provision-local.ps1)
   status            kubectl get pods,svc -n egisz-monitor
-  web | forward     port-forward only (������ �� �������). ����� ������ UI: .\start.ps1 ��� -Action apply (��� build + deploy ��� ����� Metabase)
+  web | forward     только port-forward (стек уже развёрнут). Чтобы поднять UI с нуля: .\start.ps1 или .\start.ps1 -Action apply (или build + deploy для нового образа Metabase)
   stop-forward      stop background kubectl port-forwards (saved PIDs from web/forward or deploy/apply/reset-deploy)
   test              pip install -e ".[dev]" && pytest
-  verify            ������ �������� � ��������: Postgres (�������) + Metabase (�������� � ����� ������ ���������); kubectl exec � ��� metabase (��. metabase/verify-corp-stack.sh)
+  verify            проверка витрины и Metabase: Postgres + дашборды 01-11 в корне Personal collection; kubectl exec в под metabase (см. metabase/verify-corp-stack.sh)
   help
 
   SkipPostgresPortForward   only with web/forward: omit Postgres forward if port 5432 is busy on the host
@@ -124,17 +124,17 @@ egisz-monitor-corp\start.ps1
 
 Parameters:
   -SkipKindCluster         do not run kind create; kubectl cluster-info must work
-  -DockerNoCache           with -Action build or apply: pass --no-cache to docker build (conf-ui; ��� build ��� � Metabase). apply-rebuild ������ ��� ���� ��� conf-ui.
-  -IncludePostgresPortForward   with deploy / apply / apply-rebuild / start / reset-deploy / verify: also forward Postgres to localhost:5432 (�� ��������� ������ 8080+3000)
+  -DockerNoCache           with -Action build or apply: pass --no-cache to docker build (conf-ui; для build также Metabase). apply-rebuild всегда без кэша для conf-ui.
+  -IncludePostgresPortForward   with deploy / apply / apply-rebuild / start / reset-deploy / verify: also forward Postgres to localhost:5432 (по умолчанию только 8080+3000)
   (deploy/apply/start/apply-rebuild/reset-deploy: kubectl port-forward 8080+3000 on localhost before smoke/verify; + Postgres: -IncludePostgresPortForward or .\start.ps1 -Action web. Foreground kubectl windows: -BackgroundPortForward:$false)
 
-����� ����������� Docker Desktop ���� � namespace ����� ����������� ����; ������ ��������� .\start.ps1 ��� port-forward �� localhost. �����������: ����������� ������� Windows � ������ .\start.ps1 ��� ����� � �������, ���� ����� �������������� ������� ������.
+На Docker Desktop K8s сервисы иногда доступны по LoadBalancer без port-forward; для localhost надёжнее .\start.ps1 (или -Action web). Альтернатива: отдельные окна PowerShell с kubectl port-forward вручную, если нужны видимые логи.
 
 K8s from your PC (Docker Desktop / kind): after deploy/apply/start, start.ps1 runs port-forward so http://127.0.0.1:8080 and :3000 work. Web Services use LoadBalancer where supported (Docker Desktop often exposes :8080 / :3000 on localhost directly).
 
 Generated each deploy/apply (under k8s\):
   Postgres: database egisz_reports, user egisz, password egisz
-  Metabase: admin@egisz.local / egisz  (MB_PASSWORD_COMPLEXITY=weak in k8s/metabase.yaml)
+  Metabase: admin@egisz.local / egisz  (MB_PASSWORD_COMPLEXITY=weak in k8s/metabase.yaml); дашборды 01-11 в Personal collection после provision
   Web config file: k8s\local\egisz_monitor.yaml (Firebird: host.docker.internal)
 
 Edit k8s\local\egisz_monitor.yaml for your Firebird alias and credentials on Windows.
@@ -166,7 +166,7 @@ function Invoke-DockerBuild {
     }
     Invoke-Native docker build @nc -f metabase/Dockerfile -t egisz-monitor-metabase:latest $Root
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    # :k8s-v16 + :local = ��� �� digest, ��� :latest. � k8s/metabase.yaml ����� � :k8s-v16 (bump v16� ��� ����� ��������/���������), ����� kubelet Docker Desktop ������ ������ digest ��� ����� ����.
+    # :k8s-v16 + :local — явные теги вместо digest и вместо :latest. В k8s/metabase.yaml образ с :k8s-v16 (повышайте v16 при смене дашбордов/скриптов), иначе kubelet Docker Desktop может держать старый digest без смены тега.
     Invoke-Native docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:k8s-v16
     if ($LASTEXITCODE -ne 0) { exit 1 }
     Invoke-Native docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:local
@@ -251,7 +251,7 @@ stringData:
   POSTGRES_DB: "egisz_reports"
 '@
     $mb = @'
-# Metabase UI / API ����������� (��������� � k8s/metabase-admin-secret.example.yaml).
+# Metabase UI / API учётные данные (шаблон в k8s/metabase-admin-secret.example.yaml).
 apiVersion: v1
 kind: Secret
 metadata:
@@ -326,9 +326,9 @@ function Publish-ConfUiImageToDockerDesktopK8s {
 
 function Invoke-ResetMetabaseApplicationDatabase {
     <#
-      Metabase ������ UI/�������� � Postgres (�� metabase). ���������� deployment �� ���������� � �
-      ��� �������� Metabase ����� �������� ��� �� (������� egisz_reports �� �������������).
-      -AsDeployStep: ���������� �� deploy/reset-deploy (��� ������� ������� � ��� ���������� rollout status �����).
+      Metabase хранит UI и метаданные в Postgres (БД metabase). Перед DROP базы масштабируем deployment до 0,
+      иначе активные сессии не дадут удалить БД (витрина egisz_reports не затрагивается).
+      -AsDeployStep: вызывается из deploy/reset-deploy (без отдельного баннера и без полного rollout status здесь).
     #>
     param(
         [switch]$AsDeployStep
@@ -338,7 +338,7 @@ function Invoke-ResetMetabaseApplicationDatabase {
         Write-NestedSiblingMonitorWarning
         Write-Banner "reset-metabase (application DB only)" Cyan
     } else {
-        Write-Host "`[kubectl] ����� �� ���������� Metabase (DROP/CREATE metabase � Postgres)..." -ForegroundColor Cyan
+        Write-Host "`[kubectl] Сброс приложной БД Metabase (DROP/CREATE metabase в Postgres)..." -ForegroundColor Cyan
     }
     kubectl -n $ns get deploy metabase -o name 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) {
@@ -404,7 +404,7 @@ CREATE DATABASE metabase OWNER
         if ($LASTEXITCODE -ne 0) {
             Write-Host "WARN: rollout status timed out; check: kubectl -n $ns get pods -l app.kubernetes.io/name=metabase" -ForegroundColor Yellow
         }
-        Write-Host 'Done. Metabase UI: http://127.0.0.1:3000/ - dashboards 01-10 in Personal collection after provision (1-5 min).' -ForegroundColor Green
+        Write-Host 'Done. Metabase UI: http://127.0.0.1:3000/ - dashboards 01-11 in Personal collection after provision (1-5 min).' -ForegroundColor Green
         Write-Host "Logs: kubectl -n $ns logs deploy/metabase --tail=80" -ForegroundColor Gray
     }
 }
@@ -450,9 +450,9 @@ function Wait-CorpConfUiRollout {
 }
 
 function Invoke-CorpRolloutRestartMetabaseAndConfUi {
-    # ����� docker build + kind load / docker-desktop ����� :local � conf-ui ��� �� ����, �� ��� ������ ����
-    # kubelet ����� ������� ������ ����. ���������� deployment (��� ��������� k8s) ����������� ����� � ����� ������� � provision.sh.
-    # �� ������� Firebird, etl_state � �������� ����� FB � ������ web-���� � namespace egisz-monitor.
+    # После docker build + kind load / docker-desktop тег :local у conf-ui может быть тем же, но другой digest —
+    # kubelet не всегда подтягивает слой. Принудительный rollout (стандартная практика k8s) подхватывает образ и запускает provision.sh.
+    # Не трогает Firebird, etl_state и файлы данных FB вне кластера — только web-службы в namespace egisz-monitor.
     param(
         [switch]$SkipMetabase
     )
@@ -460,33 +460,33 @@ function Invoke-CorpRolloutRestartMetabaseAndConfUi {
     if (-not $SkipMetabase) {
         kubectl -n $ns get deploy metabase -o name 2>$null | Out-Null
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "`[kubectl] rollout restart deployment/metabase (����� �����, ����������� ��� ������ ����)..." -ForegroundColor Cyan
+            Write-Host "`[kubectl] rollout restart deployment/metabase (новый слой образа, провижининг при старте пода)..." -ForegroundColor Cyan
             kubectl -n $ns rollout restart deployment/metabase
             if ($LASTEXITCODE -ne 0) { exit 1 }
         }
     }
     kubectl -n $ns get deploy conf-ui -o name 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "`[kubectl] rollout restart deployment/conf-ui (����� ����� Config UI)..." -ForegroundColor Cyan
+        Write-Host "`[kubectl] rollout restart deployment/conf-ui (новый образ Config UI)..." -ForegroundColor Cyan
         kubectl -n $ns rollout restart deployment/conf-ui
         if ($LASTEXITCODE -ne 0) { exit 1 }
     }
 }
 
 function Invoke-PostgresEnsureAppRole {
-    Write-Host "`[kubectl] Postgres: ���� egisz � �� �� Secret (��������� �role egisz does not exist� �� ������ ����)..." -ForegroundColor Cyan
+    Write-Host "`[kubectl] Postgres: роль egisz и права из Secret (устраняет «role egisz does not exist» на свежем томе)..." -ForegroundColor Cyan
     $pgPod = kubectl -n egisz-monitor get pods -l app.kubernetes.io/name=postgres -o jsonpath="{.items[0].metadata.name}" 2>$null
     if (-not $pgPod) {
-        Write-Host "ERROR: pod postgres � egisz-monitor �� ������." -ForegroundColor Red
+        Write-Host "ERROR: под postgres в egisz-monitor не найден." -ForegroundColor Red
         exit 1
     }
     $shPath = Join-Path $Root "k8s\postgres\ensure-postgres-app-role.sh"
     if (-not (Test-Path $shPath)) {
-        Write-Host "ERROR: ��� ����� $shPath" -ForegroundColor Red
+        Write-Host "ERROR: нет файла $shPath" -ForegroundColor Red
         exit 1
     }
-    # CRLF � .sh ��� � bash �invalid option name� � `set -o pipefail`. ����������� LF � ��� UTF-8 ��� BOM ����� stdin ������
-    # (���� ������ �� PowerShell 5.1 ����� ��� UTF-16 � ������ bash).
+    # CRLF в .sh даёт в bash «invalid option name» у `set -o pipefail`. Пишем временный файл с LF и без BOM перед stdin в bash
+    # (иначе поток из PowerShell 5.1 может уйти как UTF-16 и ломать bash).
     $tmpSh = Join-Path ([System.IO.Path]::GetTempPath()) ("egisz-ensure-role-{0}.sh" -f [guid]::NewGuid().ToString("n"))
     try {
         $shRaw = [System.IO.File]::ReadAllText($shPath)
@@ -499,7 +499,7 @@ function Invoke-PostgresEnsureAppRole {
             -RedirectStandardInput $tmpSh `
             -Wait -PassThru -NoNewWindow
         if ($null -eq $proc -or $proc.ExitCode -ne 0) {
-            Write-Host "ERROR: ensure-postgres-app-role.sh ���������� � �������." -ForegroundColor Red
+            Write-Host "ERROR: ensure-postgres-app-role.sh завершился с ошибкой." -ForegroundColor Red
             exit 1
         }
     } finally {
@@ -581,8 +581,50 @@ function Invoke-WebConfigSecret {
     if ($LASTEXITCODE -ne 0) { exit 1 }
 }
 
+function Invoke-ReconcileEtlCronjobFromLocalYaml {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ConfigPath
+    )
+    if (-not (Test-Path $ConfigPath)) {
+        Write-Host "WARN: CronJob reconcile skipped (file missing): $ConfigPath" -ForegroundColor Yellow
+        return
+    }
+    $pyPath = $null
+    $pyArgs = @('-m', 'egisz_monitor_corp', 'k8s-reconcile-cronjob')
+    $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+    if ($pythonCmd) {
+        $pyPath = $pythonCmd.Path
+    } else {
+        $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
+        if ($pyLauncher) {
+            $pyPath = $pyLauncher.Path
+            $pyArgs = @('-3', '-m', 'egisz_monitor_corp', 'k8s-reconcile-cronjob')
+        }
+    }
+    if (-not $pyPath) {
+        Write-Host "WARN: python/py not on PATH; CronJob not reconciled from YAML. Run: py -3 -m egisz_monitor_corp --config <path> k8s-reconcile-cronjob" -ForegroundColor Yellow
+        return
+    }
+    Write-Host "`[kubectl] Reconcile CronJob egisz-monitor-sync from auto_sync in local YAML..." -ForegroundColor Cyan
+    $prev = $env:EGISZ_MONITOR_CONFIG
+    $env:EGISZ_MONITOR_CONFIG = (Resolve-Path $ConfigPath).Path
+    $code = 1
+    try {
+        Push-Location $Root
+        & $pyPath @pyArgs
+        $code = $LASTEXITCODE
+    } finally {
+        Pop-Location
+        if ($null -ne $prev) { $env:EGISZ_MONITOR_CONFIG = $prev } else { Remove-Item Env:EGISZ_MONITOR_CONFIG -ErrorAction SilentlyContinue }
+    }
+    if ($code -ne 0) {
+        Write-Host "WARN: k8s-reconcile-cronjob exited $code (kubectl cluster / CronJob missing?)." -ForegroundColor Yellow
+    }
+}
+
 function Invoke-RemoveLegacyComposePostgresVolume {
-    # ����� ������ ����������� docker-compose � ����� egisz_monitor_corp_postgres_data � �������, ���� �������.
+    # Раньше проект поднимался через docker-compose с томом egisz_monitor_corp_postgres_data — удаляем, если остался.
     $vol = "egisz_monitor_corp_postgres_data"
     cmd /c "docker volume inspect $vol 1>nul 2>nul"
     if ($LASTEXITCODE -ne 0) { return }
@@ -613,7 +655,7 @@ function Invoke-ResetK8sNamespace {
 function Invoke-KubectlApply {
     param(
         [switch]$ResetNamespace,
-        # deploy / reset-deploy: DROP/CREATE �� metabase ����� apply Metabase (������� �� ���������). apply � ��� ����� �����.
+        # deploy / reset-deploy: DROP/CREATE БД metabase после apply Metabase (витрина не трогается). apply без этого шага.
         [switch]$ResetMetabaseAppDb
     )
 
@@ -675,7 +717,8 @@ function Invoke-KubectlApply {
     if (Test-Path $cronYaml) {
         kubectl apply -f $cronYaml
         if ($LASTEXITCODE -ne 0) { exit 1 }
-        Write-Host "`[kubectl] cronjob/egisz-monitor-sync: по умолчанию suspend=true (см. k8s/etl-cron.yaml и auto_sync в конфиге)." -ForegroundColor DarkGray
+        $k8sCfg = Join-Path $Root "k8s\local\egisz_monitor.yaml"
+        Invoke-ReconcileEtlCronjobFromLocalYaml -ConfigPath $k8sCfg
     }
 
     Publish-ConfUiImageToDockerDesktopK8s
@@ -736,7 +779,7 @@ function Test-MetabaseVerifyFatalOutput {
 }
 
 function Invoke-MetabaseVerifyCorpStackInPod {
-    # ��� ����� � pipe �� Out-String � ����� � Windows PowerShell �������� ��� ������ kubectl.
+    # Не гонять вывод в pipe и Out-String — иначе в Windows PowerShell ломается код возврата kubectl.
     $prevEa = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     $lines = @(kubectl -n egisz-monitor exec deploy/metabase -- /bin/bash /app/verify-corp-stack.sh 2>&1)
@@ -778,7 +821,7 @@ function Invoke-K8sCorpStackVerify {
         if ($trimmed) { Write-Host $trimmed }
         if (Test-MetabaseVerifyFatalOutput -ExitCode $r.Code -Text $r.Out) {
             $ErrorActionPreference = $prevEaVerify
-            Write-Host "ERROR: verify: ��������� ������ (jq/������ � ������); ������� �� �������. ������������ ����� Metabase: .\start.ps1 -Action build, ����� apply ��� rollout restart deployment/metabase." -ForegroundColor Red
+            Write-Host "ERROR: verify: фатальная ошибка (jq/скрипт в поде); правки не помогут. Пересоберите образ Metabase: .\start.ps1 -Action build, затем apply или rollout restart deployment/metabase." -ForegroundColor Red
             exit 1
         }
         Write-Host ("`[verify] attempt {0}/{1} failed; retry in 10s (provision may still be running)..." -f ($i + 1), $max) -ForegroundColor Yellow
@@ -786,7 +829,7 @@ function Invoke-K8sCorpStackVerify {
     }
     if ($verifyOk) {
         $ErrorActionPreference = $prevEaVerify
-        Write-Host "`[verify] OK (Postgres tables + Metabase dashboards in personal collection root)" -ForegroundColor Green
+        Write-Host "`[verify] OK (Postgres tables + Metabase dashboards 01-11 in personal collection root)" -ForegroundColor Green
         Write-Host "  Metabase: open Personal collection in sidebar - dashboards are on that page." -ForegroundColor DarkGray
         Invoke-ConfUiFirebirdDriverSelfTest
         return
@@ -817,7 +860,7 @@ function Invoke-K8sCorpStackVerify {
         if ($trimmed) { Write-Host $trimmed }
         if (Test-MetabaseVerifyFatalOutput -ExitCode $r.Code -Text $r.Out) {
             $ErrorActionPreference = $prevEaVerify
-            Write-Host "ERROR: verify (����� recovery): ��������� ������; ��. ����. ������������ ����� Metabase (.\start.ps1 -Action build)." -ForegroundColor Red
+            Write-Host "ERROR: verify (после recovery): фатальная ошибка; см. лог. Пересоберите образ Metabase (.\start.ps1 -Action build)." -ForegroundColor Red
             exit 1
         }
         Write-Host ("`[verify] recovery attempt {0}/{1} failed; retry in 10s..." -f ($j + 1), $maxRecovery) -ForegroundColor Yellow
@@ -825,7 +868,7 @@ function Invoke-K8sCorpStackVerify {
     }
     if ($verifyOk) {
         $ErrorActionPreference = $prevEaVerify
-        Write-Host "`[verify] OK after recovery restart (Postgres + Metabase dashboards)" -ForegroundColor Green
+        Write-Host "`[verify] OK after recovery restart (Postgres + Metabase dashboards 01-11)" -ForegroundColor Green
         Write-Host "  Metabase: open Personal collection in sidebar - dashboards are on that page." -ForegroundColor DarkGray
         Invoke-ConfUiFirebirdDriverSelfTest
         return
@@ -911,7 +954,7 @@ function Invoke-CorpPortForwardIfRequestedAfterK8s {
     param(
         [bool]$BackgroundSwitchPresent,
         [bool]$BackgroundEnabled,
-        # After deploy/apply: forward only conf-ui + Metabase (8080, 3000), not Postgres � avoids localhost:5432 clashes.
+        # After deploy/apply: forward only conf-ui + Metabase (8080, 3000), not Postgres — avoids localhost:5432 clashes.
         [switch]$ConfAndMetabaseOnly,
         [switch]$SkipBrowserOpens
     )
@@ -1082,9 +1125,9 @@ function Show-DeployInfo {
     Show-K8sNetworkLegend
     Write-Host "Credentials (local dev):" -ForegroundColor Cyan
     Write-Host "  Postgres: db=egisz_reports user=egisz pass=egisz (in cluster: postgres:5432)" -ForegroundColor White
-    Write-Host "  Metabase: admin@egisz.local / egisz � �������� 01�10 � ����� Personal collection (-Action deploy ��� reset-metabase ���������� �� ���������� metabase)" -ForegroundColor White
+    Write-Host "  Metabase: admin@egisz.local / egisz — дашборды 01-11 в корне Personal collection (-Action deploy или reset-metabase пересоздаёт только БД приложения metabase)" -ForegroundColor White
     Write-Host "  Config UI: Flask via .\start.ps1 -Action apply; conf-ui only: restart-conf-ui; Metabase: restart-metabase / restart-web" -ForegroundColor White
-    Write-Host "  Firebird: host.docker.internal:3050 � k8s\local\egisz_monitor.yaml" -ForegroundColor White
+    Write-Host "  Firebird: host.docker.internal:3050 — k8s\local\egisz_monitor.yaml" -ForegroundColor White
     Write-Host "  Standard ports: apply/start/deploy always port-forward 8080/3000; or: .\start.ps1 -Action web" -ForegroundColor White
     Write-Host ""
     Write-Host "ETL: kubectl -n egisz-monitor exec -it deploy/conf-ui -- egisz-monitor sync" -ForegroundColor Yellow
@@ -1114,9 +1157,9 @@ switch ($Action) {
         Write-NestedSiblingMonitorWarning
         Initialize-LocalKubernetesCluster
         if ($_ -eq "start") {
-            Write-Host "`[start] �� ��, ��� apply: Config UI �� �������� ����, ������ Metabase �����������..." -ForegroundColor Cyan
+            Write-Host "`[start] То же, что apply: пересобирается только Config UI, образ Metabase не трогается..." -ForegroundColor Cyan
         } else {
-            Write-Host "`[apply] ���������� ������ Config UI �� �������� ���� (Metabase �� �������)..." -ForegroundColor Cyan
+            Write-Host "`[apply] Пересборка образа Config UI и kubectl apply (Metabase не пересобирается)..." -ForegroundColor Cyan
         }
         Invoke-DockerBuildConfUi -DockerNoCache:$DockerNoCache
         Invoke-KindLoadImagesIfNeeded
@@ -1129,7 +1172,7 @@ switch ($Action) {
     "apply-rebuild" {
         Write-NestedSiblingMonitorWarning
         Initialize-LocalKubernetesCluster
-        Write-Host "`[apply-rebuild] Config UI: docker build --no-cache + kubectl apply (Metabase �� ������������)..." -ForegroundColor Cyan
+        Write-Host "`[apply-rebuild] Config UI: docker build --no-cache + kubectl apply (Metabase не пересобирается)..." -ForegroundColor Cyan
         Invoke-DockerBuildConfUi -DockerNoCache:$true
         Invoke-KindLoadImagesIfNeeded
         Invoke-KubectlApply
@@ -1148,7 +1191,7 @@ switch ($Action) {
         Write-Banner "restart-metabase"
         Invoke-CorpRolloutRestartMetabaseOnly
         Wait-CorpMetabaseRollout
-        Write-Host "`[restart-metabase] ������." -ForegroundColor Green
+        Write-Host "`[restart-metabase] Готово." -ForegroundColor Green
     }
     "restart-conf-ui" {
         Write-NestedSiblingMonitorWarning
@@ -1160,7 +1203,7 @@ switch ($Action) {
         Write-Banner "restart-conf-ui"
         Invoke-CorpRolloutRestartConfUiOnly
         Wait-CorpConfUiRollout
-        Write-Host "`[restart-conf-ui] ������." -ForegroundColor Green
+        Write-Host "`[restart-conf-ui] Готово." -ForegroundColor Green
     }
     "restart-web" {
         Write-NestedSiblingMonitorWarning
@@ -1173,7 +1216,7 @@ switch ($Action) {
         Invoke-CorpRolloutRestartMetabaseAndConfUi
         Wait-CorpMetabaseRollout
         Wait-CorpConfUiRollout
-        Write-Host "`[restart-web] ������." -ForegroundColor Green
+        Write-Host "`[restart-web] Готово." -ForegroundColor Green
     }
     "status" {
         kubectl -n egisz-monitor get pods,svc -o wide

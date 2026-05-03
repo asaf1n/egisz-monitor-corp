@@ -156,6 +156,7 @@ def test_index_html_uses_null_safe_bind_click(cfg_yaml: Path) -> None:
     assert "function bindClick" in html
     assert "bindClick('btnSaveYaml'" in html
     assert "bindClick('btnSync'" in html
+    assert "bindClick('btnSyncStop'" in html
     assert 'id="rightAsideShell"' in html
     assert 'id="btnRightAsideToggle"' in html
     assert "function formatSyncStatusBlock" in html
@@ -168,6 +169,7 @@ def test_index_html_uses_null_safe_bind_click(cfg_yaml: Path) -> None:
     assert "auto_sync_schedule_cron" in html
     assert "document.getElementById('btnSaveYaml').onclick" not in html
     assert "document.getElementById('btnPgBackup').onclick" not in html
+    assert '/api/sync/stop' in html
 
 
 def test_healthcheck_404_when_no_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -186,6 +188,16 @@ def test_healthcheck_404_when_no_config(tmp_path: Path, monkeypatch: pytest.Monk
     data = resp.get_json()
     assert data["ok"] is False
     assert "конфигурации" in (data.get("error", "")).lower()
+
+
+def test_api_sync_stop_when_idle(cfg_yaml: Path) -> None:
+    app = create_app()
+    app.testing = True
+    resp = app.test_client().post("/api/sync/stop")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["ok"] is False
+    assert "не выполняется" in body["message"].lower()
 
 
 def test_api_sync_start_rejects_invalid_form_etl_batch(cfg_yaml: Path) -> None:
@@ -277,7 +289,29 @@ def _full_config_form() -> dict[str, str]:
         "pg_password": "egisz",
         "etl_batch": "500",
         "etl_sync_days": "30",
+        "etl_interleave_page_rows": "8192",
+        "auto_sync_schedule_cron": "*/15 * * * *",
+        "auto_sync_timezone": "Etc/UTC",
     }
+
+
+def test_save_applies_cronjob_reconcile(cfg_yaml: Path) -> None:
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+    form = {**_full_config_form(), "auto_sync_enabled": "1"}
+    with patch(
+        "egisz_monitor_corp.config_app.reconcile_egisz_monitor_sync_cronjob",
+        return_value=(True, "CronJob egisz-monitor-sync: suspend=False, schedule='*/15 * * * *', timeZone='Etc/UTC'"),
+    ) as rmock:
+        resp = client.post("/save", data=form)
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["ok"] is True
+    assert body["cronjob_reconcile"]["ok"] is True
+    rmock.assert_called_once()
+    call_auto = rmock.call_args[0][0]
+    assert call_auto["enabled"] is True
 
 
 def test_api_pg_backup_streams_custom_dump(cfg_yaml: Path) -> None:

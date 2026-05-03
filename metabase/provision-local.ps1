@@ -68,3 +68,7 @@ docker run --rm `
 
 if ($LASTEXITCODE -ne 0) { exit 1 }
 Write-Host "[provision-local] Done. Откройте персональную коллекцию в Metabase и проверьте дашборды." -ForegroundColor Green
+
+Write-Host ""
+Write-Host "Полный сброс Metabase app DB в стеке (K8s) и повторная заливка дашбордов из JSON — из корня репозитория:" -ForegroundColor DarkGray
+Write-Host ".\start.ps1 -Action reset-metabase" -ForegroundColor White

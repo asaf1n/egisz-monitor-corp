@@ -13,6 +13,25 @@ meta:
   notes:
     - Переменная dwh_date — тип dimension (native field filter по дате); для каждой карточки физическое поле задаётся отдельно в metabase-field-filters.
     - Переменные top_semd, top_clinic, err_parse_code — тип text в SQL; явное равенство колонке в запросе. В экспорт из API (metabase/export_dashboards_from_api.py) они не попадают в metabase-field-filters.
+    - "Идентификаторы LOGID/EGMID: во витрине v_egisz_transactions_enriched_ui колонки «LOGID журнала EXCHANGELOG» и «EGMID сообщения EGISZ_MESSAGES» — тип text (::text в sql/001_schema.sql), без разделителей тысяч; в Metabase не используйте Sum/Average — только Count distinct или строка."
+    - "Доп. фильтры (идея): string/= по «LOGID журнала…» / «EGMID сообщения…» как переменные {{log_id}} / {{egmid}} с [[AND v.\"…\" = {{log_id}}]] — имеет смысл на 01 «Последние операции» и детальных таблицах; на агрегатах потребуется HAVING или подзапрос по id."
+
+# Ниже — не подключено к JSON дашбордов; ориентир при добавлении новых string/= фильтров.
+possible_identifier_filters:
+  log_id:
+    dashboard_slug: log_id_filter
+    template_tag: log_id
+    widget: string/=
+    example_sql_fragment: >-
+      [[AND NULLIF(TRIM(v."LOGID журнала EXCHANGELOG"), '') = {{log_id}}]]
+    primary_table: v_egisz_transactions_enriched_ui
+  egmid:
+    dashboard_slug: egmid_filter
+    template_tag: egmid
+    widget: string/=
+    example_sql_fragment: >-
+      [[AND NULLIF(TRIM(v."EGMID сообщения EGISZ_MESSAGES"), '') = {{egmid}}]]
+    primary_table: v_egisz_transactions_enriched_ui
 
 # Один логический «диапазон дат» на дашборде (slug dwh_date_filter), но при привязке к карточке Metabase использует поле из metabase-field-filters этой карточки.
 dwh_date_bindings:

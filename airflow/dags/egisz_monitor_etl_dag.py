@@ -34,11 +34,40 @@ def _monitor_sync(**_context) -> str:
 
     os.environ["EGISZ_MONITOR_CONFIG"] = cfg_path
 
-    from egisz_monitor_corp.etl import run_sync
     from egisz_monitor_corp.config_loader import load_corp_config
+    from egisz_monitor_corp.etl import run_sync
+    from egisz_monitor_corp.pg_warehouse import (
+        PipelineLockBusyError,
+        connect_pg,
+        fetch_etl_watermark_row,
+    )
 
     cfg = load_corp_config()
-    stats = run_sync(cfg, progress_cb=lambda m: print(m, flush=True))
+    pipe = cfg.etl.pipeline_name
+    try:
+        pg0 = connect_pg(cfg.postgres)
+        try:
+            wm = fetch_etl_watermark_row(pg0, pipe)
+        finally:
+            pg0.close()
+        if wm:
+            print(
+                "etl_watermarks_before_sync "
+                f"pipeline={pipe} last_log_id={wm['last_log_id']} "
+                f"last_egmid={wm['last_egmid']} source_max_egmid={wm['source_max_egmid']}",
+                flush=True,
+            )
+        else:
+            print(f"etl_watermarks_before_sync pipeline={pipe} etl_state_row=missing", flush=True)
+    except Exception as e:
+        print(f"etl_watermarks_before_sync pipeline={pipe} error={e!s}", flush=True)
+
+    try:
+        stats = run_sync(cfg, progress_cb=lambda m: print(m, flush=True))
+    except PipelineLockBusyError as e:
+        print(f"monitor_sync_skipped: {e}", flush=True)
+        return f"skipped_lock: {e!s}"
+
     return (
         f"fetched={stats.fetched} facts={stats.facts_upserted} staging_errors={stats.staging_errors} "
         f"max_log_id={stats.max_log_id} cursor={stats.last_cursor_after}"

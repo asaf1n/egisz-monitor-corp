@@ -91,7 +91,7 @@ class EtlConfig:
 
 @dataclass
 class AutoSyncConfig:
-    """Параметры автосинхронизации в YAML; фактический запуск — CronJob в Kubernetes (spec.suspend)."""
+    """Параметры автосинхронизации в YAML; в k8s при сохранении UI / `k8s-reconcile-cronjob` маппятся на CronJob (suspend, schedule, timeZone)."""
 
     enabled: bool = False
     schedule_cron: str = "*/15 * * * *"

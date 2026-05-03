@@ -736,7 +736,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH filtered AS ( SELECT v.* FROM public.v_egisz_transactions_enriched_ui v WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(v.\"Код СЭМД\"), '') = {{top_semd}}]] [[AND v.\"JID клиники\"::text = {{top_clinic}}]] ), with_err AS ( SELECT f.*, CASE WHEN f.\"Статус\" = 'success' THEN '(успешно)' WHEN f.\"Статус\" = 'unknown' THEN '(неизвестно)' WHEN f.\"Статус\" = 'error' THEN COALESCE( ( SELECT LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 120) FROM jsonb_array_elements(COALESCE(f.\"Ошибки JSON\", '[]'::jsonb)) AS e(err) WHERE NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL LIMIT 1 ), '(ошибка без деталей)' ) ELSE '(' || COALESCE(f.\"Статус\", '?') || ')' END AS err_kind FROM filtered f ) SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Тип СЭМД\", \"JID клиники\", COALESCE(NULLIF(TRIM(\"Наименование клиники\"), ''), '(нет)') AS \"Наименование клиники\", err_kind AS \"Тип ошибки\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\", COUNT(DISTINCT \"Связанное сообщение\") FILTER (WHERE \"Статус\" = 'error')::bigint AS \"Ошибок\", ROUND(100.0 * COUNT(DISTINCT \"Связанное сообщение\") FILTER (WHERE \"Статус\" = 'error') / NULLIF(COUNT(DISTINCT \"Связанное сообщение\"), 0), 2) AS \"Доля ошибок\" FROM with_err GROUP BY 1, 2, 3, 4 ORDER BY \"Ошибок\" DESC, \"Транзакций\" DESC LIMIT 500",
+          "query": "WITH filtered AS ( SELECT v.* FROM public.v_egisz_transactions_enriched_ui v WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(v.\"Код СЭМД\"), '') = {{top_semd}}]] [[AND v.\"JID клиники\"::text = {{top_clinic}}]] ), with_err AS ( SELECT f.*, CASE WHEN f.\"Статус\" = 'success' THEN '(успешно)' WHEN f.\"Статус\" = 'unknown' THEN '(неизвестно)' WHEN f.\"Статус\" = 'error' THEN COALESCE( ( SELECT LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 120) FROM jsonb_array_elements(COALESCE(f.\"Ошибки JSON\", '[]'::jsonb)) AS e(err) WHERE NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL LIMIT 1 ), '(ошибка без деталей)' ) ELSE '(' || COALESCE(f.\"Статус\", '?') || ')' END AS err_kind FROM filtered f ) SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Тип СЭМД\", \"JID клиники\", COALESCE(NULLIF(TRIM(\"Наименование клиники\"), ''), '(нет)') AS \"Наименование клиники\", err_kind AS \"Тип ошибки\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\", COUNT(DISTINCT \"Связанное сообщение\") FILTER (WHERE \"Статус\" = 'error')::bigint AS \"Ошибок\", ROUND(100.0 * COUNT(DISTINCT \"Связанное сообщение\") FILTER (WHERE \"Статус\" = 'error') / NULLIF(COUNT(DISTINCT \"Связанное сообщение\"), 0), 2) AS \"Доля ошибок\" FROM with_err GROUP BY 1, 2, 3, 4 ORDER BY \"Ошибок\" DESC, \"Документов\" DESC LIMIT 500",
           "template-tags": {
             "dwh_date": {
               "widget-type": "date/all-options",
@@ -788,8 +788,8 @@
           "[\"name\",\"Тип ошибки\"]": {
             "column_title": "Тип ошибки"
           },
-          "[\"name\",\"Транзакций\"]": {
-            "column_title": "Транзакций",
+          "[\"name\",\"Документов\"]": {
+            "column_title": "Документов",
             "number_separators": ".",
             "decimals": 0
           },
@@ -798,7 +798,7 @@
             "number_separators": ".",
             "decimals": 0
           },
-          "[\"name\",\"Процент ошибок\"]": {
+          "[\"name\",\"Доля ошибок\"]": {
             "column_title": "% ошибок в срезе",
             "decimals": 2
           }

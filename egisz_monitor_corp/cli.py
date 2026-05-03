@@ -9,6 +9,7 @@ import sys
 from egisz_monitor_corp.config_loader import load_corp_config
 from egisz_monitor_corp.etl import run_sync
 from egisz_monitor_corp.fb_client import fetch_all
+from egisz_monitor_corp.k8s_cronjob import reconcile_egisz_monitor_sync_cronjob
 from egisz_monitor_corp.pg_warehouse import (
     PipelineLockBusyError,
     apply_reports_schema,
@@ -34,6 +35,13 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     sub.add_parser("config-ui", help="Run Flask config editor on FLASK_RUN_HOST:FLASK_RUN_PORT")
+
+    kc = sub.add_parser(
+        "k8s-reconcile-cronjob",
+        help="Выставить CronJob egisz-monitor-sync по auto_sync из YAML (suspend/schedule/timeZone)",
+    )
+    kc.add_argument("--namespace", default=None, help="Namespace (по умолчанию egisz-monitor или из SA)")
+    kc.add_argument("--cronjob-name", default=None, help="Имя CronJob (по умолчанию egisz-monitor-sync)")
 
     args = p.parse_args(argv)
     if args.config:
@@ -84,6 +92,17 @@ def main(argv: list[str] | None = None) -> int:
 
         run_dev()
         return 0
+
+    if args.cmd == "k8s-reconcile-cronjob":
+        cfg = load_corp_config()
+        raw = {"enabled": cfg.auto_sync.enabled, "schedule_cron": cfg.auto_sync.schedule_cron, "timezone": cfg.auto_sync.timezone}
+        ok, detail = reconcile_egisz_monitor_sync_cronjob(
+            raw,
+            namespace=args.namespace,
+            cronjob_name=args.cronjob_name,
+        )
+        print(detail)
+        return 0 if ok else 1
 
     return 1
 

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from flask import Flask, Response, jsonify, render_template_string, request
+from flask import Flask, Response, jsonify, make_response, render_template_string, request
 
 from egisz_monitor_corp.config_loader import (
     default_config_path,
@@ -18,6 +18,7 @@ from egisz_monitor_corp.config_loader import (
 )
 from egisz_monitor_corp.fb_client import fetch_all
 from egisz_monitor_corp.fb_client import fetch_firebird_source_peaks
+from egisz_monitor_corp.k8s_cronjob import reconcile_egisz_monitor_sync_cronjob
 from egisz_monitor_corp.pg_cli_backup import pg_dump_custom_bytes, restore_upload_to_temp_and_run
 from egisz_monitor_corp.pg_warehouse import (
     connect_pg,
@@ -235,69 +236,64 @@ PAGE = """
           </button>
         </div>
 
-        <div class="flex min-h-0 flex-1 flex-col gap-4 border-t border-[#1B2940] pt-4 lg:grid lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(17rem,20rem)_minmax(16rem,1fr)] lg:gap-4 lg:pt-3">
-          <div class="flex min-w-0 flex-col gap-3 lg:min-h-0">
-            <button type="button" id="btnSync" data-default-label="Запустить синхронизацию" class="inline-flex w-full min-h-12 items-center justify-center rounded-md border border-[#F59F36] bg-[#F59F36] px-3.5 py-2.5 font-mono text-sm text-[#121826] transition hover:bg-[#FFB95D] disabled:cursor-not-allowed disabled:opacity-60 lg:min-h-[2.875rem]">
-              Запустить синхронизацию
-            </button>
-            <div class="min-w-0">
-              <div class="mb-2">
+        <div class="flex min-h-0 flex-1 flex-col gap-4 border-t border-[#1B2940] pt-4 lg:grid lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(17rem,20rem)_minmax(16rem,1fr)] lg:grid-rows-[minmax(0,1fr)_auto] lg:items-stretch lg:gap-4 lg:pt-3">
+          <div class="flex min-w-0 min-h-0 flex-col gap-1 lg:row-start-1 lg:col-start-1 lg:h-full lg:min-h-0 lg:self-stretch">
+            <div class="grid min-h-12 w-full shrink-0 grid-cols-[minmax(0,4fr)_minmax(0,1fr)] gap-2 lg:min-h-[2.875rem]">
+              <button type="button" id="btnSync" data-default-label="Запустить синхронизацию" class="inline-flex min-h-12 min-w-0 w-full items-center justify-center rounded-md border border-[#F59F36] bg-[#F59F36] px-2 py-2 font-mono text-[0.8125rem] leading-tight text-[#121826] transition hover:bg-[#FFB95D] disabled:cursor-not-allowed disabled:opacity-60 sm:text-sm lg:min-h-[2.875rem] lg:px-3">
+                Запустить синхронизацию
+              </button>
+              <button type="button" id="btnSyncStop" disabled class="inline-flex min-h-12 w-full items-center justify-center rounded-md border border-rose-900/90 bg-rose-700 p-1 text-white shadow-sm transition hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-45 lg:min-h-[2.875rem]" title="Остановить синхронизацию (кооперативно, после текущего шага)" aria-label="Остановить синхронизацию">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="70%" height="70%" preserveAspectRatio="xMidYMid meet" class="shrink-0" aria-hidden="true"><rect x="0" y="0" width="24" height="24" rx="5" ry="5" fill="#D1D5DB"/></svg>
+              </button>
+            </div>
+            <div class="flex min-h-0 min-w-0 flex-1 flex-col lg:-mt-0.5">
+              <div class="mb-1 shrink-0">
                 <h2 class="text-sm font-medium uppercase tracking-[0.12em] text-[#9CA3AF] lg:text-[11px] lg:font-normal lg:tracking-[0.16em] lg:text-[#4B5563]">ETL Configuration</h2>
               </div>
-              <p class="mb-3 max-w-2xl text-sm leading-relaxed text-[#9CA3AF] lg:text-[11px] lg:leading-snug">Полный цикл Firebird → PostgreSQL в фоне. Не закрывайте вкладку до завершения.</p>
-              <div class="grid max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2 sm:items-end lg:grid-cols-3">
-                <label class="block w-full max-w-none sm:max-w-[8rem]">
-                  <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px] lg:tracking-[0.16em] lg:text-[#4B5563]">batch_size</span>
+              <p class="mb-2 w-full min-w-0 shrink-0 text-sm leading-snug text-[#9CA3AF] lg:text-[11px] lg:leading-snug">Полный цикл Firebird → PostgreSQL.</p>
+              <div class="grid w-full min-w-0 shrink-0 grid-cols-1 gap-2 sm:grid-cols-2 sm:items-end lg:grid-cols-3">
+                <label class="block min-w-0 max-w-full">
+                  <span class="block truncate font-mono text-[10px] uppercase tracking-[0.12em] text-[#9CA3AF] lg:text-[10px] lg:tracking-[0.14em] lg:text-[#4B5563]" title="batch_size">batch</span>
                   <input name="etl_batch" type="number" value="{{ etl.batch_size }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
                 </label>
-                <label class="block w-full max-w-none sm:max-w-[10rem]">
-                  <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px] lg:tracking-[0.16em] lg:text-[#4B5563]">sync_window_days</span>
+                <label class="block min-w-0 max-w-full">
+                  <span class="block truncate font-mono text-[10px] uppercase tracking-[0.12em] text-[#9CA3AF] lg:text-[10px] lg:tracking-[0.14em] lg:text-[#4B5563]" title="sync_window_days">window</span>
                   <input name="etl_sync_days" type="number" value="{{ etl.sync_window_days }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
                 </label>
-                <label class="block w-full max-w-none sm:max-w-[10rem] lg:max-w-none">
-                  <span class="font-mono text-xs uppercase tracking-[0.14em] text-[#9CA3AF] lg:text-[11px] lg:tracking-[0.16em] lg:text-[#4B5563]">interleave_page_rows</span>
+                <label class="block min-w-0 max-w-full sm:col-span-2 lg:col-span-1">
+                  <span class="block truncate font-mono text-[10px] uppercase tracking-[0.12em] text-[#9CA3AF] lg:text-[10px] lg:tracking-[0.14em] lg:text-[#4B5563]" title="interleave_page_rows">interleave</span>
                   <input name="etl_interleave_page_rows" type="number" min="1" max="65000" value="{{ etl.interleave_page_rows }}" title="Размер страницы FIRST n при чередовании EGISZ_MESSAGES / EXCHANGELOG в Firebird (верхняя граница 65000)." class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
                 </label>
               </div>
-              <div class="mt-4 max-w-2xl rounded-lg border border-[#1B2940] bg-[#121826]/80 px-3 py-2 lg:py-2">
-                <div class="mb-1.5 text-[11px] font-medium uppercase tracking-[0.14em] text-[#509EE3]">Автосинхронизация (YAML)</div>
-                <label class="flex cursor-pointer items-center gap-2 text-sm text-[#D1D5DB]">
-                  <input type="checkbox" name="auto_sync_enabled" value="1" class="h-4 w-4 shrink-0 rounded border-[#2D3F5E] bg-[#0F1522] text-[#509EE3] focus:ring-[#509EE3]" {% if auto_sync.enabled %}checked{% endif %}/>
-                  <span class="font-mono text-xs uppercase tracking-[0.12em] text-[#9CA3AF]">auto_sync.enabled</span>
-                </label>
-                <input type="hidden" name="auto_sync_schedule_cron" value="{{ auto_sync.schedule_cron|default('*/15 * * * *', true) }}"/>
-                <input type="hidden" name="auto_sync_timezone" value="{{ auto_sync.timezone|default('Etc/UTC', true) }}"/>
-                <p class="mt-1.5 text-[10px] leading-snug text-[#6B7280]">Расписание и timezone — в YAML, файл <code class="text-[#9CA3AF]">{{ path }}</code> (раздел <code class="text-[#9CA3AF]">auto_sync</code>).</p>
-              </div>
-              <div class="mt-3 flex min-h-[2.75rem] w-full flex-wrap items-center gap-3">
+              <div class="mt-3 flex min-h-[2.75rem] w-full shrink-0 flex-wrap items-center gap-3">
               </div>
             </div>
           </div>
 
-          <div class="flex min-h-0 w-full shrink-0 flex-col gap-2 rounded-lg border border-[#2D3F5E] bg-[#121826] px-3 py-3 lg:h-full lg:max-h-none lg:min-h-0 lg:gap-1.5 lg:overflow-y-auto lg:py-2 fixed-scroll">
-            <div class="mb-1 shrink-0">
-              <h2 class="text-sm font-semibold tracking-tight text-[#D1D5DB] lg:text-sm">Последние значения синхронизации</h2>
-              <p id="pgSnapHint" class="mt-1 hidden text-[10px] leading-snug text-[#6B7280] lg:text-[10px]">Пока идёт синк: LOGID и EGMID ниже подменяются значениями из текущего прогона ETL (payload), это не обязательно уже зафиксированные в PostgreSQL курсоры. Снимок из БД обновляется каждые ~10&nbsp;с и сразу после завершения синхронизации.</p>
+          <div class="flex min-h-0 w-full min-w-0 shrink-0 flex-col gap-1.5 rounded-lg border border-[#2D3F5E] bg-[#121826] px-3 py-2 lg:row-start-1 lg:col-start-2 lg:mt-2 lg:h-full lg:min-h-0 lg:self-stretch lg:gap-1 lg:overflow-hidden lg:py-1.5 fixed-scroll">
+            <div class="mb-0 shrink-0">
+              <h2 class="text-sm font-semibold tracking-tight text-[#D1D5DB] lg:text-xs lg:leading-tight">Последние значения синхронизации</h2>
+              <p id="pgSnapHint" class="mt-0.5 hidden text-[10px] leading-snug text-[#6B7280] lg:text-[10px]" title="Во время синка LOGID/EGMID берутся из payload текущего прогона; в etl_state попадают после завершения. Опрос снимка ~10 с.">При синке LOGID/EGMID — из текущего прогона; в БД — после успешного завершения. Опрос ~10&nbsp;с.</p>
             </div>
 
-            <section id="tabSnapshot" class="flex flex-col gap-2.5">
-              <div class="space-y-2.5 text-sm leading-relaxed lg:text-sm">
-                <div class="flex min-w-0 items-baseline gap-2 py-0.5">
+            <section id="tabSnapshot" class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto lg:gap-1 fixed-scroll">
+              <div class="space-y-1 text-sm leading-snug lg:text-xs lg:leading-snug">
+                <div class="flex min-w-0 items-baseline gap-2 py-0">
                   <span class="shrink-0 text-xs font-medium text-[#9CA3AF] sm:text-sm lg:text-xs">LOGID:</span>
                   <code id="pgSnapLogId" class="snap-val min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-sm sm:text-[15px]" data-raw="" title="">—</code>
                   <button type="button" class="pg-snap-copy inline-flex min-h-[2.5rem] min-w-[2.5rem] shrink-0 items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-2 text-[#509EE3] hover:bg-[#1B2940] sm:min-h-0 sm:min-w-0 sm:p-1" data-copy="pgSnapLogId" title="Копировать" aria-label="Копировать">
                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
                   </button>
                 </div>
-                <div class="flex min-w-0 items-baseline gap-2 py-0.5">
+                <div class="flex min-w-0 items-baseline gap-2 py-0">
                   <span class="shrink-0 text-xs font-medium text-[#9CA3AF] sm:text-sm lg:text-xs">EGMID:</span>
                   <code id="pgSnapEgmid" class="snap-val min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-sm sm:text-[15px]" data-raw="" title="">—</code>
                   <button type="button" class="pg-snap-copy inline-flex min-h-[2.5rem] min-w-[2.5rem] shrink-0 items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-2 text-[#509EE3] hover:bg-[#1B2940] sm:min-h-0 sm:min-w-0 sm:p-1" data-copy="pgSnapEgmid" title="Копировать" aria-label="Копировать">
                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
                   </button>
                 </div>
-                <div class="flex min-w-0 items-baseline gap-2 py-0.5">
-                  <span class="shrink-0 text-xs font-medium text-[#9CA3AF] sm:text-sm lg:text-xs">LICENSES.MODIFYDATE:</span>
+                <div class="flex min-w-0 items-baseline gap-2 py-0">
+                  <span class="max-w-[38%] shrink-0 truncate text-xs font-medium text-[#9CA3AF] sm:text-sm lg:max-w-[42%] lg:text-[10px]" title="LICENSES.MODIFYDATE">LIC.MD:</span>
                   <code id="pgSnapLicMd" class="snap-val min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-sm sm:text-[15px]" data-raw="" title="">—</code>
                   <button type="button" class="pg-snap-copy inline-flex min-h-[2.5rem] min-w-[2.5rem] shrink-0 items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-2 text-[#509EE3] hover:bg-[#1B2940] sm:min-h-0 sm:min-w-0 sm:p-1" data-copy="pgSnapLicMd" title="Копировать" aria-label="Копировать">
                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
@@ -307,7 +303,18 @@ PAGE = """
             </section>
           </div>
 
-          <div class="flex min-h-0 min-w-0 flex-1 flex-col rounded-md border border-[#1B2940] bg-[#0B1120] px-3 py-2 text-sm text-[#93A1B6] lg:flex lg:flex-1 lg:flex-col">
+          <div class="min-w-0 shrink-0 rounded-lg border border-[#1B2940] bg-[#121826]/80 px-3 py-2 lg:col-span-2 lg:col-start-1 lg:row-start-2 lg:min-h-0 lg:py-1.5">
+            <div class="mb-1 text-[11px] font-medium uppercase tracking-[0.14em] text-[#509EE3]">Автосинхронизация (YAML)</div>
+            <label class="flex min-w-0 cursor-pointer items-center gap-2 text-sm text-[#D1D5DB]">
+              <input type="checkbox" name="auto_sync_enabled" value="1" class="h-4 w-4 shrink-0 rounded border-[#2D3F5E] bg-[#0F1522] text-[#509EE3] focus:ring-[#509EE3]" {% if auto_sync.enabled %}checked{% endif %}/>
+              <span class="min-w-0 truncate font-mono text-xs uppercase tracking-[0.12em] text-[#9CA3AF]">auto_sync.enabled</span>
+            </label>
+            <input type="hidden" name="auto_sync_schedule_cron" value="{{ auto_sync.schedule_cron|default('*/15 * * * *', true) }}"/>
+            <input type="hidden" name="auto_sync_timezone" value="{{ auto_sync.timezone|default('Etc/UTC', true) }}"/>
+            <p class="mt-1 min-w-0 truncate text-[10px] leading-snug text-[#6B7280]" title="Полная конфигурация расписания и suspend CronJob в репозитории"><code class="font-mono text-[#9CA3AF]">k8s/etl-cron.yaml</code></p>
+          </div>
+
+          <div class="flex min-h-0 min-w-0 flex-1 flex-col rounded-md border border-[#1B2940] bg-[#0B1120] px-3 py-2 text-sm text-[#93A1B6] lg:row-start-1 lg:row-span-2 lg:col-start-3 lg:flex lg:h-full lg:min-h-0 lg:flex-1 lg:flex-col">
             <div class="mb-1 flex min-w-0 items-center justify-between gap-2">
               <div class="text-xs font-medium uppercase tracking-[0.12em] text-[#509EE3] lg:text-[10px] lg:font-normal lg:tracking-[0.16em]">system log</div>
               <button type="button" class="pg-snap-copy inline-flex min-h-[2.5rem] min-w-[2.5rem] shrink-0 items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-2 text-[#509EE3] hover:bg-[#1B2940] sm:min-h-0 sm:min-w-0 sm:p-1" data-copy="syncStatus" title="Копировать лог" aria-label="Копировать лог">
@@ -355,7 +362,7 @@ PAGE = """
         <div class="flex flex-col gap-2">
           <div class="flex min-w-0 items-stretch gap-2">
             <button type="button" id="btnPgBackup" class="inline-flex min-h-10 min-w-0 flex-1 max-w-[calc(100%-2.75rem)] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-2 py-2 font-mono text-xs text-[#D1D5DB] transition hover:border-[#509EE3] hover:bg-[#223555] hover:text-white sm:text-sm">
-              Скачать бэкап
+              Backup DWH
             </button>
             <button type="button" id="btnPgBackupDir" class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-[#2D3F5E] bg-[#0F1522] text-[#509EE3] transition hover:border-[#509EE3] hover:bg-[#1B2940]" title="Папка для сохранения дампа (Chrome/Edge)">
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
@@ -364,7 +371,7 @@ PAGE = """
           <p id="pgBackupDirHint" class="hidden truncate text-[10px] text-[#6B7280]" title=""></p>
           <div class="flex min-w-0 items-stretch gap-2">
             <button type="button" id="btnPgRestore" class="inline-flex min-h-10 min-w-0 flex-1 max-w-[calc(100%-2.75rem)] items-center justify-center rounded-md border border-rose-700/70 bg-rose-950/40 px-2 py-2 font-mono text-xs text-rose-100 transition hover:bg-rose-900/50 sm:text-sm">
-              Восстановить из дампа
+              Restore DWH
             </button>
             <button type="button" id="btnPgRestorePick" class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-rose-800/60 bg-[#0F1522] text-rose-200 transition hover:border-rose-600 hover:bg-rose-950/50" title="Выбрать файл дампа">
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
@@ -387,10 +394,10 @@ PAGE = """
     const m = {
       pipeline_bootstrap: 'Подготовка ETL (схема PostgreSQL, lock; затем 4 таблицы Firebird)',
       enrichment_firebird: 'Справочники Firebird (лицензии, JPERSONS)',
-      counting: 'Подготовка к журналу',
+      counting: 'Перед инкрементом: курсоры LOGID и EGMID (COUNT журнала в Firebird не выполняется)',
       messages_counting: 'Подсчёт сообщений',
       messages_incremental: 'Выгрузка EGISZ_MESSAGES по курсору EGMID',
-      exchangelog_ready: 'Старт инкремента EXCHANGELOG по LOGID',
+      exchangelog_ready: 'Чередование: сначала EGISZ_MESSAGES (EGMID), затем пакет EXCHANGELOG (LOGID)',
       exchangelog_export: 'Чтение пакета EXCHANGELOG из Firebird',
       exchangelog_parse: 'Парсинг пакета журнала',
       parsing: 'Разбор строк журнала (пакет)',
@@ -401,6 +408,7 @@ PAGE = """
       outbound_parse: 'Исходящие документы: разбор',
       outbound_postgres: 'Исходящие документы: запись в PostgreSQL',
       outbound_done: 'Исходящие документы: готово',
+      sync_failed: 'Синхронизация: ошибка или прерывание (снимок курсоров etl_state)',
     };
     return m[phase] || (phase ? 'Фаза: ' + phase : '');
   }
@@ -424,11 +432,24 @@ PAGE = """
     const cache = p.messages_msgid_cache_size;
     const outL = Number(p.outbound_loaded);
     const outT = Number(p.outbound_total);
+    const srcEg = p.source_max_egmid;
+    const wnote = p.watermark_note != null ? String(p.watermark_note).trim() : '';
+    const diag = p.diag_error != null ? String(p.diag_error).trim() : '';
+    if (ph === 'sync_failed') {
+      const parts = [];
+      if (logid != null && logid !== '') parts.push('last_log_id ' + String(logid));
+      if (egm != null && egm !== '') parts.push('last_egmid ' + String(egm));
+      if (srcEg != null && srcEg !== '') parts.push('source_max_egmid ' + String(srcEg));
+      if (wnote) parts.push(wnote);
+      if (diag) parts.push(diag);
+      return { title: 'Синхронизация: ошибка / прерывание', detail: parts.join(' · ') };
+    }
     if (ph === 'messages_incremental') {
       const parts = [];
+      if (!(Number.isFinite(lo) && lo > 0)) parts.push('запрос к Firebird…');
       if (Number.isFinite(lo) && lo > 0) parts.push('сообщений ' + fmtIntRu(lo));
       if (Number.isFinite(page) && page > 0) parts.push('страница ' + fmtIntRu(page));
-      if (egm != null && egm !== '') parts.push('EGMID ' + String(egm));
+      if (egm != null && egm !== '') parts.push('курсор EGMID ' + String(egm));
       if (Number.isFinite(br) && br > 0) parts.push('в пакете ' + fmtIntRu(br) + ' строк');
       if (Number.isFinite(cache) && cache > 0) parts.push('MSGID в кэше ' + fmtIntRu(cache));
       return { title: 'Выгрузка EGISZ_MESSAGES по курсору EGMID', detail: parts.join(' · ') };
@@ -462,9 +483,11 @@ PAGE = """
     }
     if (ph === 'exchangelog_ready') {
       const parts = [];
-      if (logid != null && logid !== '') parts.push('LOGID ' + String(logid));
+      parts.push('далее пакет EGISZ_MESSAGES, затем EXCHANGELOG');
+      if (egm != null && egm !== '') parts.push('курсор EGMID ' + String(egm));
+      if (logid != null && logid !== '') parts.push('курсор LOGID ' + String(logid));
       if (Number.isFinite(tot) && tot > 0) parts.push('оценка строк журнала ' + fmtIntRu(tot));
-      return { title: 'EXCHANGELOG: старт по LOGID', detail: parts.join(' · ') };
+      return { title: 'Инкремент Firebird: сообщения и журнал', detail: parts.join(' · ') };
     }
     if (ph === 'exchangelog_done') {
       const parts = [];
@@ -479,7 +502,13 @@ PAGE = """
       return { title: 'Исходящие документы', detail: parts.join(' · ') };
     }
     if (ph === 'enrichment_firebird') return { title: 'Справочники Firebird', detail: 'лицензии, JPERSONS' };
-    if (ph === 'counting') return { title: 'Журнал EXCHANGELOG', detail: 'подготовка выборки' };
+    if (ph === 'counting') {
+      const parts = [];
+      parts.push('без COUNT по журналу в Firebird');
+      if (egm != null && egm !== '') parts.push('курсор EGMID ' + String(egm));
+      if (logid != null && logid !== '') parts.push('курсор LOGID ' + String(logid));
+      return { title: 'Перед чередованием EGISZ_MESSAGES / EXCHANGELOG', detail: parts.join(' · ') };
+    }
     const short = etlPhaseLabelRu(ph);
     return { title: short || ph, detail: '' };
   }
@@ -492,6 +521,9 @@ PAGE = """
       return { indeterminate: true, pct: null, label: '…' };
     }
     const ph = String(p.phase || '');
+    if (ph === 'sync_failed') {
+      return { indeterminate: true, pct: null, label: '…' };
+    }
     if (ph === 'pipeline_bootstrap' || ph === 'enrichment_firebird' || ph === 'counting' || ph === 'messages_counting') {
       return { indeterminate: true, pct: null, label: '…' };
     }
@@ -685,6 +717,12 @@ PAGE = """
     } else {
       if (j.error) {
         if (msg) lines.push(msg);
+        const p = j.progress && typeof j.progress === 'object' ? j.progress : null;
+        if (p && String(p.phase || '') === 'sync_failed') {
+          const c = etlProgressLogConcise(p);
+          if (c.title) lines.push(c.title);
+          if (c.detail) lines.push(c.detail);
+        }
         lines.push('Синхронизация завершилась с ошибкой.');
         const errStr = String(j.error);
         if (!msg || msg.indexOf(errStr) < 0) lines.push('Ошибка: ' + errStr);
@@ -949,6 +987,14 @@ PAGE = """
     const msg = e && e.message ? String(e.message) : String(e);
     return name === 'TypeError' && /fetch|network|load failed/i.test(msg);
   }
+  function syncActionButtonsFromPoll(j) {
+    var btn = document.getElementById('btnSync');
+    var stopBtn = document.getElementById('btnSyncStop');
+    if (!btn || !stopBtn) return;
+    var running = !!(j && j.running);
+    btn.disabled = !!(syncStartInFlight || running);
+    stopBtn.disabled = !running || !!syncStartInFlight;
+  }
   async function pollSync() {
     const el = document.getElementById('syncStatus');
     if (!el) return;
@@ -968,6 +1014,7 @@ PAGE = """
       lastSyncJson = j;
       setPgSnapHintVisible(!!j.running);
       refreshConnStatusStrip();
+      syncActionButtonsFromPoll(j);
       applySyncStatusFromPoll(j, el);
     } catch (e) {
       POLL_FAIL.sync += 1;
@@ -1288,10 +1335,34 @@ PAGE = """
     } finally {
       syncStartInFlight = false;
       if (btnSyncEl) {
-        btnSyncEl.disabled = false;
         btnSyncEl.removeAttribute('aria-busy');
         btnSyncEl.textContent = btnSyncDefaultLabel;
       }
+      syncActionButtonsFromPoll(lastSyncJson);
+    }
+  });
+  bindClick('btnSyncStop', async function () {
+    try {
+      const r = await fetch('/api/sync/stop', {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+      });
+      const raw = await r.text();
+      let j;
+      try {
+        j = JSON.parse(raw);
+      } catch (e) {
+        return;
+      }
+      const msg = j.message != null ? String(j.message) : '';
+      showCfgMessage(!!j.ok, msg || (j.ok ? 'OK' : 'Ошибка'), {
+        strip: j.ok ? 'Стоп' : 'Стоп',
+        logBody: msg,
+      });
+      await pollSync();
+    } catch (e) {
+      showCfgMessage(false, String(e), { strip: 'Стоп', logBody: String(e) });
     }
   });
   // Опрос только пока вкладка видима. Скрытая вкладка через 5–10 минут sleep'а
@@ -1324,6 +1395,7 @@ PAGE = """
   startPolling();
   pollSync();
   refreshConnStatusStrip();
+  syncActionButtonsFromPoll(lastSyncJson);
   setTimeout(function () { loadPgSyncSnapshotOnce(); }, 40);
   setTimeout(function () { pollHealthcheck(); }, 120);
   window.addEventListener('pageshow', function () {
@@ -1436,7 +1508,7 @@ def create_app() -> Flask:
             env_u = (os.environ.get("EGISZ_METABASE_SITE_URL") or "").strip()
             if env_u:
                 mb_url = env_u
-        return render_template_string(
+        html = render_template_string(
             PAGE,
             path=str(logical_config_path()),
             fb=cfg.firebird,
@@ -1445,6 +1517,10 @@ def create_app() -> Flask:
             auto_sync=cfg.auto_sync,
             metabase_site_url=mb_url,
         )
+        resp = make_response(html)
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        resp.headers["Pragma"] = "no-cache"
+        return resp
 
     @app.post("/save")
     def save():  # type: ignore[no-untyped-def]
@@ -1477,7 +1553,19 @@ def create_app() -> Flask:
             parse_corp_config_dict(merged)
         except Exception as e:
             return jsonify({"ok": False, "message": f"Файл записан, но конфиг не читается: {e}"})
-        return jsonify({"ok": True, "message": "Сохранено."})
+        cron_ok, cron_detail = reconcile_egisz_monitor_sync_cronjob(merged.get("auto_sync") or {})
+        base = "Сохранено."
+        if cron_ok:
+            msg = f"{base} {cron_detail}"
+        else:
+            msg = f"{base} Автосинк (CronJob): не удалось применить — {cron_detail}"
+        return jsonify(
+            {
+                "ok": True,
+                "message": msg,
+                "cronjob_reconcile": {"ok": cron_ok, "detail": cron_detail},
+            }
+        )
 
     @app.post("/test-fb")
     def test_fb():  # type: ignore[no-untyped-def]
@@ -1668,8 +1756,18 @@ def create_app() -> Flask:
 
 def run_dev() -> None:
     import os
+    import sys
 
     app = create_app()
     host = os.environ.get("FLASK_RUN_HOST", "127.0.0.1")
     port = int(os.environ.get("FLASK_RUN_PORT", "8765"))
-    app.run(host=host, port=port, debug=os.environ.get("FLASK_DEBUG") == "1", threaded=True)
+    debug = os.environ.get("FLASK_DEBUG") == "1"
+    use_reloader = debug or os.environ.get("CONFIG_UI_RELOAD") == "1"
+    if not use_reloader:
+        print(
+            "config-ui: изменения в egisz_monitor_corp/config_app.py видны только после перезапуска процесса. "
+            "Локально задайте CONFIG_UI_RELOAD=1 или FLASK_DEBUG=1. "
+            "Образ Docker/gunicorn на :8080 — пересоберите образ и перезапустите контейнер.",
+            file=sys.stderr,
+        )
+    app.run(host=host, port=port, debug=debug, use_reloader=use_reloader, threaded=True)

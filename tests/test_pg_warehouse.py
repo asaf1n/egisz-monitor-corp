@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import MagicMock
 
-from egisz_monitor_corp.pg_warehouse import fetch_healthcheck_snapshot
+from egisz_monitor_corp.pg_warehouse import fetch_etl_watermark_row, fetch_healthcheck_snapshot
 
 
 class _FakeCursor:
@@ -184,3 +184,28 @@ def test_fetch_healthcheck_snapshot_records_errors_per_view() -> None:
     assert out["proxy_db"] == {}
     assert any("v_health_signals" in e for e in out["errors"])
     assert con.rollback.call_count >= 1
+
+
+def test_fetch_etl_watermark_row_none_when_no_row() -> None:
+    cur = MagicMock()
+    cur.__enter__.return_value = cur
+    cur.__exit__.return_value = None
+    cur.fetchone.return_value = None
+    con = MagicMock()
+    con.cursor.return_value = cur
+    assert fetch_etl_watermark_row(con, "firebird_exchangelog") is None
+
+
+def test_fetch_etl_watermark_row_returns_ints() -> None:
+    cur = MagicMock()
+    cur.__enter__.return_value = cur
+    cur.__exit__.return_value = None
+    cur.fetchone.return_value = (29_614_055, 89_339_643, 89_400_000)
+    con = MagicMock()
+    con.cursor.return_value = cur
+    out = fetch_etl_watermark_row(con, "firebird_exchangelog")
+    assert out == {
+        "last_log_id": 29_614_055,
+        "last_egmid": 89_339_643,
+        "source_max_egmid": 89_400_000,
+    }
