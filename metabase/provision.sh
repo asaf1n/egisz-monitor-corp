@@ -108,7 +108,7 @@ fi
 # с новыми id'ами — это ломает закладки в браузере и ссылки в документации после rollout
 # restart. Вместо этого считаем количество существующих "EGISZ" дашбордов (имя начинается
 # с "01 ".."11 ") и пропускаем provisioning, если он уже выполнен. Принудительная пере-
-# заливка — env METABASE_FORCE_PROVISION=true или Action reset-metabase (DROP/CREATE БД).
+# заливка — env METABASE_FORCE_PROVISION=true или deploy/reset-deploy (DROP/CREATE БД).
 EXPECTED_DASHBOARDS=0
 if [ -d /app/metabase_dashboards ]; then
   for _f in /app/metabase_dashboards/*.json; do
@@ -137,7 +137,7 @@ case "${FORCE_FLAG}" in
     ;;
   auto|*)
     if [ "${EXPECTED_DASHBOARDS}" -gt 0 ] && [ "${EXISTING_DASHBOARDS}" -ge "${EXPECTED_DASHBOARDS}" ]; then
-      log_info "Skipping provisioning: ${EXISTING_DASHBOARDS}/${EXPECTED_DASHBOARDS} EGISZ dashboards already in Metabase application DB. Set METABASE_FORCE_PROVISION=true (or run 'start.ps1 -Action reset-metabase') to re-create."
+      log_info "Skipping provisioning: ${EXISTING_DASHBOARDS}/${EXPECTED_DASHBOARDS} EGISZ dashboards already in Metabase application DB. Set METABASE_FORCE_PROVISION=true (or deploy/reset-deploy for DROP/CREATE app DB) to re-create."
       PROVISION_DASHBOARDS=0
     else
       log_info "Provisioning dashboards: have ${EXISTING_DASHBOARDS} of ${EXPECTED_DASHBOARDS} expected EGISZ dashboards in Metabase."

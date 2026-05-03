@@ -71,4 +71,4 @@ Write-Host "[provision-local] Done. Откройте персональную к
 
 Write-Host ""
 Write-Host "Полный сброс Metabase app DB в стеке (K8s) и повторная заливка дашбордов из JSON — из корня репозитория:" -ForegroundColor DarkGray
-Write-Host ".\start.ps1 -Action reset-metabase" -ForegroundColor White
+Write-Host ".\start.ps1 -Action deploy   # или reset-deploy; либо METABASE_FORCE_PROVISION в k8s/metabase.yaml" -ForegroundColor White

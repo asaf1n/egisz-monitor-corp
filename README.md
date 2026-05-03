@@ -35,6 +35,7 @@ Firebird: EXCHANGELOG, EGISZ_MESSAGES, EGISZ_LICENSES (+ JPERSONS)
 | [`docs/METABASE.md`](docs/METABASE.md) | Провижининг Metabase, фильтры дат, обновление дашбордов |
 | [`docs/KUBERNETES_LOCAL.md`](docs/KUBERNETES_LOCAL.md) | Локальный Kubernetes, сценарии `start.ps1` |
 | [`docs/SYNC_DIAGNOSTICS.md`](docs/SYNC_DIAGNOSTICS.md) | Сверка объёмов Firebird / PostgreSQL, курсор ETL |
+| [`docs/DOCUMENTATION_STYLE.md`](docs/DOCUMENTATION_STYLE.md) | Как писать и править тексты в репозитории (README, docs, AGENTS) |
 
 ## Стек
 
@@ -55,7 +56,7 @@ Firebird: EXCHANGELOG, EGISZ_MESSAGES, EGISZ_LICENSES (+ JPERSONS)
 
 Главная процедура — **`run_sync`** в [`egisz_monitor_corp/etl.py`](egisz_monitor_corp/etl.py). Firebird читается только **`SELECT`**-запросами; в PostgreSQL выполняются UPSERT и обновление staging.
 
-При **`.\start.ps1`** с действиями **`deploy`**, **`apply`**, **`start`**, **`apply-rebuild`**, **`reset-deploy`** после готовности Postgres пересобирается ConfigMap **`egisz-reports-schema`** из файлов в репозитории и запускается Job **`egisz-reports-schema-init`**, который по **[`sql/schema_apply_order.txt`](sql/schema_apply_order.txt)** применяет весь DDL витрины в **`egisz_reports`** (идемпотентно, **без** удаления баз PostgreSQL). Так появляются новые объекты схемы (в том числе **`stg_jpersons_import`**), без отдельного ручного прогона, если кластер обновляется через `start.ps1`.
+При **`.\start.ps1`** с действиями **`deploy`**, **`apply`**, **`start`**, **`reset-deploy`** после готовности Postgres пересобирается ConfigMap **`egisz-reports-schema`** из файлов в репозитории и запускается Job **`egisz-reports-schema-init`**, который по **[`sql/schema_apply_order.txt`](sql/schema_apply_order.txt)** применяет весь DDL витрины в **`egisz_reports`** (идемпотентно, **без** удаления баз PostgreSQL). Так появляются новые объекты схемы (в том числе **`stg_jpersons_import`**), без отдельного ручного прогона, если кластер обновляется через `start.ps1`.
 
 ### Курсоры и `etl_state`
 
@@ -123,10 +124,12 @@ Firebird: EXCHANGELOG, EGISZ_MESSAGES, EGISZ_LICENSES (+ JPERSONS)
 
 **Клиника (JID):**
 
-1. Токен `gost-<jid>.infoclinica.lan` в **`MSGTEXT`**, затем **`LOGTEXT`**, затем **`EGISZ_MESSAGES.REPLYTO`**.
-2. Сопоставление **`REPLYTO`** с **`MO_DOMEN`** в предзагруженных строках лицензий (как в Firebird: вхождение домена, выбор по **`MODIFYDATE`**).
-3. **`MO_UID`** из XML или лицензий → карта **`MO_UID → JID`**.
-4. Наименование, ИНН, **`FIR_OID`** — из **`JPERSONS`** и **`EGISZ_LICENSES`**.
+Идентификатор клиники собирается из транспортных полей журнала и справочников Firebird:
+
+1. В URL ищется хост вида **`gost-<…>.infoclinica.lan`** в **`EXCHANGELOG.LOGTEXT`** и в **`EGISZ_MESSAGES.REPLYTO`**. Если в обоих полях есть числовой JID в пути, используется значение из **LOGTEXT**, иначе из **REPLYTO** (как в [`egisz_monitor_corp/parser.py`](egisz_monitor_corp/parser.py)).
+2. **`EGISZ_MESSAGES.REPLYTO`** сопоставляется с **`EGISZ_LICENSES.MO_DOMEN`** среди предзагруженных лицензий (вхождение домена, выбор строки по **`MODIFYDATE`**).
+3. Из выбранной лицензии берётся **`EGISZ_LICENSES.JID`**; при разрешении по организации используются **`MO_UID`** из XML ответа РЭМД или из лицензий и карта **`MO_UID → JID`**.
+4. Наименование медорганизации, ИНН и **`FIR_OID`** подставляются из **`JPERSONS`** и **`EGISZ_LICENSES`**.
 
 Парсер: модуль [`egisz_monitor_corp/parser.py`](egisz_monitor_corp/parser.py) (`EgiszMonitorParser`).
 
@@ -138,7 +141,7 @@ Firebird: EXCHANGELOG, EGISZ_MESSAGES, EGISZ_LICENSES (+ JPERSONS)
 | `exchangelog_log_id` | `EXCHANGELOG.LOGID` в выгрузке журнала | Водяной знак строки журнала на факте (удобно для SQL без join к сырью) |
 | `egisz_messages_egmid` | `EGISZ_MESSAGES.EGMID` (JOIN по `MSGID` в SQL журнала или кэш дозагрузки) | Первичный ключ сообщения в прокси-БД рядом с `LOGID` |
 | `local_uid_semd` | `<localUid>` или `DOCUMENTID` | Идентификатор экземпляра СЭМД; поиск «без ответа» |
-| `jid` | gost-токены, лицензии, `MO_UID` | Внутренний идентификатор клиники |
+| `jid` | `EXCHANGELOG.LOGTEXT`, `EGISZ_MESSAGES.REPLYTO`, `EGISZ_LICENSES.MO_DOMEN` / `JID`, `MO_UID` | Идентификатор клиники в контуре интеграции |
 | `kind_code` | `<kind>` в XML или `EGISZ_LICENSES.KIND` | Тип СЭМД; в `*_ui` — текст для Metabase |
 | `status` | `<status>` в XML | `success` / `error` / `unknown` |
 | `errors_json` | `<errors>` в XML | Сырые коды и тексты отказов |
@@ -172,7 +175,7 @@ JSON лежат в [`metabase_dashboards/`](metabase_dashboards/); при ста
 
 - **`deploy`** / **`reset-deploy`** — пересоздание БД приложения Metabase (`metabase`) и повторный провижининг.
 - **`apply`** — манифесты и перезапуск сервисов; БД Metabase сохраняется.
-- Изменили только JSON — нужны **`.\start.ps1 -Action build`** и перезапуск Metabase. При **`METABASE_FORCE_PROVISION=auto`** провижининг **пропускается**, если все **11** EGISZ-дашбордов уже есть; для принудительной перезаливки: **`.\start.ps1 -Action reset-metabase`**. Тег образа **`:k8s-v16`** задан в [`k8s/metabase.yaml`](k8s/metabase.yaml) и `start.ps1` — **bump** при следующем изменении JSON или скриптов.
+- Изменили только JSON — **`.\start.ps1 -Action restart-metabase`** (или **`deploy`** / **`reset-deploy`** для сброса БД приложения). При **`METABASE_FORCE_PROVISION=auto`** провижининг **пропускается**, если все **11** EGISZ-дашбордов уже есть; для принудительной перезаливки без ручного SQL: **`.\start.ps1 -Action deploy`** / **`reset-deploy`** или временно **`METABASE_FORCE_PROVISION=true`** в [`k8s/metabase.yaml`](k8s/metabase.yaml). Тег образа **`:k8s-v16`** задан в [`k8s/metabase.yaml`](k8s/metabase.yaml) и `start.ps1` — **bump** при следующем изменении JSON или скриптов.
 - Обновление только схемы витрины или данных ETL образ Metabase **не** требует.
 
 ## Healthcheck интеграции
@@ -216,4 +219,4 @@ Namespace: **`egisz-monitor`**. Быстрый старт с хоста Windows 
 | Config UI | Service **`conf-ui`**, порт **8080**; LoadBalancer → часто **`http://127.0.0.1:8080`** | Конфиг, sync, healthcheck API |
 | Airflow | Helm / `k8s/airflow/` | Опциональный планировщик |
 
-Если **LoadBalancer** в состоянии Pending (например **kind**), используйте **`.\start.ps1 -Action web`** (port-forward) или см. [`docs/KUBERNETES_LOCAL.md`](docs/KUBERNETES_LOCAL.md). Полный список действий: **`.\start.ps1 -Action help`**.
+Если **LoadBalancer** в состоянии Pending (например **kind**), используйте **`kubectl port-forward`** (см. [`docs/KUBERNETES_LOCAL.md`](docs/KUBERNETES_LOCAL.md)) или полный **`.\start.ps1`** / **`apply`** (скрипт поднимает 8080/3000). Полный список действий: **`.\start.ps1 -Action help`**.

@@ -152,7 +152,7 @@ if [ -f "${EXEC_JSON}" ]; then
   MAPS="$(echo "${MAPS}" | tr -d '[:space:]')"
   MAPS="${MAPS:-0}"
   if ! [ "${MAPS}" -gt 0 ] 2>/dev/null; then
-    log "FAIL: \"${EXEC_NAME}\": нет parameter_mappings на карточках (нативные фильтры не связаны). Перезалейте дашборды: METABASE_FORCE_PROVISION=true или reset-metabase."
+    log "FAIL: \"${EXEC_NAME}\": нет parameter_mappings на карточках (нативные фильтры не связаны). Перезалейте дашборды: METABASE_FORCE_PROVISION=true или deploy/reset-deploy (DROP/CREATE app DB)."
     exit 1
   fi
   log "Dashboard \"${EXEC_NAME}\" OK (${GOT_CARDS} dashcards, parameter_mappings=${MAPS})"

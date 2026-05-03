@@ -4,7 +4,7 @@ Namespace по умолчанию: **`egisz-monitor`**. Контекст: **Dock
 
 ## Важно: `reset-deploy` vs «чистый образ» conf-ui
 
-- **`apply-rebuild`** (или `apply` с `-DockerNoCache`): пересобирается образ **conf-ui** без кэша Docker, манифесты применяются, поды перезапускаются. **Namespace и PVC Postgres не удаляются** — данные витрины (`egisz_reports` и т.д.) **сохраняются**.
+- **`apply` с `-DockerNoCache`** (или **`.\scripts\apply-local-rebuild.ps1`**): образ **conf-ui** пересобирается без кэша Docker, манифесты применяются, поды перезапускаются. **Namespace и PVC Postgres не удаляются** — данные витрины (`egisz_reports` и т.д.) **сохраняются**.
 - **`reset-deploy`**: сначала удаляется namespace **`egisz-monitor`** (вместе с StatefulSet Postgres и его **PVC**), затем выполняется полная цепочка как при первом `deploy`. Это **полный greenfield**: все данные в кластерном Postgres для этого namespace **теряются**, если заранее не сделан дамп.
 
 Перед **`reset-deploy`**, если витрина нужна: [scripts/backup-postgres.ps1](../scripts/backup-postgres.ps1), дамп из UI конфигурации (PostgreSQL: бэкап), или вручную `pg_dump` / `kubectl exec` (см. [DOCKER_GORDON_PROMPT.md](DOCKER_GORDON_PROMPT.md)).
@@ -18,17 +18,13 @@ Namespace по умолчанию: **`egisz-monitor`**. Контекст: **Dock
 | После перезапуска Docker Desktop / обычный старт без удаления данных Metabase | `.\start.ps1` (по умолчанию как **`apply`**) |
 | Полный первый подъём или принудительный сброс БД приложения Metabase + оба образа | `.\start.ps1 -Action deploy` |
 | Чистый namespace + образы без кэша (**PVC Postgres и витрина удаляются**) | `.\start.ps1 -Action reset-deploy` |
-| Только пересобрать образы | `.\start.ps1 -Action build` |
 | Правки **Config UI (Flask)** → образ + apply манифестов + **перезапуск обоих** web-служб | `.\start.ps1 -Action apply` |
-| Config UI: **полная** пересборка образа (`--no-cache`) + apply (**данные Postgres сохраняются**) | `.\start.ps1 -Action apply-rebuild` или `.\scripts\apply-local-rebuild.ps1` |
-| Перезапуск **только Metabase** (образ уже в Docker / в кластере) | `.\start.ps1 -Action restart-metabase` |
-| Перезапуск **только conf-ui** | `.\start.ps1 -Action restart-conf-ui` |
-| Перезапуск **Metabase + conf-ui** без `docker build` и без `kubectl apply` | `.\start.ps1 -Action restart-web` |
-| Сброс только app DB Metabase в Postgres | `.\start.ps1 -Action reset-metabase` |
+| Config UI: пересборка образа (`--no-cache`) + apply (**данные Postgres сохраняются**) | `.\start.ps1 -Action apply -DockerNoCache` или `.\scripts\apply-local-rebuild.ps1` |
+| Пересборка образа **Metabase** (`--no-cache`) + `kind load` + rollout | `.\start.ps1 -Action restart-metabase` |
+| Пересборка **conf-ui** (синк + Config UI, `--no-cache`) + `kind load` + rollout (без `kubectl apply`) | `.\start.ps1 -Action restart-web` |
 | Статус подов и сервисов | `.\start.ps1 -Action status` |
 | Проверка витрины + дашбордов в поде Metabase (перед проверкой поднимается port-forward 8080/3000, как при apply) | `.\start.ps1 -Action verify` |
-| Только port-forward (8080 conf-ui, 3000 Metabase) | `.\start.ps1 -Action web` |
-| Остановить фоновые port-forward из скрипта | `.\start.ps1 -Action stop-forward` |
+| Port-forward вручную (если LB не отвечает) | `kubectl -n egisz-monitor port-forward svc/conf-ui 8080:8080` и `svc/metabase 3000:3000`; после `apply`/`deploy` PID фоновых процессов — в `.egisz-monitor-port-forward.pids` |
 
 Полный список действий: `.\start.ps1 -Action help`.
 
@@ -37,7 +33,7 @@ Namespace по умолчанию: **`egisz-monitor`**. Контекст: **Dock
 ### `deploy` (`-Action deploy`)
 
 1. Проверка / создание кластера (**kind** или уже включённый Docker Desktop K8s).  
-2. **`build`**: образы **`egisz-conf-ui`** и **`egisz-monitor-metabase`**.  
+2. **`docker build`** образов **`egisz-conf-ui`** и **`egisz-monitor-metabase`**.  
 3. При **kind**: `kind load` образов в кластер.  
 4. **`kubectl apply`**: namespace, Postgres, секреты, Metabase, conf-ui; Job схемы витрины; Job БД Airflow.  
 5. **DROP/CREATE** базы приложения **`metabase`** в Postgres (чистый Metabase + провижининг дашбордов из образа при старте пода).  
@@ -49,24 +45,21 @@ Namespace по умолчанию: **`egisz-monitor`**. Контекст: **Dock
 
 1. Только сборка **conf-ui** (Metabase **не** пересобирается).  
 2. `kubectl apply` полного стека (как в deploy, **без** DROP/CREATE `metabase`).  
-3. **`rollout restart`** Metabase и conf-ui → холодный JVM Metabase. Только conf-ui без полного `apply`: **`.\start.ps1 -Action restart-conf-ui`**.  
+3. **`rollout restart`** Metabase и conf-ui → холодный JVM Metabase. Только conf-ui без полного `apply`: **`.\start.ps1 -Action restart-web`**.  
 4. Port-forward 8080/3000, smoke, verify.
-
-### `apply-rebuild`
-
-Как **`apply`**, но образ **conf-ui** всегда собирается с **`--no-cache`** (эквивалент `.\start.ps1 -Action apply -DockerNoCache`). Из подкаталога: `.\scripts\apply-local-rebuild.ps1`.
 
 ### `reset-deploy`
 
 1. Удаление namespace **`egisz-monitor`** (ожидание, пока ресурсы исчезнут).  
-2. **`build`** с **`--no-cache`** для **обоих** образов (conf-ui и Metabase).  
+2. **`Invoke-DockerBuild`** с **`--no-cache`** для **обоих** образов (conf-ui и Metabase).  
 3. Далее как **`deploy`**: загрузка в kind при необходимости, `kubectl apply`, DROP/CREATE БД **`metabase`**, rollout, smoke, **verify**, port-forward.
 
 Итог: **новый PVC Postgres** — витрина пустая до следующего ETL / restore из дампа.
 
-### `restart-metabase` / `restart-conf-ui` / `restart-web`
+### `restart-metabase` / `restart-web`
 
-Только **`kubectl rollout restart`** выбранного deployment (или обоих) и **`kubectl rollout status`** до таймаута. **Не** выполняют `docker build` и **не** применяют YAML. Используйте после ручного `docker build` + загрузки образа в кластер или когда нужно перечитать конфиг из Secret без смены манифеста.
+- **`restart-metabase`**: `docker build` образа Metabase с **`--no-cache`**, `kind load`, **`kubectl rollout restart deployment/metabase`**, ожидание Ready.  
+- **`restart-web`**: то же для **conf-ui** (Flask + CLI синка в одном образе), затем **`Publish-ConfUiImageToDockerDesktopK8s`** на контексте `docker-desktop`, rollout conf-ui. **Без** `kubectl apply` манифестов.
 
 ## Терминал: `kubectl` без `start.ps1`
 
@@ -125,11 +118,11 @@ kubectl -n egisz-monitor exec -it deploy/conf-ui -- egisz-monitor sync
 | Параметр | Где используется |
 |----------|------------------|
 | `-SkipKindCluster` | Не создавать kind; должен отвечать уже настроенный `kubectl cluster-info`. |
-| `-DockerNoCache` | `build` / `apply`: `docker build --no-cache` для conf-ui (и весь `build` — для Metabase). |
-| `-SkipPostgresPortForward` | `web` / `forward`: не пробрасывать 5432 на хост. |
+| `-DockerNoCache` | Только **`apply`**: `docker build --no-cache` для conf-ui. |
+| `-SkipPostgresPortForward` | При port-forward не пробрасывать 5432 на хост (если порт занят). |
 | `-BackgroundPortForward:$false` | Отдельные окна PowerShell с `kubectl port-forward` вместо фоновых процессов. |
 
-## Проверка после `deploy`, `reset-deploy`, `apply` или `apply-rebuild`
+## Проверка после `deploy`, `reset-deploy` или `apply`
 
 1. **`.\start.ps1 -Action verify`** — проверка витрины и дашбордов Metabase из пода (встроенная логика скрипта уже вызывает её в конце успешного deploy/reset/apply).  
 2. При необходимости вручную: **`.\scripts\smoke-post-gordon.ps1`** — краткий снимок `kubectl get` / `top`, запрос **`/healthz`** у conf-ui (нужен доступ к API кластера и при необходимости port-forward на 8080).

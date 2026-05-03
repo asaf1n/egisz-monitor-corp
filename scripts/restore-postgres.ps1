@@ -7,7 +7,7 @@
     **Витрина (SchemaThenData):** после deploy примените DDL (Job egisz-reports-schema-init), затем:
     .\scripts\restore-postgres.ps1 -DwhDump '...\egisz_dwh_*.dump' -Mode DataOnly
 
-    **Metabase:** обычно `.\start.ps1 -Action reset-metabase`; при необходимости старого состояния UI — также -MetabaseDump.
+    **Metabase:** `.\start.ps1 -Action deploy` (или `reset-deploy`) для DROP/CREATE БД приложения; при необходимости старого состояния UI — также -MetabaseDump.
 
     **Full:** только если дамп полный и нужен pg_restore без --data-only.
 

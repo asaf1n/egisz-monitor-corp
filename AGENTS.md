@@ -2,15 +2,17 @@
 
 Репозиторий: **EGISZ Monitor Corp** — ETL и витрина для мониторинга обмена МИС ↔ ЕГИЗС/РЭМД. Доменная логика парсинга, статусов, отчётов и поиска аномалий для аналитиков описана в **`.cursorrules`** (бизнес-контекст интеграции). Здесь — структура кода и инфраструктуры для правок функционала.
 
-**После существенных изменений** (парсер, `sql/`, дашборды, K8s, `start.ps1`, Airflow DAG) **обновляй этот файл и `.cursorrules`**. Для **`README.md`** держи ту же глубину, что и сейчас: правки — в логике текущих разделов, плюс навигация «слой за слоем» и сквозной поток (см. README).
+**После существенных изменений** (парсер, `sql/`, дашборды, K8s, `start.ps1`, Airflow DAG) **обновляй этот файл и `.cursorrules`**. Для **`README.md`** держи ту же глубину, что и сейчас: правки — в логике текущих разделов, плюс навигация «слой за слоем» и сквозной поток (см. README). **Тон и ограничения формулировок** для текстов репозитория — в [`docs/DOCUMENTATION_STYLE.md`](docs/DOCUMENTATION_STYLE.md); для агента в Cursor — правило `.cursor/rules/documentation-style.mdc`.
 
 ## Корень
 
 | Путь | Назначение |
 |------|------------|
 | `pyproject.toml` | Пакет `egisz-monitor-corp`, зависимости; CLI: **`egisz-corp`** и **`egisz-monitor`** (оба → `egisz_monitor_corp.cli`) |
-| `start.ps1` | Локальный стек в K8s (**namespace `egisz-monitor`**): по умолчанию **`apply`** / **`start`** (без сброса БД Metabase); **`deploy`** — полная пересборка образов + DROP/CREATE БД Metabase; также `reset-deploy`, `build`, `apply-rebuild`, `restart-*`, `reset-metabase`, `verify` (витрина + дашборды Metabase **01–11**), `web`, `forward`, `metabase-provision-local`, `test` — см. **`docs/KUBERNETES_LOCAL.md`**. Скрипт сохраняется в **UTF-8 с BOM** для корректной кириллицы в Windows PowerShell. |
+| `start.ps1` | Локальный стек в K8s (**namespace `egisz-monitor`**): по умолчанию **`apply`** / **`start`**; **`deploy`** — оба образа + DROP/CREATE БД приложения Metabase; **`reset-deploy`**, **`restart-metabase`** / **`restart-web`**, **`verify`**, **`metabase-provision-local`**, **`test`** — см. **`docs/KUBERNETES_LOCAL.md`**. Пересборка conf-ui без кэша + apply: **`.\start.ps1 -Action apply -DockerNoCache`** или **`.\scripts\apply-local-rebuild.ps1`**. Сброс только app DB Metabase без удаления namespace: **`deploy`** / **`reset-deploy`** или env **`METABASE_FORCE_PROVISION`**. Скрипт в **UTF-8 с BOM**. |
 | `README.md` | Обзор продукта, ETL, маппинг полей, таблица дашбордов Metabase |
+| [`docs/DOCUMENTATION_STYLE.md`](docs/DOCUMENTATION_STYLE.md) | Стиль пользовательской документации: конструктивные формулировки, аудитория, без цитирования чата |
+| `.cursor/rules/documentation-style.mdc` | То же для ИИ-агента Cursor (`alwaysApply`) |
 | `.cursorrules` | Парсинг SOAP/XML, витрина, отчёты, критичные статусы и сигналы для мониторинга интеграции |
 | `AGENTS.md` | Этот файл |
 
@@ -54,7 +56,7 @@
 |------|------------|
 | `metabase_dashboards/*.json` | Дашборды как код; имена и native-SQL карточек |
 | `metabase_dashboards/README.md` | Соответствие файлов (`01_operational.json` … `11_healthcheck.json`) и имён в UI |
-| `metabase/Dockerfile` | Образ **`egisz-monitor-metabase`** (теги `:k8s-v16`, `:local` — см. `start.ps1 -Action build`; non-root UID 1500, multi-stage `--virtual` apk-deps, HEALTHCHECK; bump при смене JSON/скриптов) |
+| `metabase/Dockerfile` | Образ **`egisz-monitor-metabase`** (теги `:k8s-v16`, `:local` — `docker build` в `start.ps1` deploy/reset-deploy/restart-metabase и в `metabase/provision-local.ps1`; non-root UID 1500, multi-stage `--virtual` apk-deps, HEALTHCHECK; bump при смене JSON/скриптов) |
 | `metabase/provision.sh` | Старт пода: провижининг из `/app/metabase_dashboards/` |
 | `metabase/setup-dashboards.sh` | Импорт JSON в коллекцию администратора |
 | `metabase/provision-local.ps1` | Локальный провижининг к Metabase на `localhost:3000` |

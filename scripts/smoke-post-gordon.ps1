@@ -29,7 +29,7 @@ try {
     $r = Invoke-WebRequest -Uri "$ConfUiUrl/healthz" -UseBasicParsing -TimeoutSec 5
     Write-Host "Status:" $r.StatusCode $r.Content
 } catch {
-    Write-Warning "healthz failed: run .\start.ps1 -Action web or open Config UI via LoadBalancer. $($_.Exception.Message)"
+    Write-Warning "healthz failed: run .\start.ps1 (apply) for port-forward, kubectl port-forward svc/conf-ui 8080:8080, or open Config UI via LoadBalancer. $($_.Exception.Message)"
 }
 
 Write-Host "`n=== kubectl logs deploy/conf-ui (tail 40; look for Firebird query timeout) ===" -ForegroundColor Cyan

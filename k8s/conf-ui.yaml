@@ -76,7 +76,7 @@ metadata:
 spec:
   replicas: 1
   # maxUnavailable=0 + maxSurge=1: новый под становится Ready (через /healthz) до отстрела старого —
-  # устраняет окно «Failed to fetch» в браузере при .\start.ps1 -Action apply / restart-conf-ui.
+  # устраняет окно «Failed to fetch» в браузере при .\start.ps1 -Action apply / restart-web.
   strategy:
     type: RollingUpdate
     rollingUpdate:

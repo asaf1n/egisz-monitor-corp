@@ -101,7 +101,7 @@ flowchart LR
 
 - **Airflow**: DAG читает конфиг по переменным `egisz_monitor_project_root` / `egisz_monitor_config_path`; задача `test_connections` отделена от `monitor_sync`. Вызывает `run_sync` напрямую без shell — устойчиво к изменениям CLI.
 - **Kubernetes**: namespace `egisz-monitor`, отдельные Job (schema-init, airflow-metadata-init), отдельные Secret (`postgres-credentials`, `metabase-admin`, `egisz-monitor-conf-ui-config`). Init-container для Config UI копирует Secret в emptyDir, чтобы Flask мог писать YAML — хороший паттерн для read-only K8s Secret.
-- **Локальный dev**: `start.ps1` создаёт kind cluster при необходимости, грузит образы, делает `kubectl apply` и port-forward, поддерживает `restart-metabase`/`restart-conf-ui`/`restart-web` — даёт быстрый цикл итераций.
+- **Локальный dev**: `start.ps1` создаёт kind cluster при необходимости, грузит образы, делает `kubectl apply` и port-forward; **`restart-web`** / **`restart-metabase`** пересобирают образ conf-ui или Metabase и делают rollout — быстрый цикл без полного `apply`.
 - **CLI пакет**: `egisz-corp` и `egisz-monitor` зарегистрированы в `pyproject.toml`, оба ведут в `egisz_monitor_corp.cli`. Это позволяет включить пакет в любой корпоративный стек как `pip install -e .` и не зависеть от Docker-образа.
 - **Конфиг**: YAML с поддержкой `EGISZ_MONITOR_CONFIG`, `EGISZ_MONITOR_POSTGRES_*` ENV-overrides и Kubernetes Secret-mount (с обработкой ротируемого пути `..YYYY_MM_DD_*`).
 

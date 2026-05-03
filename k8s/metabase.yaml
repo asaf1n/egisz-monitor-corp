@@ -105,7 +105,7 @@ spec:
             - name: MB_SITE_URL
               value: "http://127.0.0.1:3000"
             # Application DB в Postgres (БД metabase). Иначе Metabase держит состояние во внутреннем хранилище
-            # контейнера — rollout/redeploy не гарантируют повторный провижинг из образа. deploy/reset-deploy делают DROP/CREATE БД metabase; точечно: .\start.ps1 -Action reset-metabase.
+            # контейнера — rollout/redeploy не гарантируют повторный провижинг из образа. deploy/reset-deploy делают DROP/CREATE БД metabase; точечно: METABASE_FORCE_PROVISION или полный deploy.
             - name: MB_DB_TYPE
               value: "postgres"
             - name: MB_DB_HOST
@@ -127,7 +127,7 @@ spec:
             # Идемпотентный provisioning: если в БД metabase уже есть >= /app/metabase_dashboards/*.json,
             # provision.sh пропускает setup-dashboards.sh, dashboard ID сохраняются между restart'ами.
             # auto — детект по числу EGISZ дашбордов; true — всегда пересоздавать (через bump тега и
-            # rollout restart); false — никогда (для отладки). Force re-provision: start.ps1 -Action reset-metabase.
+            # rollout restart); false — никогда (для отладки). Force re-provision: METABASE_FORCE_PROVISION=true или deploy/reset-deploy.
             - name: METABASE_FORCE_PROVISION
               value: "auto"
             # JVM-тюнинг для контейнера: heap = 75% memory limit (G1GC; кратно snappier чем дефолтный

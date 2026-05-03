@@ -110,6 +110,22 @@ PAGE = """
     .hc-bullet-red { background: rgba(244, 63, 94, 0.85); box-shadow: 0 0 0 1px rgba(244, 63, 94, 0.3); }
     .hc-bullet-yellow { background: rgba(245, 158, 11, 0.85); box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.3); }
     .hc-bullet-green { background: rgba(16, 185, 129, 0.85); box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.3); }
+    /* Полоса «Стоп»: жёлтые диагонали как на предупреждающей разметке */
+    #connStatusStrip.conn-strip-stop-hazard {
+      border-color: rgba(250, 204, 21, 0.82);
+      color: #fffbeb;
+      background-color: rgba(6, 78, 59, 0.55);
+      background-image: repeating-linear-gradient(
+        -42deg,
+        transparent 0 11px,
+        rgba(250, 204, 21, 0.38) 11px 14px,
+        transparent 14px 25px,
+        rgba(250, 204, 21, 0.38) 25px 28px
+      );
+    }
+    #connStatusStrip.conn-strip-stop-hazard #connStatusText {
+      text-shadow: 0 0 2px rgba(0, 0, 0, 0.95), 0 1px 3px rgba(0, 0, 0, 0.85);
+    }
   </style>
 </head>
 <body class="min-h-[100dvh] min-h-screen bg-[#121826] text-white lg:h-screen lg:overflow-hidden pb-[env(safe-area-inset-bottom,0px)]">
@@ -592,6 +608,15 @@ PAGE = """
       return { key: 'sync_err', title: 'Ошибка синхронизации', hint: logHint, classBar: 'border-orange-700/80 bg-orange-900/40 text-orange-100' };
     }
     if (m) {
+      const mNorm = m.trim();
+      if (mNorm === 'Стоп') {
+        return {
+          key: 'stop_strip',
+          title: statusLinePhrase(mNorm, 72) || 'Стоп',
+          hint: logHint,
+          classBar: 'conn-strip-stop-hazard',
+        };
+      }
       return ui && ui.ok
         ? {
             key: 'db_ok',

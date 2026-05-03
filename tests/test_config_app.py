@@ -164,6 +164,8 @@ def test_index_html_uses_null_safe_bind_click(cfg_yaml: Path) -> None:
     assert "function etlStatusOneLine" in html
     assert "function statusLinePhrase" in html
     assert "function connStatusStripState" in html
+    assert "conn-strip-stop-hazard" in html
+    assert "repeating-linear-gradient" in html
     assert "function buildSystemLogText" in html
     assert 'name="etl_interleave_page_rows"' in html
     assert "auto_sync_schedule_cron" in html
@@ -198,6 +200,30 @@ def test_api_sync_stop_when_idle(cfg_yaml: Path) -> None:
     body = resp.get_json()
     assert body["ok"] is False
     assert "не выполняется" in body["message"].lower()
+
+
+def test_api_sync_stop_when_running_accepts_cancel(cfg_yaml: Path) -> None:
+    """Последняя остановка: при активном синке POST /api/sync/stop принимает кооперативный cancel."""
+    import egisz_monitor_corp.sync_routes as sr
+
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+    with sr._state_lock:
+        sr._state["running"] = True
+        sr._cancel_evt.clear()
+    try:
+        resp = client.post("/api/sync/stop")
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["ok"] is True
+        low = body["message"].lower()
+        assert "останов" in low or "стоп" in low or "выйдет" in low
+        assert sr._cancel_evt.is_set()
+    finally:
+        with sr._state_lock:
+            sr._state["running"] = False
+            sr._cancel_evt.clear()
 
 
 def test_api_sync_start_rejects_invalid_form_etl_batch(cfg_yaml: Path) -> None:

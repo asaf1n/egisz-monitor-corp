@@ -37,5 +37,5 @@ auto_sync:
   timezone: "Etc/UTC"
 
 metabase:
-  # С ПК при port-forward Metabase на localhost:3000 (см. .\start.ps1 -Action web). Вход в Metabase: admin@egisz.local / egisz.
+  # С ПК при port-forward Metabase на localhost:3000 (kubectl port-forward svc/metabase 3000:3000 или после .\start.ps1). Вход в Metabase: admin@egisz.local / egisz.
   site_url: "http://127.0.0.1:3000"

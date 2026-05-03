@@ -1,9 +1,6 @@
-# Пересборка образа conf-ui без кэша Docker и kubectl apply (см. start.ps1 -Action apply-rebuild).
-param()
-
-$RepoRoot = Split-Path $PSScriptRoot -Parent
-Set-Location $RepoRoot
-
-$start = Join-Path $RepoRoot 'start.ps1'
-& $start -Action apply-rebuild
-if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+# Пересборка образа conf-ui без кэша Docker + kubectl apply (эквивалент: .\start.ps1 -Action apply -DockerNoCache).
+$ErrorActionPreference = "Stop"
+$here = Split-Path -Parent $MyInvocation.MyCommand.Path
+$start = Join-Path (Split-Path -Parent $here) "start.ps1"
+& $start -Action apply -DockerNoCache
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
