@@ -273,7 +273,7 @@ PAGE = """
                   <input name="etl_batch" type="number" value="{{ etl.batch_size }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
                 </label>
                 <label class="block min-w-0 max-w-full">
-                  <span class="block truncate font-mono text-[10px] uppercase tracking-[0.12em] text-[#9CA3AF] lg:text-[10px] lg:tracking-[0.14em] lg:text-[#4B5563]" title="sync_window_days">window</span>
+                  <span class="block truncate font-mono text-[10px] uppercase tracking-[0.12em] text-[#9CA3AF] lg:text-[10px] lg:tracking-[0.14em] lg:text-[#4B5563]" title="sync_window_days">sync days</span>
                   <input name="etl_sync_days" type="number" value="{{ etl.sync_window_days }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
                 </label>
                 <label class="block min-w-0 max-w-full sm:col-span-2 lg:col-span-1">
@@ -289,7 +289,6 @@ PAGE = """
           <div class="flex min-h-0 w-full min-w-0 shrink-0 flex-col gap-1.5 rounded-lg border border-[#2D3F5E] bg-[#121826] px-3 py-2 lg:row-start-1 lg:col-start-2 lg:mt-2 lg:h-full lg:min-h-0 lg:self-stretch lg:gap-1 lg:overflow-hidden lg:py-1.5 fixed-scroll">
             <div class="mb-0 shrink-0">
               <h2 class="text-sm font-semibold tracking-tight text-[#D1D5DB] lg:text-xs lg:leading-tight">Последние значения синхронизации</h2>
-              <p id="pgSnapHint" class="mt-0.5 hidden text-[10px] leading-snug text-[#6B7280] lg:text-[10px]" title="Во время синка LOGID/EGMID берутся из payload текущего прогона; в etl_state попадают после завершения. Опрос снимка ~10 с.">При синке LOGID/EGMID — из текущего прогона; в БД — после успешного завершения. Опрос ~10&nbsp;с.</p>
             </div>
 
             <section id="tabSnapshot" class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto lg:gap-1 fixed-scroll">
@@ -643,12 +642,6 @@ PAGE = """
     if (msg && (/Предупреждение/i.test(msg) || !p)) lines.push(msg);
     return lines.filter(Boolean).join(String.fromCharCode(10));
   }
-  function setPgSnapHintVisible(on) {
-    const h = document.getElementById('pgSnapHint');
-    if (!h) return;
-    if (on) h.classList.remove('hidden');
-    else h.classList.add('hidden');
-  }
   function refreshConnStatusStrip() {
     const wrap = document.getElementById('connStatusStrip');
     const textEl = document.getElementById('connStatusText');
@@ -699,7 +692,7 @@ PAGE = """
     const mm = String(d.getUTCMinutes()).padStart(2, '0');
     return day + ' ' + mon + ' ' + hh + ':' + mm;
   }
-  function syncMetricsLines(j) {
+  function syncMetricsLines() {
     const logEl = document.getElementById('pgSnapLogId');
     const egEl = document.getElementById('pgSnapEgmid');
     const licEl = document.getElementById('pgSnapLicMd');
@@ -713,15 +706,6 @@ PAGE = """
     let logV = rawFrom(logEl);
     let egV = rawFrom(egEl);
     let licV = rawFrom(licEl);
-    const p = j && j.progress && typeof j.progress === 'object' ? j.progress : null;
-    if (p) {
-      if (p.cursor_log_id != null && p.cursor_log_id !== '') logV = String(p.cursor_log_id);
-      if (p.messages_cursor_egmid != null && p.messages_cursor_egmid !== '') egV = String(p.messages_cursor_egmid);
-      if (p.licenses_modifydate_iso != null && String(p.licenses_modifydate_iso).trim() !== '') {
-        const iso = String(p.licenses_modifydate_iso).trim();
-        licV = Number.isNaN(Date.parse(iso)) ? iso : formatPgSyncAtRu(iso);
-      }
-    }
     function fmtNum(s) {
       if (s === '—') return '—';
       const n = Number(String(s).replace(/\\s/g, '').replace(/\\u00a0/g, ''));
@@ -1037,7 +1021,6 @@ PAGE = """
         loadPgSyncSnapshotOnce();
       }
       lastSyncJson = j;
-      setPgSnapHintVisible(!!j.running);
       refreshConnStatusStrip();
       syncActionButtonsFromPoll(j);
       applySyncStatusFromPoll(j, el);
