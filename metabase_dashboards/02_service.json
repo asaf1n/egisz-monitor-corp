@@ -1,7 +1,6 @@
 {
   "name": "02 Сервис, healthcheck и парсинг журнала",
   "description": "Поток callback/витрины (нагрузка, топы СЭМД и клиник) и сигналы healthcheck (`v_health_signals`, heatmap клиники × дни по **Обработано IPS**, очередь, тренд ошибок парсинга по уникальным документам, сводка прокси-БД). Период витрины — field filter `dwh_date` по **«Обработано IPS»** на карточках потока и на heatmap (та же логика, что архив СЭМД и дашборд **01**); фильтры **Код СЭМД** и **JID клиники** — `top_semd_filter`, `top_clinic_filter`. Карточки healthcheck (сигналы, топ 24ч, очередь, прокси) — снимок «сейчас» из `sql/005_healthcheck.sql`, без привязки к `dwh_date`. **Парсинг staging** (`v_stg_parse_errors_by_document`): фильтр даты `parse_created_filter` по `created_at`, плюс `err_parse_code_filter`. Отказы РЭМД — на **01** и **04**.",
-  "width": "full",
   "parameters": [
     {
       "id": "d4e5f6a7-b8c9-0d1e-2f3a-4b5c6d7e8f0a1",
@@ -43,39 +42,32 @@
     {
       "name": "02 · Топ типов СЭМД (поток)",
       "description": "Объём по коду и наименованию СЭМД в выбранном периоде (все статусы) — для приоритизации доработок и нагрузки на шлюз.",
-      "table_ref": "v_egisz_transactions_enriched_ui",
-      "metabase-field-filters": {
-        "dwh_date": {
-          "table_ref": "v_egisz_transactions_enriched_ui",
-          "field_name": "Обработано IPS"
-        }
-      },
       "dataset_query": {
         "type": "native",
         "native": {
           "query": "SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID клиники\"::text = {{top_clinic}}]] GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 25",
           "template-tags": {
-            "dwh_date": {
-              "id": "f2000001-0001-4001-8001-000000000001",
-              "name": "dwh_date",
-              "display-name": "По дате «Обработано»",
-              "type": "dimension",
-              "widget-type": "date/all-options"
-            },
             "top_semd": {
+              "widget-type": "string/=",
               "id": "f2000001-0001-4001-8001-000000000010",
               "name": "top_semd",
               "display-name": "Код СЭМД",
               "type": "text",
-              "widget-type": "string/=",
               "required": false
             },
+            "dwh_date": {
+              "widget-type": "date/all-options",
+              "id": "f2000001-0001-4001-8001-000000000001",
+              "name": "dwh_date",
+              "display-name": "По дате «Обработано»",
+              "type": "dimension"
+            },
             "top_clinic": {
+              "widget-type": "string/=",
               "id": "f2000001-0001-4001-8001-000000000011",
               "name": "top_clinic",
               "display-name": "JID клиники",
               "type": "text",
-              "widget-type": "string/=",
               "required": false
             }
           }
@@ -87,10 +79,20 @@
         "graph.dimensions": [
           "Наименование СЭМД"
         ],
-        "graph.metrics": [
-          "Документов"
-        ],
         "graph.show_values": true,
+        "table": {
+          "columns": {
+            "[\"name\",\"clinic_id\"]": {
+              "display_as": null
+            },
+            "[\"name\",\"service_id\"]": {
+              "display_as": null
+            },
+            "[\"name\",\"transaction_id\"]": {
+              "display_as": null
+            }
+          }
+        },
         "column_settings": {
           "[\"name\",\"Код СЭМД\"]": {
             "column_title": "Код СЭМД"
@@ -103,7 +105,10 @@
             "number_separators": ".",
             "decimals": 0
           }
-        }
+        },
+        "graph.metrics": [
+          "Документов"
+        ]
       },
       "sizeX": 12,
       "sizeY": 6,
@@ -113,39 +118,32 @@
     {
       "name": "02 · Объём по клиникам (поток)",
       "description": "Топ клиник по числу **документов** (DISTINCT «Связанное сообщение»), все статусы; JID в подписи — как на оперативном мониторинге.",
-      "table_ref": "v_egisz_transactions_enriched_ui",
-      "metabase-field-filters": {
-        "dwh_date": {
-          "table_ref": "v_egisz_transactions_enriched_ui",
-          "field_name": "Обработано IPS"
-        }
-      },
       "dataset_query": {
         "type": "native",
         "native": {
           "query": "SELECT \"JID клиники\"::text AS \"JID клиники\", \"Наименование клиники\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID клиники\"::text = {{top_clinic}}]] GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20",
           "template-tags": {
-            "dwh_date": {
-              "id": "f2000002-0002-4002-8002-000000000001",
-              "name": "dwh_date",
-              "display-name": "По дате «Обработано»",
-              "type": "dimension",
-              "widget-type": "date/all-options"
-            },
             "top_semd": {
+              "widget-type": "string/=",
               "id": "f2000002-0002-4002-8002-000000000010",
               "name": "top_semd",
               "display-name": "Код СЭМД",
               "type": "text",
-              "widget-type": "string/=",
               "required": false
             },
+            "dwh_date": {
+              "widget-type": "date/all-options",
+              "id": "f2000002-0002-4002-8002-000000000001",
+              "name": "dwh_date",
+              "display-name": "По дате «Обработано»",
+              "type": "dimension"
+            },
             "top_clinic": {
+              "widget-type": "string/=",
               "id": "f2000002-0002-4002-8002-000000000011",
               "name": "top_clinic",
               "display-name": "JID клиники",
               "type": "text",
-              "widget-type": "string/=",
               "required": false
             }
           }
@@ -157,10 +155,20 @@
         "graph.dimensions": [
           "Наименование клиники"
         ],
-        "graph.metrics": [
-          "Документов"
-        ],
         "graph.show_values": true,
+        "table": {
+          "columns": {
+            "[\"name\",\"clinic_id\"]": {
+              "display_as": null
+            },
+            "[\"name\",\"service_id\"]": {
+              "display_as": null
+            },
+            "[\"name\",\"transaction_id\"]": {
+              "display_as": null
+            }
+          }
+        },
         "column_settings": {
           "[\"name\",\"JID клиники\"]": {
             "column_title": "JID клиники"
@@ -173,7 +181,10 @@
             "number_separators": ".",
             "decimals": 0
           }
-        }
+        },
+        "graph.metrics": [
+          "Документов"
+        ]
       },
       "sizeX": 12,
       "sizeY": 6,
@@ -183,11 +194,11 @@
     {
       "name": "02 · Сигналы healthcheck",
       "description": "Пять сигналов: error_rate_high (>10% за 24ч при объёме **документов** >50), unknown_high (>5%), parse_errors_burst (**уникальных документов** с ошибкой парсинга за час >10), queue_red_24h (>50 в очереди >24ч), cursor_stale (etl_state.updated_at >6ч). Уровень — green/yellow/red.",
-      "table_ref": "v_health_signals_ui",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT \"Сигнал\", \"Уровень\", \"Значение\", \"Единица\", \"База расчёта\", \"Что делать\" FROM public.v_health_signals_ui ORDER BY CASE \"Уровень\" WHEN 'red' THEN 0 WHEN 'yellow' THEN 1 WHEN 'green' THEN 2 ELSE 3 END, \"Код сигнала\""
+          "query": "SELECT \"Сигнал\", \"Уровень\", \"Значение\", \"Единица\", \"База расчёта\", \"Что делать\" FROM public.v_health_signals_ui ORDER BY CASE \"Уровень\" WHEN 'red' THEN 0 WHEN 'yellow' THEN 1 WHEN 'green' THEN 2 ELSE 3 END, \"Код сигнала\"",
+          "template-tags": {}
         },
         "database": 1
       },
@@ -223,9 +234,22 @@
             "value": "green",
             "color": "#10B981"
           }
-        ]
+        ],
+        "table": {
+          "columns": {
+            "[\"name\",\"clinic_id\"]": {
+              "display_as": null
+            },
+            "[\"name\",\"service_id\"]": {
+              "display_as": null
+            },
+            "[\"name\",\"transaction_id\"]": {
+              "display_as": null
+            }
+          }
+        }
       },
-      "sizeX": 24,
+      "sizeX": 17,
       "sizeY": 5,
       "row": 6,
       "col": 0
@@ -233,11 +257,11 @@
     {
       "name": "02 · Сводка по уровням (сигналы)",
       "description": "Сколько сигналов сейчас в каждом уровне (для быстрой оценки общего состояния).",
-      "table_ref": "v_health_signals",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT \"Уровень\" AS \"Уровень\", COUNT(*)::bigint AS \"Количество\" FROM public.v_health_signals_ui GROUP BY 1 ORDER BY CASE \"Уровень\" WHEN 'red' THEN 0 WHEN 'yellow' THEN 1 WHEN 'green' THEN 2 ELSE 3 END"
+          "query": "SELECT \"Уровень\" AS \"Уровень\", COUNT(*)::bigint AS \"Количество\" FROM public.v_health_signals_ui GROUP BY 1 ORDER BY CASE \"Уровень\" WHEN 'red' THEN 0 WHEN 'yellow' THEN 1 WHEN 'green' THEN 2 ELSE 3 END",
+          "template-tags": {}
         },
         "database": 1
       },
@@ -246,85 +270,69 @@
         "pie.dimension": "Уровень",
         "pie.metric": "Количество",
         "pie.show_legend": true,
-        "pie.show_total": true
-      },
-      "sizeX": 8,
-      "sizeY": 6,
-      "row": 11,
-      "col": 0
-    },
-    {
-      "name": "02 · Топ клиник по error rate (24ч)",
-      "description": "Top-15 клиник по доле ошибок РЭМД за последние 24ч. Используется для эскалации в L2.",
-      "table_ref": "v_health_by_clinic_ui",
-      "dataset_query": {
-        "type": "native",
-        "native": {
-          "query": "SELECT \"Наименование клиники\" AS \"Наименование клиники\", \"Доля ошибок, %\" AS \"Доля ошибок, %\", \"Транзакций за 24ч\" AS \"Транзакций за 24ч\", \"В очереди сейчас\" AS \"В очереди сейчас\", \"Уровень здоровья\" AS \"Уровень здоровья\" FROM public.v_health_by_clinic_ui WHERE \"Транзакций за 24ч\" >= 20 [[AND \"JID клиники\"::text = {{top_clinic}}]] ORDER BY \"Доля ошибок, %\" DESC NULLS LAST, \"Транзакций за 24ч\" DESC LIMIT 15",
-          "template-tags": {
-            "top_clinic": {
-              "id": "h1100001-1001-4101-8101-000000000010",
-              "name": "top_clinic",
-              "display-name": "JID клиники",
-              "type": "text",
-              "widget-type": "string/=",
-              "required": false
+        "pie.show_total": true,
+        "table": {
+          "columns": {
+            "[\"name\",\"clinic_id\"]": {
+              "display_as": null
+            },
+            "[\"name\",\"service_id\"]": {
+              "display_as": null
+            },
+            "[\"name\",\"transaction_id\"]": {
+              "display_as": null
             }
           }
         },
-        "database": 1
+        "pie.percent_visibility": "inside",
+        "version": 2,
+        "pie.rows": [
+          {
+            "key": "green",
+            "name": "green",
+            "originalName": "green",
+            "color": "#88BF4D",
+            "defaultColor": false,
+            "enabled": true,
+            "hidden": false,
+            "isOther": false
+          }
+        ]
       },
-      "display": "row",
-      "visualization_settings": {
-        "graph.dimensions": [
-          "Наименование клиники"
-        ],
-        "graph.metrics": [
-          "Доля ошибок, %"
-        ],
-        "graph.show_values": true
-      },
-      "sizeX": 16,
-      "sizeY": 6,
-      "row": 11,
-      "col": 8
+      "sizeX": 7,
+      "sizeY": 5,
+      "row": 6,
+      "col": 17
     },
     {
       "name": "02 · Heatmap клиники × дни (доля ошибок)",
       "description": "Тепловая карта по витрине: календарный день из **Обработано IPS**, клиника, доля ошибок (%). Тот же учёт документов, что архив и топы на **02** (COUNT DISTINCT «Связанное сообщение»). Период — общий фильтр **Период по дате обработки (витрина)**; без выбранного периода даты в SQL не режутся (лучше задать диапазон, как на **06**).",
-      "table_ref": "v_egisz_transactions_enriched_ui",
-      "metabase-field-filters": {
-        "dwh_date": {
-          "table_ref": "v_egisz_transactions_enriched_ui",
-          "field_name": "Обработано IPS"
-        }
-      },
       "dataset_query": {
         "type": "native",
         "native": {
           "query": "WITH d AS ( SELECT date_trunc('day', v.\"Обработано IPS\")::date AS day, COALESCE(NULLIF(TRIM(v.\"Наименование клиники\"), ''), 'JID ' || v.\"JID клиники\"::text) AS clinic, COUNT(DISTINCT v.\"Связанное сообщение\") AS cnt, COUNT(DISTINCT v.\"Связанное сообщение\") FILTER (WHERE v.\"Статус\" = 'error') AS err FROM public.v_egisz_transactions_enriched_ui v WHERE NULLIF(TRIM(v.\"JID клиники\"::text), '') IS NOT NULL [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(v.\"Код СЭМД\"), '') = {{top_semd}}]] [[AND v.\"JID клиники\"::text = {{top_clinic}}]] GROUP BY 1, 2 ) SELECT day AS \"День\", clinic AS \"Клиника\", ROUND(100.0 * err / NULLIF(cnt, 0), 2) AS \"Доля ошибок, %\" FROM d ORDER BY 1, 2",
           "template-tags": {
-            "dwh_date": {
-              "id": "f2000007-0007-4007-8007-000000000001",
-              "name": "dwh_date",
-              "display-name": "По дате «Обработано»",
-              "type": "dimension",
-              "widget-type": "date/all-options"
-            },
             "top_semd": {
+              "widget-type": "string/=",
               "id": "f2000007-0007-4007-8007-000000000010",
               "name": "top_semd",
               "display-name": "Код СЭМД",
               "type": "text",
-              "widget-type": "string/=",
               "required": false
             },
+            "dwh_date": {
+              "widget-type": "date/all-options",
+              "id": "f2000007-0007-4007-8007-000000000001",
+              "name": "dwh_date",
+              "display-name": "По дате «Обработано»",
+              "type": "dimension"
+            },
             "top_clinic": {
+              "widget-type": "string/=",
               "id": "h1100002-1001-4101-8101-000000000010",
               "name": "top_clinic",
               "display-name": "JID клиники",
               "type": "text",
-              "widget-type": "string/=",
               "required": false
             }
           }
@@ -352,21 +360,29 @@
             "max_type": "custom",
             "max_value": 25
           }
-        ]
+        ],
+        "table": {
+          "columns": [
+            {
+              "name": "Связанное сообщение",
+              "enabled": false
+            }
+          ]
+        }
       },
       "sizeX": 24,
       "sizeY": 8,
-      "row": 17,
+      "row": 11,
       "col": 0
     },
     {
       "name": "02 · Возраст очереди без ответа",
       "description": "Сколько документов «зависло» по возрасту: < 1ч, 1–24ч, > 24ч (источник `v_health_proxy_db`). Высокая `> 24ч` колонка — повод эскалировать на шлюз РЭМД.",
-      "table_ref": "v_health_proxy_db_ui",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT 'До 1 часа' AS \"Возраст\", \"Очередь < 1ч\" AS \"Документов\" FROM public.v_health_proxy_db_ui UNION ALL SELECT '1–24 часа', \"Очередь 1–24ч\" FROM public.v_health_proxy_db_ui UNION ALL SELECT 'Более 24 часов', \"Очередь > 24ч\" FROM public.v_health_proxy_db_ui"
+          "query": "SELECT 'До 1 часа' AS \"Возраст\", \"Очередь < 1ч\" AS \"Документов\" FROM public.v_health_proxy_db_ui UNION ALL SELECT '1–24 часа', \"Очередь 1–24ч\" FROM public.v_health_proxy_db_ui UNION ALL SELECT 'Более 24 часов', \"Очередь > 24ч\" FROM public.v_health_proxy_db_ui",
+          "template-tags": {}
         },
         "database": 1
       },
@@ -375,37 +391,43 @@
         "graph.dimensions": [
           "Возраст"
         ],
+        "graph.show_values": true,
+        "table": {
+          "columns": {
+            "[\"name\",\"clinic_id\"]": {
+              "display_as": null
+            },
+            "[\"name\",\"service_id\"]": {
+              "display_as": null
+            },
+            "[\"name\",\"transaction_id\"]": {
+              "display_as": null
+            }
+          }
+        },
         "graph.metrics": [
           "Документов"
-        ],
-        "graph.show_values": true
+        ]
       },
       "sizeX": 12,
       "sizeY": 6,
-      "row": 25,
+      "row": 19,
       "col": 0
     },
     {
       "name": "02 · Тренд ошибок парсинга",
       "description": "Динамика **уникальных документов** с ошибкой парсинга (`document_group_key`) по часам. Ось времени — **created_at** staging (время разбора журнала, не IPS). Используйте **Период парсинга**; без него берётся окно **30 суток до MAX(created_at)** в таблице (не привязано к календарю сервера).",
-      "table_ref": "v_stg_parse_errors_by_document",
-      "metabase-field-filters": {
-        "parse_created": {
-          "table_ref": "v_stg_parse_errors_by_document",
-          "field_name": "created_at"
-        }
-      },
       "dataset_query": {
         "type": "native",
         "native": {
           "query": "WITH b AS ( SELECT COALESCE((SELECT MAX(created_at) FROM public.v_stg_parse_errors_by_document), NOW()) AS mx ) SELECT date_trunc('hour', e.created_at) AS \"Час\", COUNT(DISTINCT e.document_group_key)::bigint AS \"Уникальных документов с ошибкой\" FROM public.v_stg_parse_errors_by_document e CROSS JOIN b WHERE e.created_at >= b.mx - INTERVAL '30 days' [[AND {{parse_created}}]] GROUP BY 1 ORDER BY 1",
           "template-tags": {
             "parse_created": {
+              "widget-type": "date/all-options",
               "id": "f3parse0-trend-001-4001-8001-000000099002",
               "name": "parse_created",
               "display-name": "По дате created_at (staging)",
-              "type": "dimension",
-              "widget-type": "date/all-options"
+              "type": "dimension"
             }
           }
         },
@@ -416,37 +438,63 @@
         "graph.dimensions": [
           "Час"
         ],
-        "graph.metrics": [
-          "Уникальных документов с ошибкой"
-        ],
         "graph.show_values": true,
         "graph.x_axis.scale": "timeseries",
+        "table": {
+          "columns": {
+            "[\"name\",\"clinic_id\"]": {
+              "display_as": null
+            },
+            "[\"name\",\"service_id\"]": {
+              "display_as": null
+            },
+            "[\"name\",\"transaction_id\"]": {
+              "display_as": null
+            }
+          }
+        },
         "column_settings": {
           "[\"name\",\"Час\"]": {
             "date_style": "D MMMM, YYYY",
             "time_style": "HH:mm"
           }
-        }
+        },
+        "graph.metrics": [
+          "Уникальных документов с ошибкой"
+        ]
       },
       "sizeX": 12,
       "sizeY": 6,
-      "row": 25,
+      "row": 19,
       "col": 12
     },
     {
       "name": "02 · Сводка прокси-БД",
       "description": "Цифры из `v_health_proxy_db_ui`: staging исходящих (`stg_egisz_outbound_documents`), max EGMID в нём, очередь без ответа, `etl_state.last_log_id`, GREATEST(last_egmid, source_max_egmid) в etl_state (колонка «etl_state max(...)» в представлении).",
-      "table_ref": "v_health_proxy_db_ui",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT \"Staging: всего строк\", \"Без EGMID\", \"Очередь всего\", \"Очередь > 24ч\", \"Staging max EGMID\", \"Staging max Sent\", \"Последний апдейт курсора\", \"etl_state.last_log_id\" FROM public.v_health_proxy_db_ui"
+          "query": "SELECT \"Staging: всего строк\", \"Без EGMID\", \"Очередь всего\", \"Очередь > 24ч\", \"Staging max EGMID\", \"Staging max Sent\", \"Последний апдейт курсора\", \"etl_state.last_log_id\" FROM public.v_health_proxy_db_ui",
+          "template-tags": {}
         },
         "database": 1
       },
       "display": "table",
       "visualization_settings": {
         "table.cell_column": "Staging: всего строк",
+        "table": {
+          "columns": {
+            "[\"name\",\"clinic_id\"]": {
+              "display_as": null
+            },
+            "[\"name\",\"service_id\"]": {
+              "display_as": null
+            },
+            "[\"name\",\"transaction_id\"]": {
+              "display_as": null
+            }
+          }
+        },
         "column_settings": {
           "[\"name\",\"etl_state.last_log_id\"]": {
             "column_title": "etl_state.last_log_id"
@@ -455,79 +503,31 @@
       },
       "sizeX": 24,
       "sizeY": 4,
-      "row": 31,
+      "row": 25,
       "col": 0
     },
     {
       "name": "02 · Парсинг: строки журнала vs уникальные документы",
       "description": "Сравнение сырого COUNT(*) по ошибкам и **COUNT(DISTINCT document_group_key)**. Одна и та же проблема по одному СЭМД не должна многократно раздувать «документную» метрику, если в тексте извлечён relatesToMessage / localUid / emdrId.",
-      "table_ref": "v_stg_parse_errors_by_document",
-      "metabase-field-filters": {
-        "parse_created": {
-          "table_ref": "v_stg_parse_errors_by_document",
-          "field_name": "created_at"
-        }
-      },
       "dataset_query": {
         "type": "native",
         "native": {
           "query": "SELECT COUNT(*)::bigint AS \"Строк в stg_parse_errors\", COUNT(DISTINCT document_group_key)::bigint AS \"Уникальных документов с ошибкой\" FROM public.v_stg_parse_errors_by_document WHERE 1=1 [[AND {{parse_created}}]] [[AND error_code::text = {{err_parse_code}}]]",
           "template-tags": {
             "err_parse_code": {
+              "widget-type": "string/=",
               "id": "f3000000-0001-4001-8001-000000000010",
               "name": "err_parse_code",
               "display-name": "Код ошибки парсинга",
               "type": "text",
-              "widget-type": "string/=",
               "required": false
             },
             "parse_created": {
+              "widget-type": "date/all-options",
               "id": "f3parse0-0001-4001-8001-000000099001",
               "name": "parse_created",
               "display-name": "По дате created_at (staging)",
-              "type": "dimension",
-              "widget-type": "date/all-options"
-            }
-          }
-        },
-        "database": 1
-      },
-      "display": "table",
-      "visualization_settings": {},
-      "sizeX": 24,
-      "sizeY": 3,
-      "row": 36,
-      "col": 0
-    },
-    {
-      "name": "02 · Ошибки парсинга (stg_parse_errors)",
-      "description": "Последние 100 записей staging с **ссылками на источник** (LOGID, MSGID, EGMID) и подсказками из сырого XML. Деталь по строкам журнала; для KPI используйте карточку «строки vs документы» и `document_group_key`.",
-      "table_ref": "v_stg_parse_errors_by_document",
-      "metabase-field-filters": {
-        "parse_created": {
-          "table_ref": "v_stg_parse_errors_by_document",
-          "field_name": "created_at"
-        }
-      },
-      "dataset_query": {
-        "type": "native",
-        "native": {
-          "query": "SELECT id AS \"Номер записи\", error_code AS \"Код ошибки\", LEFT(message, 200) AS \"Сообщение\", created_at AS \"Создано\", relates_to_hint AS \"relatesToMessage (из текста)\", local_uid_hint AS \"localUid (из текста)\", emdr_id_hint AS \"emdrId (из текста)\", exchangelog_log_id AS \"EXCHANGELOG.LOGID\", journal_msgid AS \"EXCHANGELOG.MSGID\", egisz_messages_egmid AS \"EGISZ_MESSAGES.EGMID\", document_group_key AS \"Ключ документа (группировка)\", relates_to_id AS \"relates_to_id (если есть)\" FROM public.v_stg_parse_errors_by_document WHERE 1=1 [[AND {{parse_created}}]] [[AND error_code::text = {{err_parse_code}}]] ORDER BY id DESC LIMIT 100",
-          "template-tags": {
-            "err_parse_code": {
-              "id": "f3000001-0001-4001-8001-000000000010",
-              "name": "err_parse_code",
-              "display-name": "Код ошибки парсинга",
-              "type": "text",
-              "widget-type": "string/=",
-              "required": false
-            },
-            "parse_created": {
-              "id": "f3parse0-0001-4001-8001-000000099001",
-              "name": "parse_created",
-              "display-name": "По дате created_at (staging)",
-              "type": "dimension",
-              "widget-type": "date/all-options"
+              "type": "dimension"
             }
           }
         },
@@ -535,6 +535,105 @@
       },
       "display": "table",
       "visualization_settings": {
+        "table": {
+          "columns": [
+            {
+              "name": "Связанное сообщение",
+              "enabled": false
+            }
+          ]
+        }
+      },
+      "sizeX": 24,
+      "sizeY": 3,
+      "row": 29,
+      "col": 0
+    },
+    {
+      "name": "02 · Топ клиник по error rate (24ч)",
+      "description": "Top-15 клиник по доле ошибок РЭМД за последние 24ч. Используется для эскалации в L2.",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT \"Наименование клиники\" AS \"Наименование клиники\", \"Доля ошибок, %\" AS \"Доля ошибок, %\", \"Транзакций за 24ч\" AS \"Транзакций за 24ч\", \"В очереди сейчас\" AS \"В очереди сейчас\", \"Уровень здоровья\" AS \"Уровень здоровья\" FROM public.v_health_by_clinic_ui WHERE \"Транзакций за 24ч\" >= 20 [[AND \"JID клиники\"::text = {{top_clinic}}]] ORDER BY \"Доля ошибок, %\" DESC NULLS LAST, \"Транзакций за 24ч\" DESC LIMIT 15",
+          "template-tags": {
+            "top_clinic": {
+              "widget-type": "string/=",
+              "id": "h1100001-1001-4101-8101-000000000010",
+              "name": "top_clinic",
+              "display-name": "JID клиники",
+              "type": "text",
+              "required": false
+            }
+          }
+        },
+        "database": 1
+      },
+      "display": "row",
+      "visualization_settings": {
+        "graph.dimensions": [
+          "Наименование клиники"
+        ],
+        "graph.show_values": true,
+        "table": {
+          "columns": {
+            "[\"name\",\"clinic_id\"]": {
+              "display_as": null
+            },
+            "[\"name\",\"service_id\"]": {
+              "display_as": null
+            },
+            "[\"name\",\"transaction_id\"]": {
+              "display_as": null
+            }
+          }
+        },
+        "graph.metrics": [
+          "Доля ошибок, %"
+        ]
+      },
+      "sizeX": 16,
+      "sizeY": 6,
+      "row": 32,
+      "col": 8
+    },
+    {
+      "name": "02 · Ошибки парсинга (stg_parse_errors)",
+      "description": "Последние 100 записей staging с **ссылками на источник** (LOGID, MSGID, EGMID) и подсказками из сырого XML. Деталь по строкам журнала; для KPI используйте карточку «строки vs документы» и `document_group_key`.",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT id AS \"Номер записи\", error_code AS \"Код ошибки\", LEFT(message, 200) AS \"Сообщение\", created_at AS \"Создано\", relates_to_hint AS \"relatesToMessage (из текста)\", local_uid_hint AS \"localUid (из текста)\", emdr_id_hint AS \"emdrId (из текста)\", exchangelog_log_id AS \"EXCHANGELOG.LOGID\", journal_msgid AS \"EXCHANGELOG.MSGID\", egisz_messages_egmid AS \"EGISZ_MESSAGES.EGMID\", document_group_key AS \"Ключ документа (группировка)\", relates_to_id AS \"relates_to_id (если есть)\" FROM public.v_stg_parse_errors_by_document WHERE 1=1 [[AND {{parse_created}}]] [[AND error_code::text = {{err_parse_code}}]] ORDER BY id DESC LIMIT 100",
+          "template-tags": {
+            "err_parse_code": {
+              "widget-type": "string/=",
+              "id": "f3000001-0001-4001-8001-000000000010",
+              "name": "err_parse_code",
+              "display-name": "Код ошибки парсинга",
+              "type": "text",
+              "required": false
+            },
+            "parse_created": {
+              "widget-type": "date/all-options",
+              "id": "f3parse0-0001-4001-8001-000000099001",
+              "name": "parse_created",
+              "display-name": "По дате created_at (staging)",
+              "type": "dimension"
+            }
+          }
+        },
+        "database": 1
+      },
+      "display": "table",
+      "visualization_settings": {
+        "table": {
+          "columns": [
+            {
+              "name": "Связанное сообщение",
+              "enabled": false
+            }
+          ]
+        },
         "column_settings": {
           "[\"name\",\"Номер записи\"]": {
             "column_title": "№ записи"
@@ -555,7 +654,7 @@
       },
       "sizeX": 24,
       "sizeY": 10,
-      "row": 39,
+      "row": 38,
       "col": 0
     }
   ]

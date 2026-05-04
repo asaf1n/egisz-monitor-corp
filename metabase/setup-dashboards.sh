@@ -483,17 +483,50 @@ create_card() {
             null
           end
         );
+      def infer_table_ref($q):
+        if ($q | test("v_rpt_documents_no_response_ui")) then "v_rpt_documents_no_response_ui"
+        elif ($q | test("v_rpt_semd_archive_ui")) then "v_rpt_semd_archive_ui"
+        elif ($q | test("v_stg_parse_errors_by_document")) then "v_stg_parse_errors_by_document"
+        elif ($q | test("v_egisz_transactions_enriched_ui")) then "v_egisz_transactions_enriched_ui"
+        else null end;
+      def infer_field_name($tr; $q; $tagKey):
+        if $tagKey == "parse_created" then "created_at"
+        elif $tagKey != "dwh_date" then null
+        elif $tr == "v_rpt_documents_no_response_ui" then "Отправлено"
+        elif $tr == "v_rpt_semd_archive_ui" then "Дата обработки"
+        elif ($q | test("\"День \\(тренд\\)\"")) then "День (тренд)"
+        else "Обработано IPS" end;
       ($metaArr[0]) as $meta
       | (.dataset_query.native["template-tags"] // {}) as $tags
       | (.["metabase-field-filters"] // {}) as $ff
-      | if ($ff | length) == 0 then
+      | (.dataset_query.native.query // "") as $q
+      | (infer_table_ref($q)) as $trAuto
+      | (
+          if ($ff | length) > 0 then
+            $ff
+          else
+            reduce ($tags | keys_unsorted[]) as $k ({}; 
+              if (($tags[$k].type // "") == "dimension") then
+                (infer_field_name($trAuto; $q; $k)) as $fn
+                | if ($trAuto != null and $fn != null) then
+                    . + { ($k): { table_ref: $trAuto, field_name: $fn } }
+                  else
+                    .
+                  end
+              else
+                .
+              end
+            )
+          end
+        ) as $ff2
+      | if ($ff2 | length) == 0 then
           $tags
         else
-          ($ff | keys_unsorted) as $keys
+          ($ff2 | keys_unsorted) as $keys
           | reduce $keys[] as $k ($tags;
-              resolve_field_id($meta; $ff[$k].table_ref; $ff[$k].field_name) as $fid
+              resolve_field_id($meta; $ff2[$k].table_ref; $ff2[$k].field_name) as $fid
               | if $fid == null then
-                  error("metabase-field-filters: field not found: \($ff[$k].table_ref).\($ff[$k].field_name)")
+                  error("metabase-field-filters: field not found: \($ff2[$k].table_ref).\($ff2[$k].field_name)")
                 else
                   .[$k] = ($tags[$k] // {}) + { dimension: ["field", $fid, null] }
                 end

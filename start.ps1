@@ -344,6 +344,31 @@ function Publish-ConfUiStampedDeploymentImage {
     Write-Host "`[local] conf-ui -> $img (stamped image; docker-desktop or kind)" -ForegroundColor DarkGray
 }
 
+function Publish-MetabaseStampedDeploymentImage {
+    <#
+      Уникальный тег egisz-monitor-metabase:<utc> и kubectl set image — чтобы kubelet гарантированно
+      взял свежий слой после docker build (imagePullPolicy=IfNotPresent + статичный тег может оставлять старый imageID).
+      Работает для docker-desktop и kind; на остальных контекстах ничего не делает.
+    #>
+    $ctx = (kubectl config current-context 2>$null | Out-String).Trim()
+    if ($ctx -ne "docker-desktop" -and $ctx -notmatch '^kind-') { return }
+    kubectl -n egisz-monitor get deploy metabase -o name 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { return }
+    $stamp = [DateTime]::UtcNow.ToString("yyyyMMddHHmmss")
+    $img = "egisz-monitor-metabase:k8s-v23-$stamp"
+    docker tag egisz-monitor-metabase:latest $img
+    if ($LASTEXITCODE -ne 0) { return }
+    if ($ctx -match '^kind-') {
+        $name = $ctx -replace '^kind-', ''
+        Write-Host "`[kind] Loading metabase $img into cluster $name (stamped tag for rollout)..." -ForegroundColor DarkGray
+        kind load docker-image $img --name $name
+        if ($LASTEXITCODE -ne 0) { exit 1 }
+    }
+    kubectl -n egisz-monitor set image deployment/metabase "metabase=$img"
+    if ($LASTEXITCODE -ne 0) { return }
+    Write-Host "`[local] metabase -> $img (stamped image; docker-desktop or kind)" -ForegroundColor DarkGray
+}
+
 function Invoke-ResetMetabaseApplicationDatabase {
     <#
       Metabase хранит UI и метаданные в Postgres (БД metabase). Перед DROP базы масштабируем deployment до 0.
@@ -725,6 +750,7 @@ function Invoke-KubectlApply {
         Invoke-ReconcileEtlCronjobFromLocalYaml -ConfigPath $k8sCfg
     }
 
+    Publish-MetabaseStampedDeploymentImage
     Publish-ConfUiStampedDeploymentImage
 
     if ($ResetMetabaseAppDb) {
@@ -1114,6 +1140,7 @@ switch ($Action) {
         Write-Banner "restart-metabase (docker build Metabase --no-cache + rollout)"
         Invoke-DockerBuildMetabaseOnly -DockerNoCache:$true
         Invoke-KindLoadImagesIfNeeded
+        Publish-MetabaseStampedDeploymentImage
         Invoke-CorpRolloutRestartMetabaseOnly
         Wait-CorpMetabaseRollout
         Write-Host "`[restart-metabase] Готово." -ForegroundColor Green

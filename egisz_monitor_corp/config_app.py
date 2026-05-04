@@ -298,16 +298,9 @@ PAGE = """
                   </button>
                 </div>
                 <div class="flex min-w-0 items-baseline gap-2 py-0">
-                  <span class="shrink-0 max-w-[38%] truncate text-xs font-medium text-[#9CA3AF] sm:text-sm lg:text-xs" title="etl_state.last_egmid — ватермарк журнала, не paging снимка EGISZ_MESSAGES">last_egmid:</span>
+                  <span class="shrink-0 max-w-[38%] truncate text-xs font-medium text-[#9CA3AF] sm:text-sm lg:text-xs" title="etl_state.messages_snapshot_high_egmid — курсор выгрузки снимка EGISZ_MESSAGES (последний EGMID, до которого дошла постраничная выгрузка)">EGMID:</span>
                   <code id="pgSnapEgmid" class="snap-val min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-sm sm:text-[15px]" data-raw="" title="">—</code>
                   <button type="button" class="pg-snap-copy inline-flex min-h-[2.5rem] min-w-[2.5rem] shrink-0 items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-2 text-[#509EE3] hover:bg-[#1B2940] sm:min-h-0 sm:min-w-0 sm:p-1" data-copy="pgSnapEgmid" title="Копировать" aria-label="Копировать">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
-                  </button>
-                </div>
-                <div class="flex min-w-0 items-baseline gap-2 py-0">
-                  <span class="max-w-[38%] shrink-0 truncate text-xs font-medium text-[#9CA3AF] sm:text-sm lg:max-w-[42%] lg:text-[10px]" title="etl_state.messages_snapshot_high_egmid — инкрементальная выгрузка снимка EGISZ_MESSAGES">MSG snap:</span>
-                  <code id="pgSnapMsgScan" class="snap-val min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-sm sm:text-[15px]" data-raw="" title="">—</code>
-                  <button type="button" class="pg-snap-copy inline-flex min-h-[2.5rem] min-w-[2.5rem] shrink-0 items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-2 text-[#509EE3] hover:bg-[#1B2940] sm:min-h-0 sm:min-w-0 sm:p-1" data-copy="pgSnapMsgScan" title="Копировать" aria-label="Копировать">
                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
                   </button>
                 </div>
@@ -725,7 +718,6 @@ PAGE = """
   function syncMetricsLines() {
     const logEl = document.getElementById('pgSnapLogId');
     const egEl = document.getElementById('pgSnapEgmid');
-    const msgScanEl = document.getElementById('pgSnapMsgScan');
     const licEl = document.getElementById('pgSnapLicMd');
     function rawFrom(el) {
       if (!el) return '—';
@@ -736,7 +728,6 @@ PAGE = """
     }
     let logV = rawFrom(logEl);
     let egV = rawFrom(egEl);
-    let msgScanV = rawFrom(msgScanEl);
     let licV = rawFrom(licEl);
     function fmtNum(s) {
       if (s === '—') return '—';
@@ -745,8 +736,7 @@ PAGE = """
     }
     return [
       'LOGID: ' + fmtNum(logV),
-      'last_egmid: ' + fmtNum(egV),
-      'messages_snapshot_high_egmid: ' + fmtNum(msgScanV),
+      'EGMID: ' + fmtNum(egV),
       'LICENSES.MODIFYDATE: ' + licV,
     ];
   }
@@ -806,7 +796,6 @@ PAGE = """
   async function loadPgSyncSnapshotOnce() {
     const logEl = document.getElementById('pgSnapLogId');
     const egEl = document.getElementById('pgSnapEgmid');
-    const msgScanEl = document.getElementById('pgSnapMsgScan');
     const licEl = document.getElementById('pgSnapLicMd');
     if (!logEl || !egEl || !licEl) return;
     function clearSnap() {
@@ -816,11 +805,6 @@ PAGE = """
       egEl.textContent = '—';
       egEl.setAttribute('data-raw', '');
       egEl.title = '';
-      if (msgScanEl) {
-        msgScanEl.textContent = '—';
-        msgScanEl.setAttribute('data-raw', '');
-        msgScanEl.title = '';
-      }
       licEl.textContent = '—';
       licEl.setAttribute('data-raw', '');
       licEl.title = '';
@@ -845,7 +829,7 @@ PAGE = """
         logEl.setAttribute('data-raw', '');
         logEl.title = '';
       }
-      const egStr = j.egmid != null ? String(j.egmid) : null;
+      const egStr = j.messages_snapshot_high_egmid != null ? String(j.messages_snapshot_high_egmid) : null;
       if (egStr != null && egStr !== '') {
         const en = Number(egStr);
         egEl.textContent = Number.isFinite(en) ? en.toLocaleString('ru-RU') : egStr;
@@ -855,19 +839,6 @@ PAGE = """
         egEl.textContent = '—';
         egEl.setAttribute('data-raw', '');
         egEl.title = '';
-      }
-      if (msgScanEl) {
-        const msStr = j.messages_snapshot_high_egmid != null ? String(j.messages_snapshot_high_egmid) : null;
-        if (msStr != null && msStr !== '') {
-          const mn = Number(msStr);
-          msgScanEl.textContent = Number.isFinite(mn) ? mn.toLocaleString('ru-RU') : msStr;
-          msgScanEl.setAttribute('data-raw', msStr);
-          msgScanEl.title = msStr;
-        } else {
-          msgScanEl.textContent = '—';
-          msgScanEl.setAttribute('data-raw', '');
-          msgScanEl.title = '';
-        }
       }
       const licRaw = j.licenses_modifydate != null && String(j.licenses_modifydate).trim() !== '' ? String(j.licenses_modifydate) : null;
       if (licRaw) {
