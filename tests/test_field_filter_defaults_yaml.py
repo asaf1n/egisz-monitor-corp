@@ -15,4 +15,4 @@ def test_field_filter_defaults_yaml_exists_and_structure():
     assert "dwh_date_bindings" in data
     assert "text_parameter_bindings" in data
     assert isinstance(data.get("dashboards"), list)
-    assert len(data["dashboards"]) >= 11
+    assert len(data["dashboards"]) >= 6

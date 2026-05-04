@@ -5,7 +5,6 @@ firebird:
   database: proxy_egisz
   user: SYSDBA
   password: masterkey
-  # Кириллица JPERSONS: при «????» в Metabase см. docs/METABASE.md; для UTF8-БД верните UTF8.
   charset: WIN1251
   page_size: 4096
 postgres:
@@ -20,7 +19,6 @@ etl:
   pipeline_name: firebird_exchangelog
   sync_window_days: 10
   source_query: null
-  interleave_page_rows: 8192
 auto_sync:
   enabled: false
   schedule_cron: "*/15 * * * *"

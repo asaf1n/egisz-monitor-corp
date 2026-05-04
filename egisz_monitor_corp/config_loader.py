@@ -71,11 +71,10 @@ class PostgresConfig:
 
 @dataclass
 class EtlConfig:
-    batch_size: int = 500
+    # Размер страницы EXCHANGELOG (FIRST n по LOGID) и шаг гранулярности кооперативной остановки sync.
+    batch_size: int = 8000
     pipeline_name: str = "firebird_exchangelog"
     sync_window_days: int = 30
-    # Размер страницы FIRST n при чередовании EGISZ_MESSAGES / EXCHANGELOG в Firebird (верхняя граница 65000).
-    interleave_page_rows: int = 8192
     source_query: str | None = None
     # None / не задано — без лимита. UTF-8 размер MSGTEXT; при превышении строка журнала пропускается (staging MSGTEXT_TOO_LARGE).
     max_msgtext_bytes: int | None = None
@@ -87,7 +86,6 @@ class EtlConfig:
     facts_upsert_chunk_size: int = 500
     # SET LOCAL statement_timeout на каждый батч UPSERT (сек.); None — не задавать лимит на стороне PG для этого шага.
     pg_upsert_statement_timeout_sec: int | None = 120
-
 
 @dataclass
 class AutoSyncConfig:
@@ -210,9 +208,6 @@ def parse_corp_config_dict(
     else:
         pg_upsert_statement_timeout_sec = 120
 
-    _inter = _int(etl.get("interleave_page_rows"), 8192)
-    _inter = max(500, min(_inter, 65_000))
-
     _sch = _str(as_raw.get("schedule_cron"), "*/15 * * * *").strip() or "*/15 * * * *"
     _tz = _str(as_raw.get("timezone"), "Etc/UTC").strip() or "Etc/UTC"
 
@@ -235,7 +230,7 @@ def parse_corp_config_dict(
             schema=pg_schema,
         ),
         etl=EtlConfig(
-            batch_size=_int(etl.get("batch_size"), 500),
+            batch_size=_int(etl.get("batch_size"), 8000),
             pipeline_name=_str(etl.get("pipeline_name"), "firebird_exchangelog"),
             sync_window_days=_int(etl.get("sync_window_days"), 30),
             source_query=_str(etl.get("source_query"), "") or None,
@@ -244,7 +239,6 @@ def parse_corp_config_dict(
             skip_firebird_progress_count=_bool(etl.get("skip_firebird_progress_count"), False),
             facts_upsert_chunk_size=_fchunk,
             pg_upsert_statement_timeout_sec=pg_upsert_statement_timeout_sec,
-            interleave_page_rows=_inter,
         ),
         metabase=dict(mb) if isinstance(mb, dict) else {},
         auto_sync=AutoSyncConfig(

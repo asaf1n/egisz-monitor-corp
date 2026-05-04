@@ -4,6 +4,8 @@
 .github/
 .gitignore
 .gitattributes
+.cursor/
+.cursorrules
 
 # Виртуальные окружения и кеши Python.
 .venv/
@@ -25,6 +27,7 @@ tests/
 .idea/
 *.swp
 *.swo
+.DS_Store
 
 # Артефакты сборки.
 build/
@@ -37,6 +40,9 @@ dist/
 k8s/local/
 k8s/postgres/postgres-credentials.yaml
 k8s/metabase-admin-secret.yaml
+.sync-err.log
+.sync-out.log
+debug-*.log
 
 # Большие/неиспользуемые ресурсы Metabase (для образа conf-ui они не нужны;
 # metabase/Dockerfile сам их COPY-ит из metabase_dashboards/).
@@ -46,9 +52,22 @@ metabase_dashboards/.manifest.sha256
 docs/
 *.md
 !README.md
+AGENTS.md
 agent-transcripts/
 terminals/
 
 # Временные файлы Windows.
 Thumbs.db
 desktop.ini
+
+# Временные файлы и резервные копии k8s.
+.k8s-backups/
+
+# Конфиги редакторов/IDE специфичные для проекта (не нужны в контейнере).
+.editorconfig
+.prettierrc
+.eslintrc
+
+# Автозаполненные пароли/сессии.
+.env.local
+.env.*.local

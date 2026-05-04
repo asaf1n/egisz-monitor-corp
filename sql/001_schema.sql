@@ -1,5 +1,6 @@
 -- EGISZ corporate DWH (Metabase-facing). Полная схема витрины в одном файле.
 -- UPSERT key: relates_to_id (SOAP callback). Watermark Firebird: EXCHANGELOG.LOGID → etl_state.
+-- MSGID — идентификатор сообщения в обмене; EXCHANGELOG.MSGID ссылается на EGISZ_MESSAGES.MSGID; EGMID — суррогатный ключ строки EGISZ_MESSAGES (РЭМД).
 -- Источник полей клиники: Firebird JPERSONS / EGISZ_LICENSES (см. proxy_tables: JINN VARCHAR(12), FIR_OID VARCHAR(255)).
 
 CREATE TABLE IF NOT EXISTS dim_semd_types (
@@ -69,13 +70,13 @@ ALTER TABLE fact_egisz_transactions ADD COLUMN IF NOT EXISTS semd_creation_at TI
 
 COMMENT ON COLUMN fact_egisz_transactions.registration_date IS 'Дата/время регистрации в ЕГИСЗ РЭМД: тег registrationDateTime (предпочтительно) или registrationDate в XML из EXCHANGELOG.MSGTEXT';
 COMMENT ON COLUMN fact_egisz_transactions.semd_creation_at IS 'Дата/время создания СЭМД: тег creationDateTime в XML из EXCHANGELOG.MSGTEXT';
-COMMENT ON COLUMN fact_egisz_transactions.processed_at IS 'Обработано IPS: EGISZ_MESSAGES.CREATEDATE; при отсутствии джойна — CREATEDATE строки EXCHANGELOG; иначе время загрузки ETL';
+COMMENT ON COLUMN fact_egisz_transactions.processed_at IS 'Обработано IPS: CREATEDATE строки EGISZ_MESSAGES (по MSGID журнала); если сообщение не найдено в снимке — CREATEDATE строки EXCHANGELOG; иначе время загрузки ETL';
 
 ALTER TABLE fact_egisz_transactions ADD COLUMN IF NOT EXISTS exchangelog_log_id BIGINT;
 ALTER TABLE fact_egisz_transactions ADD COLUMN IF NOT EXISTS egisz_messages_egmid BIGINT;
 
 COMMENT ON COLUMN fact_egisz_transactions.exchangelog_log_id IS 'EXCHANGELOG.LOGID строки журнала-источника (как водяной знак ETL, но на уровне факта для отчётов)';
-COMMENT ON COLUMN fact_egisz_transactions.egisz_messages_egmid IS 'EGISZ_MESSAGES.EGMID: из LEFT JOIN по MSGID в выгрузке журнала или из кэша дозагрузки по MSGID';
+COMMENT ON COLUMN fact_egisz_transactions.egisz_messages_egmid IS 'EGISZ_MESSAGES.EGMID — суррогатный ключ записи сообщения (фиксация исходящего при отправке в РЭМД); подставляется из stg_egisz_messages_journal по EXCHANGELOG.MSGID (= MSGID сообщения)';
 
 CREATE INDEX IF NOT EXISTS idx_fact_egisz_exchangelog_log_id ON fact_egisz_transactions (exchangelog_log_id);
 CREATE INDEX IF NOT EXISTS idx_fact_egisz_egisz_messages_egmid ON fact_egisz_transactions (egisz_messages_egmid);
@@ -98,8 +99,8 @@ ALTER TABLE stg_parse_errors ADD COLUMN IF NOT EXISTS emdr_id_hint VARCHAR(512);
 
 COMMENT ON TABLE stg_parse_errors IS 'Rows where MSGTEXT could not yield relates_to_id or XML is unusable; see relates_to_hint / local_uid_hint / emdr_id_hint and EXCHANGELOG keys for document-level reporting';
 COMMENT ON COLUMN stg_parse_errors.exchangelog_log_id IS 'EXCHANGELOG.LOGID — исходная строка прокси-журнала (трассировка)';
-COMMENT ON COLUMN stg_parse_errors.egisz_messages_egmid IS 'EGISZ_MESSAGES.EGMID при джойне по MSGID (трассировка)';
-COMMENT ON COLUMN stg_parse_errors.journal_msgid IS 'EXCHANGELOG.MSGID (трассировка к исходящему сообщению)';
+COMMENT ON COLUMN stg_parse_errors.egisz_messages_egmid IS 'EGISZ_MESSAGES.EGMID — идентификатор записи сообщения (трассировка)';
+COMMENT ON COLUMN stg_parse_errors.journal_msgid IS 'EXCHANGELOG.MSGID — идентификатор сообщения в контуре обмена (трассировка к EGISZ_MESSAGES.MSGID)';
 COMMENT ON COLUMN stg_parse_errors.relates_to_hint IS 'Регексп по тегу relatesToMessage в сыром MSGTEXT, если факт не построен';
 COMMENT ON COLUMN stg_parse_errors.local_uid_hint IS 'Регексп по localUid в сыром MSGTEXT (экземпляр СЭМД в МИС)';
 COMMENT ON COLUMN stg_parse_errors.emdr_id_hint IS 'Регексп по emdrId в сыром MSGTEXT (рег. номер в РЭМД, если уже фигурирует в теле)';
@@ -260,6 +261,7 @@ DROP VIEW IF EXISTS v_health_proxy_db_ui;
 DROP VIEW IF EXISTS v_health_by_clinic;
 DROP VIEW IF EXISTS v_health_signals;
 DROP VIEW IF EXISTS v_health_proxy_db;
+DROP VIEW IF EXISTS v_rpt_semd_archive_ui;
 DROP VIEW IF EXISTS v_rpt_documents_no_response_ui;
 DROP VIEW IF EXISTS v_egisz_transactions_enriched_ui;
 DROP VIEW IF EXISTS v_rpt_documents_no_response;
@@ -343,6 +345,20 @@ COMMENT ON TABLE stg_egisz_licenses_import IS 'Полная выгрузка EGI
 
 CREATE INDEX IF NOT EXISTS idx_stg_lic_import_jid ON stg_egisz_licenses_import (jid);
 
+-- Снимок EGISZ_MESSAGES за прогон (окно CREATEDATE как у журнала; только строки с непустым DOCUMENTID): сопоставление с EXCHANGELOG по MSGID только в PostgreSQL.
+CREATE TABLE IF NOT EXISTS stg_egisz_messages_journal (
+    msgid VARCHAR(512) NOT NULL PRIMARY KEY,
+    egmid BIGINT,
+    replyto TEXT,
+    documentid TEXT,
+    msg_created_at TIMESTAMPTZ,
+    loaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE stg_egisz_messages_journal IS 'Зеркало EGISZ_MESSAGES (непустой DOCUMENTID, окно CREATEDATE как у журнала при sync_window_days > 0): инкрементальная выгрузка по EGMID с водяным знаком etl_state.messages_snapshot_high_egmid; при sync_window_days <= 0 — TRUNCATE и полный пересъём без окна по дате; догрузка по MSGID из пакетов журнала. Сопоставление EXCHANGELOG.MSGID = MSGID — в PostgreSQL.';
+
+CREATE INDEX IF NOT EXISTS idx_stg_em_journal_msgid ON stg_egisz_messages_journal (msgid);
+
 -- Снимок исходящих сообщений с DOCUMENTID (инкремент по EGMID как у ETL). Заполняется пайплайном после загрузки fact.
 CREATE TABLE IF NOT EXISTS stg_egisz_outbound_documents (
     document_id VARCHAR(256) PRIMARY KEY,
@@ -357,8 +373,8 @@ CREATE TABLE IF NOT EXISTS stg_egisz_outbound_documents (
 
 ALTER TABLE stg_egisz_outbound_documents ADD COLUMN IF NOT EXISTS egmid BIGINT;
 
-COMMENT ON TABLE stg_egisz_outbound_documents IS 'EGISZ_MESSAGES с непустым DOCUMENTID (EGMID выше курсора ETL); для отчёта «Документы без ответа»';
-COMMENT ON COLUMN stg_egisz_outbound_documents.egmid IS 'EGMID строки EGISZ_MESSAGES при последнем снимке staging';
+COMMENT ON TABLE stg_egisz_outbound_documents IS 'EGISZ_MESSAGES с непустым DOCUMENTID в окне CREATEDATE (sync_window_days, как у журнала); для отчёта «Документы без ответа»';
+COMMENT ON COLUMN stg_egisz_outbound_documents.egmid IS 'EGISZ_MESSAGES.EGMID — идентификатор записи сообщения при последнем снимке staging';
 COMMENT ON COLUMN stg_egisz_outbound_documents.sent_at IS 'Дата/время создания строки в EGISZ_MESSAGES (поле CREATEDATE в источнике Firebird; при другом имени колонки поправьте SQL в sql_util.outbound_documents_staging_select)';
 
 CREATE OR REPLACE VIEW v_rpt_documents_no_response AS
@@ -403,7 +419,7 @@ COMMENT ON TABLE dim_column_display_labels IS 'Имя колонки в пред
 INSERT INTO dim_column_display_labels (source_object, source_column, display_label_ru) VALUES
     ('v_egisz_transactions_enriched', 'relates_to_id', 'Связанное сообщение'),
     ('v_egisz_transactions_enriched', 'exchangelog_log_id', 'LOGID журнала EXCHANGELOG'),
-    ('v_egisz_transactions_enriched', 'egisz_messages_egmid', 'EGMID сообщения EGISZ_MESSAGES'),
+    ('v_egisz_transactions_enriched', 'egisz_messages_egmid', 'EGISZ_MESSAGES.EGMID (ключ записи сообщения, РЭМД)'),
     ('v_egisz_transactions_enriched', 'local_uid_semd', 'localUid СЭМД'),
     ('v_egisz_transactions_enriched', 'jid', 'JID клиники'),
     ('v_egisz_transactions_enriched', 'gost_jid_token', 'Токен gost (нецифр., для отображения)'),
@@ -450,7 +466,7 @@ CREATE OR REPLACE VIEW v_egisz_transactions_enriched_ui AS
 SELECT
     local_uid_semd AS "localUid СЭМД",
     exchangelog_log_id::text AS "LOGID журнала EXCHANGELOG",
-    egisz_messages_egmid::text AS "EGMID сообщения EGISZ_MESSAGES",
+    egisz_messages_egmid::text AS "EGISZ_MESSAGES.EGMID (ключ записи, РЭМД)",
     jid::text AS "JID клиники",
     gost_host AS "Хост клиники (VPN ГОСТ)",
     org_oid AS "OID организации",
@@ -477,6 +493,50 @@ SELECT
 FROM v_egisz_transactions_enriched;
 
 COMMENT ON VIEW v_egisz_transactions_enriched_ui IS 'Обёртка над v_egisz_transactions_enriched с подписями колонок для отчётов; см. dim_column_display_labels. JID клиники, Код СЭМД, LOGID/EGMID — TEXT (идентификаторы: без разделителей тысяч и суммирования в Metabase). «Сводка ошибок» — errors_friendly: агрегация подсказок по errors_json, исходные «Ошибки JSON» не меняются. Колонка «Связанное сообщение» (relates_to_id) — последняя для удобства витрин и Metabase.';
+
+-- Архив обработанных СЭМД (колбэки): максимальный набор полей; порядок колонок под отчёт «Архив СЭМД» в Metabase.
+CREATE OR REPLACE VIEW v_rpt_semd_archive_ui AS
+SELECT
+    e.processed_at AS "Дата обработки",
+    e.jid::text AS "JID",
+    NULLIF(
+        TRIM(
+            CONCAT_WS(
+                ' — ',
+                NULLIF(TRIM(e.kind_code::text), ''),
+                NULLIF(TRIM(e.kind_name), '')
+            )
+        ),
+        ''
+    ) AS "Тип и наименование СЭМД",
+    e.kind_code::text AS "Код СЭМД",
+    e.kind_name AS "Наименование СЭМД",
+    e.local_uid_semd AS "localUid СЭМД",
+    e.emdr_id AS "Рег. номер РЭМД",
+    e.status AS "Статус",
+    e.errors_friendly AS "Сводка ошибок",
+    e.errors_json AS "Ошибки JSON",
+    e.registration_date AS "Зарегистрирован в ЕГИСЗ РЭМД",
+    e.semd_creation_at AS "Создание СЭМД",
+    e.chart_day AS "День (тренд)",
+    e.clinic_name AS "Наименование клиники",
+    e.clinic_inn AS "ИНН клиники",
+    e.clinic_mo_oid AS "OID клиники",
+    e.exchangelog_log_id::text AS "LOGID журнала EXCHANGELOG",
+    e.egisz_messages_egmid::text AS "EGISZ_MESSAGES.EGMID (ключ записи, РЭМД)",
+    e.gost_host AS "Хост клиники (VPN ГОСТ)",
+    e.org_oid AS "OID организации",
+    e.gost_jid_token AS "Токен gost (нецифр., для отображения)",
+    e.jid_from_license::text AS "JID (EGISZ_LICENSES)",
+    e.jid_from_gost_log::text AS "JID из gost в LOGTEXT",
+    e.jid_from_gost_reply::text AS "JID из gost в REPLYTO",
+    e.gost_token_logtext AS "Токен gost (LOGTEXT)",
+    e.gost_token_replyto AS "Токен gost (REPLYTO)",
+    e.jid_sources_mismatch AS "Расхождение источников JID",
+    e.relates_to_id AS "Связанное сообщение"
+FROM v_egisz_transactions_enriched e;
+
+COMMENT ON VIEW v_rpt_semd_archive_ui IS 'Полный список обработанных документов (факт колбэка); сортировка в отчётах — по «Дата обработки» DESC.';
 
 CREATE OR REPLACE VIEW v_rpt_documents_no_response_ui AS
 SELECT

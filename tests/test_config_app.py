@@ -92,12 +92,12 @@ def test_healthcheck_returns_signals_top_clinics_and_proxy(cfg_yaml: Path) -> No
             "staging_max_egmid": 29261980,
             "pending_older_24h": 19,
             "etl_last_log_id": 18000123,
+            "etl_cursor_egmid": 29261989,
         },
         "level_summary": {"red": 1, "yellow": 0, "green": 1},
         "errors": [],
     }
-    fb_peaks = {
-        "max_egmid": 29261989,
+    fb_lic = {
         "max_licenses_modifydate": "2026-04-29T20:00:00",
         "error": None,
     }
@@ -112,7 +112,7 @@ def test_healthcheck_returns_signals_top_clinics_and_proxy(cfg_yaml: Path) -> No
         "egisz_monitor_corp.config_app.fetch_etl_source_peaks_from_pg",
         return_value={"source_max_egmid": None, "source_max_licenses_modifydate": None},
     ), patch(
-        "egisz_monitor_corp.config_app.fetch_firebird_source_peaks", return_value=fb_peaks
+        "egisz_monitor_corp.config_app.fetch_firebird_max_license_modifydate", return_value=fb_lic
     ):
         resp = client.get("/api/healthcheck")
 
@@ -124,7 +124,7 @@ def test_healthcheck_returns_signals_top_clinics_and_proxy(cfg_yaml: Path) -> No
     assert data["by_clinic_top"][0]["jid"] == 12
 
     proxy = data["proxy_db"]
-    assert proxy["fb_max_egmid"] == 29261989
+    assert proxy["etl_cursor_egmid"] == 29261989
     assert proxy["egmid_lag"] == 9
     assert proxy["fb_max_licenses_modifydate"].startswith("2026-04-29")
 
@@ -167,7 +167,8 @@ def test_index_html_uses_null_safe_bind_click(cfg_yaml: Path) -> None:
     assert "conn-strip-stop-hazard" in html
     assert "repeating-linear-gradient" in html
     assert "function buildSystemLogText" in html
-    assert 'name="etl_interleave_page_rows"' in html
+    assert 'name="etl_batch"' in html
+    assert 'name="etl_sync_days"' in html
     assert "auto_sync_schedule_cron" in html
     assert "document.getElementById('btnSaveYaml').onclick" not in html
     assert "document.getElementById('btnPgBackup').onclick" not in html
@@ -315,7 +316,6 @@ def _full_config_form() -> dict[str, str]:
         "pg_password": "egisz",
         "etl_batch": "500",
         "etl_sync_days": "30",
-        "etl_interleave_page_rows": "8192",
         "auto_sync_schedule_cron": "*/15 * * * *",
         "auto_sync_timezone": "Etc/UTC",
     }
@@ -334,10 +334,49 @@ def test_save_applies_cronjob_reconcile(cfg_yaml: Path) -> None:
     assert resp.status_code == 200
     body = resp.get_json()
     assert body["ok"] is True
+    assert "batch_size=500" in body.get("message", "")
+    assert "sync_window_days=30" in body.get("message", "")
     assert body["cronjob_reconcile"]["ok"] is True
     rmock.assert_called_once()
     call_auto = rmock.call_args[0][0]
     assert call_auto["enabled"] is True
+
+
+def test_save_writes_etl_even_when_yaml_had_null_etl(cfg_yaml: Path) -> None:
+    import yaml
+
+    from egisz_monitor_corp.config_app import _merged_yaml_dict_from_form
+
+    root = yaml.safe_load(cfg_yaml.read_text(encoding="utf-8"))
+    root["etl"] = None
+    cfg_yaml.write_text(yaml.safe_dump(root, allow_unicode=True), encoding="utf-8")
+
+    merged = _merged_yaml_dict_from_form(
+        cfg_yaml,
+        {
+            **_full_config_form(),
+            "etl_batch": "3333",
+            "etl_sync_days": "14",
+        },
+    )
+    assert merged["etl"]["batch_size"] == 3333
+    assert merged["etl"]["sync_window_days"] == 14
+
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+    form = {**_full_config_form(), "etl_batch": "3333", "etl_sync_days": "14"}
+    with patch(
+        "egisz_monitor_corp.config_app.reconcile_egisz_monitor_sync_cronjob",
+        return_value=(True, "CronJob ok"),
+    ):
+        resp = client.post("/save", data=form)
+    assert resp.status_code == 200
+    assert resp.get_json()["ok"] is True
+    saved = yaml.safe_load(cfg_yaml.read_text(encoding="utf-8"))
+    assert isinstance(saved.get("etl"), dict)
+    assert saved["etl"]["batch_size"] == 3333
+    assert saved["etl"]["sync_window_days"] == 14
 
 
 def test_api_pg_backup_streams_custom_dump(cfg_yaml: Path) -> None:
@@ -354,6 +393,26 @@ def test_api_pg_backup_streams_custom_dump(cfg_yaml: Path) -> None:
     cd = resp.headers.get("Content-Disposition") or ""
     assert "attachment" in cd.lower()
     assert ".dump" in cd
+
+
+def test_api_metabase_export_dashboards_json_zip(cfg_yaml: Path) -> None:
+    from unittest.mock import patch
+
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+    fake_zip = b"PK\x03\x04fake"
+    with patch(
+        "egisz_monitor_corp.config_app.build_export_zip_bytes",
+        return_value=(fake_zip, "egisz_metabase_dashboards_20260101_120000.zip", "live"),
+    ):
+        resp = client.post("/api/metabase/export-dashboards-json")
+    assert resp.status_code == 200
+    assert resp.mimetype == "application/zip"
+    assert resp.data == fake_zip
+    assert resp.headers.get("X-Egisz-Metabase-Export-Source") == "live"
+    cd = resp.headers.get("Content-Disposition") or ""
+    assert "egisz_metabase_dashboards" in cd
 
 
 def test_api_pg_restore_multipart_ok(cfg_yaml: Path) -> None:

@@ -51,10 +51,12 @@ def _monitor_sync(**_context) -> str:
         finally:
             pg0.close()
         if wm:
+            msg_snap = wm.get("messages_snapshot_high_egmid", 0)
             print(
                 "etl_watermarks_before_sync "
                 f"pipeline={pipe} last_log_id={wm['last_log_id']} "
-                f"last_egmid={wm['last_egmid']} source_max_egmid={wm['source_max_egmid']}",
+                f"last_egmid={wm['last_egmid']} source_max_egmid={wm['source_max_egmid']} "
+                f"messages_snapshot_high_egmid={msg_snap}",
                 flush=True,
             )
         else:

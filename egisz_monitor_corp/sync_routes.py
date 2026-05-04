@@ -23,8 +23,8 @@ _state: dict[str, Any] = {
 _cancel_evt = threading.Event()
 
 _SYNC_FAILED_WATERMARK_NOTE_RU = (
-    "last_log_id двигается по пакетам журнала; last_egmid — после полного успешного sync. "
-    "При обрыве LOGID часто впереди EGMID."
+    "last_log_id двигается по пакетам журнала; last_egmid — ватермарк журнала после полного успешного sync. "
+    "При обрыве last_log_id часто впереди last_egmid."
 )
 
 
@@ -50,7 +50,7 @@ def _build_sync_failed_progress(
             row = fetch_etl_watermark_row(pg, cfg.etl.pipeline_name)
             if row:
                 progress["cursor_log_id"] = row["last_log_id"]
-                progress["messages_cursor_egmid"] = row["last_egmid"]
+                progress["etl_last_egmid"] = row["last_egmid"]
                 progress["source_max_egmid"] = row["source_max_egmid"]
             else:
                 miss = "etl_state: нет строки для пайплайна"
@@ -157,7 +157,10 @@ def try_request_cancel_sync() -> tuple[bool, str]:
         if not _state["running"]:
             return False, "Синхронизация не выполняется."
     _cancel_evt.set()
-    return True, "Запрос на остановку принят; ETL завершит текущий шаг и выйдет."
+    return True, (
+        "Запрос на остановку принят; ETL завершит текущий шаг и выйдет "
+        "(между запросами к Firebird: справочники, страницы журнала ~batch_size строк, чанки MSGID)."
+    )
 
 
 def try_start_sync(

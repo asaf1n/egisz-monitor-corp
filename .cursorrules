@@ -2,7 +2,17 @@
 
 Этот файл — для **бизнес-аналитики**, **мониторинга сервиса интеграции** и **поиска аномалий** (ошибки регистрации, очередь без ответа, сбои разбора). Структура репозитория, модули и задачи разработки — в **`AGENTS.md`**; обзор продукта — **`README.md`**.
 
-**Сопровождение документации (агенты и разработчики):** после существенных изменений в коде, схеме SQL, дашбордах или K8s — **дополняй `AGENTS.md` и этот файл** (`.cursorrules`), чтобы пути, модули и доменные определения не расходились с репозиторием. Для **`README.md`** сохраняй **максимальную детализацию** при удобстве чтения: при правках **ориентируйся на текущую структуру** (стек → синк → сэмплинг → кэш → ETL → маппинг → дашборды → конфиг → инфраструктура) и **предлагай/вноси** уточнения так, чтобы по отдельности было ясно назначение каждого слоя, а в совокупности — сквозной поток **Firebird → парсинг → PostgreSQL → Metabase**. **Тон текстов** — [`docs/DOCUMENTATION_STYLE.md`](docs/DOCUMENTATION_STYLE.md); правило агента — `.cursor/rules/documentation-style.mdc`.
+**Границы документации (не смешивать):**
+
+| Аудитория | Файл | Что класть |
+|-----------|------|------------|
+| Операторы, аналитики, обзор продукта, синк, конфиг, инфраструктура «как пользоваться» | **`README.md`** | Единственное место для **описания продукта и ручных процедур** (в т.ч. сверка курсора ETL, DBeaver, ориентиры по таблицам PG). Не выносить операторские инструкции в отдельные `docs/*.md`, кроме уже существующих узких приложений (K8s, Metabase, аудит, стиль текстов). |
+| ИИ-агенты и разработчики | **`AGENTS.md`** | Структура репозитория, модули, типовые задачи правок, ссылки на тесты и K8s. **Не** дублировать сюда длинные пользовательские гайды — на них ссылаться из README. |
+| Cursor: домен интеграции + правила ответа | **`.cursorrules`** (этот файл) | Парсинг, статусы, healthcheck, единицы учёта в Metabase, параллельный ETL; **финальный блок копирования** — одна строка **`.\start.ps1 -Action …`** для **применения правок из репозитория к образам и кластеру** (не для пересказа последнего шага в чате). Без плейсхолдеров — см. «Команда применения изменений». |
+
+**Сопровождение:** после существенных изменений в коде, схеме SQL, дашбордах или K8s — **дополняй `AGENTS.md` и этот файл**; операторские и продуктовые уточнения — **`README.md`**. Для README сохраняй **максимальную детализацию** при удобстве чтения: стек → синк → окно/справочники → парсинг → маппинг → дашборды → healthcheck → ручная диагностика → конфиг → инфраструктура; сквозной поток **Firebird → парсинг → PostgreSQL → Metabase**. **Тон текстов** — [`AGENTS.md` — раздел «Стиль документации»](AGENTS.md#doc-style); правило агента — `.cursor/rules/documentation-style.mdc`.
+
+**Не добавлять** в `sql/` файлы «шаблонов для DBeaver», не описывающие реальный пайплайн `run_sync` — диагностика только в README (ссылка на `sql_util.py` для предикатов).
 
 ---
 
@@ -32,9 +42,9 @@
 | Рост доли **`error`** | `v_egisz_transactions_enriched_ui`, поле «Статус» | РЭМД отклонил регистрацию; разбор причин — «Ошибки JSON» / «Сводка ошибок». |
 | Рост **`unknown`** | то же | Исход не классифицирован при разборе — риск версии XML/парсера или нестандартного ответа. |
 | Очередь **без ответа** | `v_rpt_documents_no_response_ui` | Исходящий `DOCUMENTID` есть в staging, в факте **нет** строки с тем же **`local_uid_semd`** — нет callback; возможен сбой шлюза, задержка ЕГИСЗ или разрыв окна ETL. |
-| **`stg_parse_errors`** | таблица + представление **`v_stg_parse_errors_by_document`** + дашборд «Ошибки и разбор» | Не удалось построить факт (нет связки / битый XML). В сводках и healthcheck считают **уникальные документы** (`document_group_key`), не сырые строки журнала; трассировка: **LOGID / MSGID / EGMID**. |
+| **`stg_parse_errors`** | таблица + представление **`v_stg_parse_errors_by_document`** + дашборд «Ошибки и разбор» | Не удалось построить факт (нет связки / битый XML). В сводках и healthcheck считают **уникальные документы** (`document_group_key`), не сырые строки журнала; трассировка: **LOGID** журнала, **MSGID** сообщения (**EXCHANGELOG.MSGID**), **EGMID** записи **EGISZ_MESSAGES**. |
 | **`etl_state.last_log_id`** | служебно | Водяной знак по **`LOGID`**, не метрика качества интеграции. |
-| **`etl_state.last_egmid`** | служебно | Водяной знак по **`EGISZ_MESSAGES.EGMID`** для постраничной загрузки сообщений. |
+| **`etl_state.last_egmid`** | служебно | Водяной знак по **max(`EGISZ_MESSAGES.EGMID`)** после успешного прогона журнала (**EGMID** — суррогатный ключ строки сообщения при фиксации в РЭМД). |
 
 ---
 
@@ -80,13 +90,13 @@
 | `v_health_signals` | 5 фиксированных строк-сигналов с уровнями: `error_rate_high`, `unknown_high`, `parse_errors_burst`, `queue_red_24h`, `cursor_stale`. |
 | `v_health_proxy_db` | Сводка staging исходящих + age-buckets очереди + `etl_state.last_log_id` и его `updated_at`. |
 
-**Как читать дашборд `11 Healthcheck интеграции` (`metabase_dashboards/11_healthcheck.json`):**
+**Как читать блок healthcheck на дашборде `02 Сервис, healthcheck и парсинг журнала` (`metabase_dashboards/02_service.json`):**
 
 1. **Сигналы** (верхняя таблица) и **Сводка по уровням** (pie) — общее состояние сервиса.
 2. **Топ клиник по error rate (24ч)** + **Heatmap клиники × дни** — массовая проверка по клиникам. Heatmap полезен для поиска **долгоиграющих** проблем (vs точечного выпада).
 3. **Возраст очереди без ответа** (3 столбца: < 1ч, 1–24ч, > 24ч) — здоровье очереди исходящих.
 4. **Тренд ошибок парсинга** — состояние канала данных (`stg_parse_errors`), не вины МИС.
-5. **Сводка прокси-БД** — снимок `staging_max_egmid`, `etl_last_log_id`, `etl_last_update`. Расхождение `staging_max_egmid` ↔ `fb_max_egmid` (см. Config UI вкладка Healthcheck) подсвечивает «застой» приёма из источника.
+5. **Сводка прокси-БД** — снимок `staging_max_egmid`, курсор `etl_state.last_log_id`, **курсор EGMID** (`max(last_egmid, source_max_egmid)` из `etl_state`, без запроса MAX к Firebird), `etl_last_update`. Расхождение **staging** ↔ **курсор EGMID** в Healthcheck (`egmid_lag`) подсвечивает отставание очереди от обработанного журнала.
 
 **Пороговая логика:**
 
@@ -98,7 +108,7 @@
 | `queue_red_24h` | очередь > 24ч больше 50 документов | очередь > 24ч больше 10 документов |
 | `cursor_stale` | `etl_state.updated_at` старше 6 часов или `NULL` | старше 2 часов |
 
-**Изменение порогов:** редактировать CTE `params` в `v_health_signals` (`sql/005_healthcheck.sql`), затем `apply-schema` (или дождаться следующего `run_sync`). Логика и обоснование в **`docs/INTEGRATION_AUDIT.md` §3**.
+**Изменение порогов:** редактировать CTE `params` в `v_health_signals` (`sql/005_healthcheck.sql`), затем `apply-schema` (или дождаться следующего `run_sync`). Логика и обоснование в **`docs/BI_EGISZ_INFOKLINIKA_AUDIT.md` §3**.
 
 **Внешний контракт `/api/healthcheck`** (Flask, `egisz_monitor_corp/config_app.py`):
 
@@ -109,14 +119,16 @@
   "level_summary": {"red": 1, "yellow": 0, "green": 4},
   "signals":      [{"code": "error_rate_high", "level": "red", "value": 14.5, "value_unit": "%", "denominator": 320, "hint": "..."}],
   "by_clinic_top": [{"jid": 12, "clinic_name": "...", "facts_24h": 320, "error_rate_24h": 14.5, "pending_now": 5, "health_level": "red"}],
-  "proxy_db":     {"stg_outbound_total": 4521, "fb_max_egmid": 29261989, "staging_max_egmid": 29261980, "egmid_lag": 9, "pending_older_24h": 19, "etl_last_log_id": 18000123},
+  "proxy_db":     {"stg_outbound_total": 4521, "etl_cursor_egmid": 29261989, "staging_max_egmid": 29261980, "egmid_lag": 9, "pending_older_24h": 19, "etl_last_log_id": 18000123},
   "errors": []
 }
 ```
 
+`proxy_db.etl_cursor_egmid` в ответе API соответствует в PostgreSQL выражению **GREATEST(`etl_state.last_egmid`, `etl_state.source_max_egmid`)** (пик EGMID ETL для сравнения со staging), а не курсору постраничной выгрузки снимка **`stg_egisz_messages_journal`**.
+
 При недоступной PostgreSQL: `{"ok": false, "errors": ["PostgreSQL недоступен: ..."]}` со статусом 200 (graceful degrade — UI показывает заметку, не падает).
 
-**Куда смотреть при сигнале:** см. таблицу триажа в **`docs/INTEGRATION_AUDIT.md` §3.7**.
+**Куда смотреть при сигнале:** см. таблицу триажа в **`docs/BI_EGISZ_INFOKLINIKA_AUDIT.md` §3.7** (якорь `#healthcheck-triage`).
 
 ---
 
@@ -136,21 +148,40 @@ Lock — **session-level**: автоматически снимается при
 
 `run_sync` для тестируемости разнесён на:
 
-- `_export_egisz_licenses_full(cfg)` → `EnrichmentCache` (полный SELECT `EGISZ_LICENSES` + `LEFT JOIN JPERSONS`; окно `MODIFYDATE` в Python);
-- `_count_exchangelog_total(cfg, base_sql, …)` → `int` (для прогрес-бара UI);
-- `_export_egisz_messages_by_egmid(cfg, last_egmid, …)` → словарь MSGID + курсор EGMID (только SELECT из FB);
-- `_export_exchangelog_page(cfg, base_sql, …)` → одна страница `EXCHANGELOG` из FB;
-- `_process_exchangelog_pages(...)` → `_PageStats` (на страницу: выгрузка страницы журнала, затем склейка MSGID с кэшем `EGISZ_MESSAGES`, сопоставление REPLYTO→лицензия в Python, парсинг, UPSERT факта/измерений);
-- `_refresh_outbound_documents(cfg, pg, …)` (снимок `stg_egisz_outbound_documents`).
+- `_count_exchangelog_total()` → `int` (заглушка для прогресса UI);
+- `_export_exchangelog_page(cfg, base_sql, …)` → одна страница **сырого** `EXCHANGELOG` из FB (`base_sql` = `exchangelog_inner_sql_for_etl`, **без** JOIN к `EGISZ_MESSAGES` во Firebird; поля сообщения подтягиваются из PostgreSQL по **MSGID**);
+- `_process_exchangelog_pages(...)` → `_PageStats` (постранично: кэш по **MSGID** из PostgreSQL, парсинг, UPSERT);
+- `_refresh_outbound_documents(cfg, pg, …)` (полная перезапись `stg_egisz_outbound_documents` из `EGISZ_MESSAGES` по окну **CREATEDATE** = `sync_window_days`).
 
 Юнит-тесты — `tests/test_etl_helpers.py` (без живого Firebird/Postgres, с mock-fetch и FakeConn для advisory lock).
 
 ---
 
-## Ответ агента после правок Config UI
+## Команда применения изменений (обязательно в конце каждого ответа)
 
-Если менялись **`egisz_monitor_corp/config_app.py`**, **`sync_routes.py`** или слой Docker/`Dockerfile` для conf-ui — **в конце ответа пользователю** добавляй одну строку (из корня репозитория, PowerShell):
+**Назначение блока (важно):** в конце ответа — **команда, которую пользователь запускает, чтобы внедрить внесённые в файлах репозитория изменения в Docker-образы и Kubernetes** (пересборка, `apply`, rollout). Это **не** краткое описание «что сделали в чате» и **не** дублирование последнего шага сессии; это **следующий шаг вручную** — применить дифф к работающему стеку. Если в ответе менялся только markdown без кода/манифестов — в основном тексте укажи, что выкат не нужен, и **не** подставляй `apply` без необходимости (см. таблицу ниже).
 
-**`.\start.ps1 -Action apply`**
+**Смысл по сути:** выкат в **локальный** стек (`start.ps1`: образы + `kubectl apply` + rollout). Это **не** замена прогона **pytest**.
 
-(пересборка образа conf-ui, apply манифестов, rollout). Принудительная пересборка conf-ui без кэша Docker: **`.\start.ps1 -Action apply -DockerNoCache`** или **`.\scripts\apply-local-rebuild.ps1`**. Локально без k8s — напомни про **`CONFIG_UI_RELOAD=1`** / перезапуск процесса Flask.
+**`.\start.ps1 -Action test`** запускает только **pytest** на хосте: **поды, образы и манифесты Kubernetes не обновляет**. Его **нельзя** подставлять в финальный блок как «применение изменений в сервисе». Если нужна проверка тестами — напиши это **в основном тексте** отдельно (`.\start.ps1 -Action test` или `py -m pytest tests/`).
+
+**Правило:** в **каждом** сообщении агента в Cursor, после основного текста, добавляй **отдельный блок для копирования** (тройные backticks), внутри **ровно одна** строка PowerShell из **корня репозитория** — **без** плейсхолдеров: **та команда, которая реально накатит сегодняшние правки** (см. таблицу). Не вставляй `<действие>` или `...` вместо реальной команды.
+
+```text
+.\start.ps1 -Action apply
+```
+
+Типичный выкат после правок коду и манифестам — **`apply`**. Полное пересоздание стека с DROP/CREATE БД приложения Metabase — **`deploy`** или **`reset-deploy`**.
+
+| Что менялось | Действие | Примечание |
+|--------------|----------|------------|
+| Код **`egisz_monitor_corp/`**, **`sql/`** (DDL витрины), **`k8s/`**, Dockerfiles, **`metabase/`**, **`metabase_dashboards/`**, **`start.ps1`**, **`config/`** попавший в ConfigMap/секреты из репо | **`apply`** | Пересборка затронутых образов (логика в `start.ps1`), apply манифестов, rollout **conf-ui**, **CronJob sync**, при необходимости Metabase/Postgres по сценарию |
+| Нужен полный пересоздание стека + DROP/CREATE БД приложения Metabase | **`deploy`** или **`reset-deploy`** | См. README и **`docs/BI_EGISZ_INFOKLINIKA_AUDIT.md`** §8 |
+| Сменились только JSON дашбордов / образ Metabase, без остального | **`restart-metabase`** | Часто достаточно вместо полного `deploy` |
+| Логика выгрузки Metabase (`egisz_monitor_corp/metabase_export.py`) или кнопка ZIP в Config UI | **`apply`** | Пересборка **conf-ui** (wheel из `egisz_monitor_corp/`); при правке только `metabase/Dockerfile` — ещё **`restart-metabase`** |
+| Подозрение на кэш Docker при правках conf-ui | **`apply -DockerNoCache`** или **`.\scripts\apply-local-rebuild.ps1`** | |
+| Только правки **markdown** (README, AGENTS, `.cursorrules`, `docs/*.md`) без изменений образов и YAML | В тексте: «выкат подов не требуется»; в блоке при желании проверки живого стека — **`verify`** | Не вводить в заблуждение `apply`, если пользователь не просил синхронизировать кластер |
+
+Локальная разработка Flask **без** Kubernetes: выкат через `start.ps1` не используется — **`CONFIG_UI_RELOAD=1`** или перезапуск процесса.
+
+Если в одном ответе затронуты и код в образах, и манифесты — **одна** строка в блоке, покрывающая выкат (обычно **`apply`**). Блок не для резюме действий агента, а **исключительно для команды применения изменений пользователем**.

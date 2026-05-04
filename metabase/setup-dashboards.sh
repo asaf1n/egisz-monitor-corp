@@ -1,9 +1,13 @@
 #!/bin/bash
 # Единственный путь поставки отчётов EGISZ в Metabase: все дашборды и native-карточки из
-# DASHBOARDS_DIR/*.json (см. metabase_dashboards/README.md). Пустой инстанс после первой настройки
+# DASHBOARDS_DIR/*.json (см. README «Metabase и дашборды», AGENTS «Metabase»). Пустой инстанс после первой настройки
 # админа + готовой схемы Postgres — этот скрипт создаёт весь набор. Повторы: удаление одноимённых
 # сущностей в персональной коллекции, затем повторный импорт.
 set -euo pipefail
+
+_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=include/mb_list.sh
+. "${_script_dir}/include/mb_list.sh"
 
 METABASE_URL="${METABASE_URL:-http://localhost:3000}"
 # Fallback, если переменные не заданы (в поде k8s задаются из Secret metabase-admin).
@@ -22,11 +26,6 @@ ROOT_COLLECTION_NAME="EGISZ Corp Monitoring"
 
 log_info() {
   echo "[dashboards] $1" >&2
-}
-
-# Metabase 0.49+ часто отдаёт списки как { "data": [ ... ] }; без нормализации jq '.[]' ломается и провижининг молча пропускается.
-mb_normalize_list() {
-  jq -c 'if type == "array" then . elif (.data | type == "array") then .data else [] end'
 }
 
 api_request() {
@@ -212,17 +211,17 @@ delete_collection_tree() {
 
   children_json="$(api_request GET "/api/collection/${collection_id}/items")"
 
-  child_ids="$(echo "${children_json}" | mb_normalize_list | jq -r '.[]? | select(.model == "collection") | .id')"
+  child_ids="$(echo "${children_json}" | mb_list | jq -r '.[]? | select(.model == "collection") | .id')"
   for child_id in ${child_ids}; do
     delete_collection_tree "${child_id}"
   done
 
-  dashboard_ids="$(echo "${children_json}" | mb_normalize_list | jq -r '.[]? | select(.model == "dashboard") | .id')"
+  dashboard_ids="$(echo "${children_json}" | mb_list | jq -r '.[]? | select(.model == "dashboard") | .id')"
   for dashboard_id in ${dashboard_ids}; do
     api_request DELETE "/api/dashboard/${dashboard_id}" >/dev/null
   done
 
-  card_ids="$(echo "${children_json}" | mb_normalize_list | jq -r '.[]? | select(.model == "card") | .id')"
+  card_ids="$(echo "${children_json}" | mb_list | jq -r '.[]? | select(.model == "card") | .id')"
   for card_id in ${card_ids}; do
     api_request DELETE "/api/card/${card_id}" >/dev/null
   done
@@ -235,14 +234,14 @@ delete_demo_content() {
   local collections_raw collections_json dashboards_raw dashboards_json databases_json example_ids dashboard_ids sample_ids
 
   collections_raw="$(api_request GET "/api/collection")"
-  collections_json="$(echo "${collections_raw}" | mb_normalize_list)"
+  collections_json="$(echo "${collections_raw}" | mb_list)"
   example_ids="$(echo "${collections_json}" | jq -r '.[] | select(.name == "Examples") | .id')"
   for example_id in ${example_ids}; do
     delete_collection_tree "${example_id}"
   done
 
   dashboards_raw="$(api_request GET "/api/dashboard")"
-  dashboards_json="$(echo "${dashboards_raw}" | mb_normalize_list)"
+  dashboards_json="$(echo "${dashboards_raw}" | mb_list)"
   dashboard_ids="$(echo "${dashboards_json}" | jq -r '.[] | select(.name == "E-commerce Insights") | .id')"
   for dashboard_id in ${dashboard_ids}; do
     api_request DELETE "/api/dashboard/${dashboard_id}" >/dev/null
@@ -262,7 +261,7 @@ delete_legacy_corp_cards() {
     log_info "GET /api/card failed; skip legacy card cleanup"
     return 0
   fi
-  ids="$(echo "${cards_raw}" | mb_normalize_list | jq -r '
+  ids="$(echo "${cards_raw}" | mb_list | jq -r '
     .[]
     | select(
         (.name == "Факты со статусом error")
@@ -512,7 +511,8 @@ create_card() {
     | .table = (.table // {})
     | .table.columns = (
         if ($display == "table")
-           and ($query | test("v_egisz_transactions_enriched_ui|stg_parse_errors")) then
+           and ($query | test("v_egisz_transactions_enriched_ui|stg_parse_errors"))
+           and ($query | test("v_rpt_documents_no_response_ui") | not) then
           (.table.columns // []) as $cols
           | if ($cols | length) == 0 then
               [ { "name": "Связанное сообщение", "enabled": false } ]
@@ -706,7 +706,7 @@ done
 authenticate
 delete_demo_content
 
-collections_for_delete="$(api_request GET "/api/collection" | mb_normalize_list)"
+collections_for_delete="$(api_request GET "/api/collection" | mb_list)"
 for collection_id in $(echo "${collections_for_delete}" | jq -r '.[] | select(.name | test("^EGISZ")) | .id' | sort -nr); do
   delete_collection_tree "${collection_id}"
 done
@@ -740,6 +740,27 @@ for _i in $(seq 1 90); do
 done
 APP_DB_METADATA_JSON=""
 
+# Дашборд 06_semd_archive.json привязывает field filter к «Дата обработки» в v_rpt_semd_archive_ui.
+# Раньше архив был последним в 05 — без явного ожидания create_card падал на resolve_field_id.
+# Сейчас 06 идёт после 05 в *.json: метаданные view должны быть готовы до импорта архива.
+log_info "Waiting for DWH view field metadata (v_rpt_semd_archive_ui)…"
+for _i in $(seq 1 90); do
+  APP_DB_METADATA_JSON=""
+  _narch="$(get_database_metadata | jq '
+    ([.tables[]? | select(.name == "v_rpt_semd_archive_ui")] | first | .fields // []) | length
+  ')"
+  if [ "${_narch:-0}" -ge 12 ] 2>/dev/null; then
+    log_info "DWH archive view fields in metadata (count=${_narch}) — OK"
+    break
+  fi
+  if [ "$_i" -eq 90 ]; then
+    echo "[dashboards] ERROR: v_rpt_semd_archive_ui: недостаточно полей в metadata за 180s (получено ${_narch:-0}, нужно ≥12). Примените sql/001_schema.sql к egisz_reports; в Metabase: Admin → Databases → Sync database schema." >&2
+    exit 1
+  fi
+  sleep 2
+done
+APP_DB_METADATA_JSON=""
+
 # Дашборды в корне личной коллекции (тот же URL, что «Персональная коллекция …»), иначе вложенная папка не видна на главном экране коллекции.
 PERSONAL_ID="$(api_request GET "/api/user/current" | jq -r '.personal_collection_id // empty')"
 if [ -n "${PERSONAL_ID}" ] && [ "${PERSONAL_ID}" != "null" ]; then
@@ -760,7 +781,7 @@ wipe_corp_root_collection() {
   local _pass items list id
   for _pass in 1 2 3; do
     items="$(api_request GET "/api/collection/${coll}/items")"
-    list="$(echo "${items}" | mb_normalize_list)"
+    list="$(echo "${items}" | mb_list)"
     # Вложенные коллекции (старые папки EGISZ и т.п.): иначе остаются «осиротевшие» карточки и дубликаты в UI.
     while IFS= read -r subcoll; do
       [ -z "${subcoll}" ] && continue
@@ -773,7 +794,7 @@ wipe_corp_root_collection() {
       api_request DELETE "/api/dashboard/${id}" >/dev/null || true
     done < <(echo "${list}" | jq -r '.[] | select(.model == "dashboard") | .id')
     items="$(api_request GET "/api/collection/${coll}/items")"
-    list="$(echo "${items}" | mb_normalize_list)"
+    list="$(echo "${items}" | mb_list)"
     while IFS= read -r id; do
       [ -z "${id}" ] && continue
       log_info "Removing prior saved question (card) id=${id}"

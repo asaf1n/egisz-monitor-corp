@@ -1,18 +1,9 @@
-"""Юнит-тесты для расщеплённых хелперов run_sync и advisory lock helpers.
-
-Покрытие:
-1. `_export_egisz_licenses_full` — кэш справочников Firebird (mock fetch_all; JPERSONS и EGISZ_LICENSES отдельно; при pg=None — сшивка в Python).
-2. `_count_exchangelog_total` — выбор COUNT-SQL и graceful degrade при ошибке FB.
-3. `_pipeline_lock_key` — детерминированный bigint в диапазоне int64.
-4. `try_acquire_pipeline_lock` / `release_pipeline_lock` — корректная логика на FakeConn.
-"""
+"""Юнит-тесты для расщеплённых хелперов run_sync и advisory lock helpers."""
 
 from __future__ import annotations
 
 from typing import Any
 from unittest.mock import MagicMock, patch
-
-from datetime import datetime, timezone
 
 import pytest
 
@@ -24,12 +15,12 @@ from egisz_monitor_corp.config_loader import (
     PostgresConfig,
 )
 from egisz_monitor_corp.etl import (
-    EnrichmentCache,
+    EtlCancelledError,
     _count_exchangelog_total,
     _egmid_sql_int,
-    _export_egisz_licenses_full,
-    _export_egisz_messages_by_egmid,
+    _ensure_exchangelog_msgids_in_staging_from_firebird,
     _is_test_clinic,
+    _messages_journal_full_rescan,
     _process_exchangelog_pages,
     _to_int,
 )
@@ -59,41 +50,10 @@ def _cfg(sync_window_days: int = 30, source_query: str | None = None) -> CorpApp
     )
 
 
-def test_export_egisz_licenses_full_builds_mo_uid_and_jname_maps() -> None:
-    licenses_only = [
-        {
-            "jid": 12,
-            "mo_uid": "1.2.3",
-            "egisz_licenses_kind": "12",
-            "id": 1,
-            "mo_domen": "clinic.example",
-        },
-        {"jid": 7, "mo_uid": "4.5.6", "egisz_licenses_kind": "31", "id": 2, "mo_domen": "b.example"},
-        {"jid": None, "mo_uid": "x", "id": 3, "mo_domen": None},
-    ]
-    jp_rows = [
-        {"jid": 12, "jname": "Клиника A полное", "jinn": "1234567890", "fir_oid": "1.2.3.4"},
-        {"jid": 7, "jname": None, "jinn": None, "fir_oid": None},
-    ]
-
-    def fake_fetch(_cfg: Any, sql: str, *_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
-        s = sql.upper()
-        if "FROM JPERSONS" in s:
-            return jp_rows
-        if "FROM EGISZ_LICENSES" in s and "JOIN" not in s:
-            return licenses_only
-        return []
-
-    with patch("egisz_monitor_corp.etl.fetch_all", side_effect=fake_fetch):
-        cache = _export_egisz_licenses_full(_cfg(), log=lambda _m: None)
-
-    assert cache.mo_uid_to_jid_from_egisz_licenses == {"1.2.3": 12, "4.5.6": 7}
-    assert cache.jname_by_jid[12] == "Клиника A полное"
-    assert cache.jpersons_by_jid[12] == ("Клиника A полное", "1234567890", "1.2.3.4")
-    assert cache.clinic_dim_by_jid[12] == ("Клиника A полное", "1234567890", "1.2.3.4")
-    assert cache.clinic_dim_by_jid[7] == (None, None, None)
-    assert any(c[0] == 12 for c in cache.clinics)
-    assert any(c[0] == 7 for c in cache.clinics)
+def test_messages_journal_full_rescan_when_sync_window_not_positive() -> None:
+    assert _messages_journal_full_rescan(_cfg(sync_window_days=0)) is True
+    assert _messages_journal_full_rescan(_cfg(sync_window_days=-1)) is True
+    assert _messages_journal_full_rescan(_cfg(sync_window_days=30)) is False
 
 
 def test_count_exchangelog_total_is_zero_without_firebird() -> None:
@@ -113,7 +73,6 @@ def test_pipeline_lock_key_is_deterministic_int64() -> None:
     b = _pipeline_lock_key("firebird_exchangelog")
     assert a == b
     assert _pipeline_lock_key("firebird_exchangelog") != _pipeline_lock_key("other_pipeline")
-    # bigint signed int64 диапазон.
     for name in ["a", "very-long-pipeline-name-12345", "русский_пайплайн"]:
         v = _pipeline_lock_key(name)
         assert -(1 << 63) <= v <= (1 << 63) - 1
@@ -184,6 +143,49 @@ def test_to_int_rejects_zero_but_egmid_sql_int_keeps_zero_for_cursor() -> None:
     assert _egmid_sql_int(0) == 0
 
 
+def test_process_exchangelog_pages_cooperative_cancel_between_firebird_pages() -> None:
+    """Отмена в начале второй итерации цикла — второй SELECT журнала не выполняется."""
+    exports: list[int] = []
+
+    def fake_export(*_a: Any, **_k: Any) -> list[dict[str, Any]]:
+        exports.append(1)
+        return [
+            {
+                "logid": 1,
+                "logtext": "",
+                "msgtext": "",
+                "msgid": None,
+                "log_created_at": None,
+            }
+        ]
+
+    stops = {"n": 0}
+
+    def cancel() -> None:
+        stops["n"] += 1
+        if stops["n"] >= 2:
+            raise EtlCancelledError("stop")
+
+    cfg = _cfg()
+    cfg.etl.batch_size = 1
+    pg = MagicMock()
+
+    with patch("egisz_monitor_corp.etl._export_exchangelog_page", side_effect=fake_export):
+        with pytest.raises(EtlCancelledError):
+            _process_exchangelog_pages(
+                cfg,
+                pg,
+                base_sql="SELECT 1",
+                last_id=0,
+                total_exchangelog=0,
+                progress_detail_cb=None,
+                log=lambda _m: None,
+                detail=lambda _p: None,
+                cancel_check=cancel,
+            )
+    assert len(exports) == 1
+
+
 def test_process_exchangelog_pages_msgtext_too_large_staging_only() -> None:
     """Строка с MSGTEXT больше max_msgtext_bytes не вызывает parse_xml; staging MSGTEXT_TOO_LARGE."""
     huge = "ы" * 500  # UTF-8: 1000 байт
@@ -212,13 +214,12 @@ def test_process_exchangelog_pages_msgtext_too_large_staging_only() -> None:
     with (
         patch("egisz_monitor_corp.etl._export_exchangelog_page", side_effect=fake_export),
         patch("egisz_monitor_corp.etl.insert_staging_errors", side_effect=capture_insert),
+        patch("egisz_monitor_corp.etl.fetch_journal_messages_by_msgids", return_value=[]),
     ):
         stats = _process_exchangelog_pages(
             cfg,
             pg,
             base_sql="SELECT 1",
-            enrichment=EnrichmentCache(),
-            msg_by_msgid={},
             last_id=0,
             total_exchangelog=1,
             progress_detail_cb=None,
@@ -228,18 +229,27 @@ def test_process_exchangelog_pages_msgtext_too_large_staging_only() -> None:
 
     assert stats.facts == 0
     assert any(any(t[1] == "MSGTEXT_TOO_LARGE" for t in batch) for batch in flushed)
-    # Полная страница без сдвига EGMID в драйвере: основной SELECT + MAX(EGMID) в Firebird, затем выход.
-    calls = {"n": 0}
 
-    def fake_fetch(_cfg: Any, sql: str, *_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
-        calls["n"] += 1
-        if calls["n"] > 3:
-            raise AssertionError("fetch_all called too many times (infinite loop)")
-        return [{"msgid": f"k{i}", "egmid": None, "replyto": None, "documentid": None, "msg_created_at": None} for i in range(500)]
 
-    with patch("egisz_monitor_corp.etl.fetch_all", side_effect=fake_fetch):
-        msg, cur = _export_egisz_messages_by_egmid(_cfg(), 0, log=lambda _m: None, detail=None)
-
-    assert calls["n"] == 2
-    assert cur == 0
-    assert len(msg) == 500
+def test_ensure_exchangelog_msgids_fetches_firebird_when_missing_in_staging() -> None:
+    """Недостающие MSGID из пакета журнала — один SELECT в Firebird и вставка в staging."""
+    cfg = _cfg()
+    pg = MagicMock()
+    journal_rows = [{"msgid": "abc-1", "logid": 10, "logtext": "", "msgtext": "", "log_created_at": None}]
+    fb_row = {
+        "msgid": "abc-1",
+        "egmid": 99,
+        "replyto": None,
+        "documentid": "DOC",
+        "msg_created_at": None,
+    }
+    with (
+        patch("egisz_monitor_corp.etl.journal_msgids_present_in_staging", return_value=set()),
+        patch("egisz_monitor_corp.etl._etl_fb_fetch", return_value=[fb_row]) as mock_fb,
+        patch("egisz_monitor_corp.etl.insert_journal_messages_staging_rows") as mock_ins,
+    ):
+        _ensure_exchangelog_msgids_in_staging_from_firebird(
+            cfg, pg, journal_rows, log=lambda _m: None, cancel_check=None
+        )
+    mock_fb.assert_called_once()
+    mock_ins.assert_called_once_with(pg, [fb_row])

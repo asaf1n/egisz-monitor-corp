@@ -1,14 +1,12 @@
 from egisz_monitor_corp.sql_util import (
     default_exchangelog_select,
     egisz_messages_by_msgids_sql,
-    egisz_messages_incremental_page_max_egmid_sql,
-    egisz_messages_incremental_sql,
-    enrichment_egisz_licenses_only_sql,
-    enrichment_egisz_licenses_sql,
+    egisz_messages_documentid_filled_predicate,
     exchangelog_count_after_cursor,
     exchangelog_count_logid_after_cursor,
     exchangelog_inner_sql_for_etl,
-    jpersons_all_sql,
+    journal_messages_keyset_page_sql,
+    journal_messages_staging_base_sql,
     outbound_documents_staging_select,
     paginated_exchangelog_sql,
 )
@@ -30,30 +28,9 @@ def test_count_wraps_inner_and_filters_logid() -> None:
     assert "LOGID > 42" in sql
 
 
-def test_enrichment_licenses_only_sql_no_join() -> None:
-    s = enrichment_egisz_licenses_only_sql()
-    assert "FROM EGISZ_LICENSES" in s
-    assert "JOIN" not in s.upper()
-    assert "DATEADD" not in s
-
-
-def test_jpersons_all_sql_selects_jid() -> None:
-    s = jpersons_all_sql()
-    assert "FROM JPERSONS" in s.upper()
-    assert "JID IS NOT NULL" in s
-
-
 def test_egisz_messages_by_msgids_uses_placeholders() -> None:
     s = egisz_messages_by_msgids_sql("?,?")
     assert "IN (?,?)" in s.replace("\n", " ")
-
-
-def test_enrichment_licenses_sql_join_still_available() -> None:
-    s = enrichment_egisz_licenses_sql()
-    assert "FROM EGISZ_LICENSES" in s
-    assert "JOIN JPERSONS" in s.upper()
-    assert "DATEADD" not in s
-    assert "WHERE l.JID" not in s
 
 
 def test_default_count_logid_only_no_join() -> None:
@@ -65,13 +42,31 @@ def test_default_count_logid_only_no_join() -> None:
     assert "LOGDATE" not in sql
 
 
-def test_default_select_exchangelog_joins_messages_for_egmid() -> None:
+def test_default_select_exchangelog_no_join_messages_in_pg() -> None:
     s = default_exchangelog_select()
     assert "FROM EXCHANGELOG e" in s
-    assert "e.MSGID AS MSGID" in s
-    assert "LEFT JOIN EGISZ_MESSAGES m ON m.MSGID = e.MSGID" in s.replace("\n", " ")
-    assert "m.EGMID AS MESSAGE_EGMID" in s.replace("\n", " ")
-    assert "DATEADD" not in s
+    assert "e.MSGID AS msgid" in s.replace("\n", " ")
+    assert "LEFT JOIN" not in s
+    assert "EGISZ_MESSAGES" not in s
+
+
+def test_journal_messages_keyset_page_sql_filters_after_egmid() -> None:
+    inner = journal_messages_staging_base_sql(sync_window_days=None)
+    sql = journal_messages_keyset_page_sql(inner, after_egmid=42_000, limit=500)
+    assert "AND m.EGMID > 42000" in sql.replace("\n", " ")
+    assert "FIRST 500" in sql.replace("\n", " ")
+    assert "ORDER BY m.EGMID NULLS LAST" in sql.replace("\n", " ")
+    assert "TRIM(m.DOCUMENTID)" in inner
+
+
+def test_journal_messages_base_matches_outbound_predicates() -> None:
+    j = journal_messages_staging_base_sql(sync_window_days=7)
+    o = outbound_documents_staging_select(sync_window_days=7)
+    pred = egisz_messages_documentid_filled_predicate()
+    assert pred in j.replace("\n", " ")
+    assert pred in o.replace("\n", " ")
+    assert "DATEADD(-7 DAY TO CURRENT_TIMESTAMP)" in j
+    assert "DATEADD(-7 DAY TO CURRENT_TIMESTAMP)" in o
 
 
 def test_exchangelog_inner_for_etl_adds_logdate_window() -> None:
@@ -84,32 +79,19 @@ def test_exchangelog_inner_for_etl_zero_means_no_extra_predicate() -> None:
     assert "DATEADD" not in s
 
 
-def test_egisz_messages_incremental_respects_sync_window() -> None:
-    s = egisz_messages_incremental_sql(last_egmid=1, limit=50, sync_window_days=7)
-    assert "FIRST 50" in s
-    assert "EGMID > 1" in s
-    assert "CREATEDATE >= DATEADD(-7 DAY TO CURRENT_TIMESTAMP)" in s.replace("\n", " ")
-
-
-def test_egisz_messages_page_max_sql_matches_incremental_window() -> None:
-    s = egisz_messages_incremental_page_max_egmid_sql(last_egmid=9, limit=100, sync_window_days=3)
-    assert "MAX(p.EGMID)" in s.replace("\n", " ")
-    assert "FIRST 100" in s
-    assert "EGMID > 9" in s
-    assert "CREATEDATE >= DATEADD(-3 DAY TO CURRENT_TIMESTAMP)" in s.replace("\n", " ")
-
-
-def test_outbound_staging_select_orders_by_egmid_desc_uses_egmid_floor() -> None:
-    s = outbound_documents_staging_select(min_egmid=14)
+def test_outbound_staging_select_orders_by_egmid_desc_uses_createdate_window() -> None:
+    s = outbound_documents_staging_select(sync_window_days=14)
     assert "ORDER BY m.EGMID DESC" in s
-    assert "EGMID > 14" in s
+    assert "CREATEDATE >= DATEADD(-14 DAY TO CURRENT_TIMESTAMP)" in s.replace("\n", " ")
     assert "EGISZ_LICENSES" not in s
+
+
+def test_outbound_staging_select_zero_days_no_date_predicate() -> None:
+    s = outbound_documents_staging_select(sync_window_days=0)
+    assert "ORDER BY m.EGMID DESC" in s
     assert "DATEADD" not in s
 
 
-def test_egisz_messages_incremental_orders_by_egmid() -> None:
-    s = egisz_messages_incremental_sql(last_egmid=99, limit=100)
-    assert "FIRST 100" in s
-    assert "EGMID > 99" in s
-    assert "ORDER BY m.EGMID" in s
+def test_outbound_staging_select_none_sync_days_no_date_predicate() -> None:
+    s = outbound_documents_staging_select(sync_window_days=None)
     assert "DATEADD" not in s

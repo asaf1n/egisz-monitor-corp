@@ -143,14 +143,37 @@ spec:
               value: "/usr/local/lib/libfbclient.so"
             - name: EGISZ_MONITOR_SQL_DIR
               value: "/app/sql"
+            - name: METABASE_URL
+              value: "http://metabase.egisz-monitor.svc.cluster.local:3000"
+            - name: METABASE_ADMIN_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: metabase-admin
+                  key: email
+            - name: METABASE_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: metabase-admin
+                  key: password
+            # Опционально: API Key из Metabase (Admin → Authentication → API Keys). Если пароль/сессия дают 401.
+            - name: METABASE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: metabase-admin
+                  key: api_key
+                  optional: true
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           volumeMounts:
             - name: cfg-work
               mountPath: /app/config
+            - name: tmp
+              mountPath: /tmp
+            - name: run
+              mountPath: /run
           # /healthz не дергает Postgres/Firebird — pod помечается Ready сразу как Flask поднялся,
           # а недоступность бэкендов диагностируется через /api/healthcheck без срыва readinessProbe.
           startupProbe:
@@ -189,4 +212,8 @@ spec:
           secret:
             secretName: egisz-monitor-conf-ui-config
         - name: cfg-work
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        - name: run
           emptyDir: {}

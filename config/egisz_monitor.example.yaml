@@ -30,7 +30,8 @@ etl:
   batch_size: 500
   pipeline_name: "firebird_exchangelog"
   # Окно по датам в Firebird: EXCHANGELOG.LOGDATE и EGISZ_MESSAGES.CREATEDATE (DATEADD -N DAY TO CURRENT_TIMESTAMP).
-  # 0 или отрицательное — без ограничения по дате (только курсоры LOGID / EGMID).
+  # 0 или отрицательное — синхронизация по всем записям (без предиката по дате) для журнала, снимка сообщений и исходящих;
+  # для stg_egisz_messages_journal — TRUNCATE + сброс messages_snapshot_high_egmid, затем полный проход EGISZ_MESSAGES в FB.
   sync_window_days: 30
   # Игнорируется пайплайном: журнал всегда строится из встроенного SELECT по EXCHANGELOG.LOGID.
   source_query: null
@@ -44,8 +45,6 @@ etl:
   # facts_upsert_chunk_size: 500
   # Лимит statement_timeout в секундах на каждый батч UPSERT (SET LOCAL); null = не задавать для этого шага.
   # pg_upsert_statement_timeout_sec: 120
-  # Размер пакета FIRST n в Firebird при чередовании журнала и EGISZ_MESSAGES (500–65000).
-  interleave_page_rows: 8192
 
 auto_sync:
   # В k8s: при «Сохранить в YAML» и при `start.ps1` apply патчится CronJob `egisz-monitor-sync`:

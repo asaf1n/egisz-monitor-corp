@@ -17,8 +17,9 @@ from egisz_monitor_corp.config_loader import (
     save_corp_config,
 )
 from egisz_monitor_corp.fb_client import fetch_all
-from egisz_monitor_corp.fb_client import fetch_firebird_source_peaks
+from egisz_monitor_corp.fb_client import fetch_firebird_max_license_modifydate
 from egisz_monitor_corp.k8s_cronjob import reconcile_egisz_monitor_sync_cronjob
+from egisz_monitor_corp.metabase_export import build_export_zip_bytes
 from egisz_monitor_corp.pg_cli_backup import pg_dump_custom_bytes, restore_upload_to_temp_and_run
 from egisz_monitor_corp.pg_warehouse import (
     connect_pg,
@@ -266,19 +267,15 @@ PAGE = """
               <div class="mb-1 shrink-0">
                 <h2 class="text-sm font-medium uppercase tracking-[0.12em] text-[#9CA3AF] lg:text-[11px] lg:font-normal lg:tracking-[0.16em] lg:text-[#4B5563]">ETL Configuration</h2>
               </div>
-              <p class="mb-2 w-full min-w-0 shrink-0 text-sm leading-snug text-[#9CA3AF] lg:text-[11px] lg:leading-snug">Полный цикл Firebird → PostgreSQL.</p>
-              <div class="grid w-full min-w-0 shrink-0 grid-cols-1 gap-2 sm:grid-cols-2 sm:items-end lg:grid-cols-3">
+              <p class="mb-2 w-full min-w-0 shrink-0 text-sm leading-snug text-[#9CA3AF] lg:text-[11px] lg:leading-snug">Полный цикл Firebird → PostgreSQL (журнал + исходящие).</p>
+              <div class="grid w-full min-w-0 shrink-0 grid-cols-1 gap-2 sm:grid-cols-2 sm:items-end">
                 <label class="block min-w-0 max-w-full">
                   <span class="block truncate font-mono text-[10px] uppercase tracking-[0.12em] text-[#9CA3AF] lg:text-[10px] lg:tracking-[0.14em] lg:text-[#4B5563]" title="batch_size">batch</span>
                   <input name="etl_batch" type="number" value="{{ etl.batch_size }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
                 </label>
                 <label class="block min-w-0 max-w-full">
-                  <span class="block truncate font-mono text-[10px] uppercase tracking-[0.12em] text-[#9CA3AF] lg:text-[10px] lg:tracking-[0.14em] lg:text-[#4B5563]" title="sync_window_days">sync days</span>
-                  <input name="etl_sync_days" type="number" value="{{ etl.sync_window_days }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
-                </label>
-                <label class="block min-w-0 max-w-full sm:col-span-2 lg:col-span-1">
-                  <span class="block truncate font-mono text-[10px] uppercase tracking-[0.12em] text-[#9CA3AF] lg:text-[10px] lg:tracking-[0.14em] lg:text-[#4B5563]" title="interleave_page_rows">interleave</span>
-                  <input name="etl_interleave_page_rows" type="number" min="1" max="65000" value="{{ etl.interleave_page_rows }}" title="Размер страницы FIRST n при чередовании EGISZ_MESSAGES / EXCHANGELOG в Firebird (верхняя граница 65000)." class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+                  <span class="block truncate font-mono text-[10px] uppercase tracking-[0.12em] text-[#9CA3AF] lg:text-[10px] lg:tracking-[0.14em] lg:text-[#4B5563]" title="sync_window_days: EXCHANGELOG (LOGDATE), EGISZ_MESSAGES/исходящие (CREATEDATE); 0 = без фильтра по датам в Firebird для всех потоков + TRUNCATE stg_egisz_messages_journal и сброс messages_snapshot_high_egmid">sync days</span>
+                  <input name="etl_sync_days" type="number" value="{{ etl.sync_window_days }}" title="0: синхронизация по всем записям (без окна по дате) для журнала и сообщений; полный пересъём снимка EGISZ_MESSAGES в staging" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
                 </label>
               </div>
               <div class="mt-3 flex min-h-[2.75rem] w-full shrink-0 flex-wrap items-center gap-3">
@@ -301,9 +298,16 @@ PAGE = """
                   </button>
                 </div>
                 <div class="flex min-w-0 items-baseline gap-2 py-0">
-                  <span class="shrink-0 text-xs font-medium text-[#9CA3AF] sm:text-sm lg:text-xs">EGMID:</span>
+                  <span class="shrink-0 max-w-[38%] truncate text-xs font-medium text-[#9CA3AF] sm:text-sm lg:text-xs" title="etl_state.last_egmid — ватермарк журнала, не paging снимка EGISZ_MESSAGES">last_egmid:</span>
                   <code id="pgSnapEgmid" class="snap-val min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-sm sm:text-[15px]" data-raw="" title="">—</code>
                   <button type="button" class="pg-snap-copy inline-flex min-h-[2.5rem] min-w-[2.5rem] shrink-0 items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-2 text-[#509EE3] hover:bg-[#1B2940] sm:min-h-0 sm:min-w-0 sm:p-1" data-copy="pgSnapEgmid" title="Копировать" aria-label="Копировать">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
+                  </button>
+                </div>
+                <div class="flex min-w-0 items-baseline gap-2 py-0">
+                  <span class="max-w-[38%] shrink-0 truncate text-xs font-medium text-[#9CA3AF] sm:text-sm lg:max-w-[42%] lg:text-[10px]" title="etl_state.messages_snapshot_high_egmid — инкрементальная выгрузка снимка EGISZ_MESSAGES">MSG snap:</span>
+                  <code id="pgSnapMsgScan" class="snap-val min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-sm sm:text-[15px]" data-raw="" title="">—</code>
+                  <button type="button" class="pg-snap-copy inline-flex min-h-[2.5rem] min-w-[2.5rem] shrink-0 items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-2 text-[#509EE3] hover:bg-[#1B2940] sm:min-h-0 sm:min-w-0 sm:p-1" data-copy="pgSnapMsgScan" title="Копировать" aria-label="Копировать">
                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
                   </button>
                 </div>
@@ -373,6 +377,20 @@ PAGE = """
         </div>
       </div>
       <div class="shrink-0 rounded-lg border border-[#2D3F5E] bg-[#121826] px-3 py-3 lg:py-2.5">
+        <div class="mb-2 flex flex-col gap-2 border-b border-[#1B2940] pb-3">
+          <div class="flex min-w-0 items-stretch gap-2">
+            <button type="button" id="btnMbExport" class="inline-flex min-h-10 min-w-0 flex-1 max-w-[calc(100%-2.75rem)] items-center justify-center rounded-md border border-[#2D3F5E] bg-[#1B2940] px-2 py-2 font-mono text-xs text-[#D1D5DB] transition hover:border-[#509EE3] hover:bg-[#223555] hover:text-white sm:text-sm" title="Скачать ZIP: при доступном API — из Metabase, иначе эталон из образа">
+              Скачать ZIP дашбордов
+            </button>
+            <button type="button" id="btnMbExportDir" class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-[#2D3F5E] bg-[#0F1522] text-[#509EE3] transition hover:border-[#509EE3] hover:bg-[#1B2940]" title="Папка для сохранения ZIP (Chrome/Edge)">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            </button>
+          </div>
+          <p id="mbExportDirHint" class="hidden truncate text-[10px] text-[#6B7280]" title=""></p>
+          <p class="truncate font-mono text-[10px] leading-snug text-[#6B7280]" title="Сначала выгрузка из Metabase (нужны Secret или api_key). Если API недоступен — в архиве эталон из каталога репозитория metabase_dashboards/">
+            Источник: Metabase API или эталон <code class="text-[#9CA3AF]">metabase_dashboards/</code> в образе
+          </p>
+        </div>
         <input type="file" id="pgRestoreFile" accept=".dump,.backup,application/octet-stream" class="sr-only" tabindex="-1" aria-hidden="true"/>
         <div class="flex flex-col gap-2">
           <div class="flex min-w-0 items-stretch gap-2">
@@ -403,21 +421,24 @@ PAGE = """
   let wasSyncRunning = false;
   let lastUiMessage = { ok: true, strip: '', logBody: '' };
   let pgBackupDirHandle = null;
+  let mbExportDirHandle = null;
   const STRIP_BASE =
     'relative rounded-md border min-h-[2.75rem] overflow-hidden text-xs sm:text-sm font-mono transition-[background-color,border-color,color] duration-150';
   function etlPhaseLabelRu(phase) {
     const m = {
-      pipeline_bootstrap: 'Подготовка ETL (схема PostgreSQL, lock; затем 4 таблицы Firebird)',
-      enrichment_firebird: 'Справочники Firebird (лицензии, JPERSONS)',
-      counting: 'Перед инкрементом: курсоры LOGID и EGMID (COUNT журнала в Firebird не выполняется)',
-      messages_counting: 'Подсчёт сообщений',
-      messages_incremental: 'Выгрузка EGISZ_MESSAGES по курсору EGMID',
-      exchangelog_ready: 'Чередование: сначала EGISZ_MESSAGES (EGMID), затем пакет EXCHANGELOG (LOGID)',
+      pipeline_bootstrap: 'Подготовка ETL (схема PostgreSQL, lock)',
+      references_jpersons_export: 'JPERSONS: выгрузка из Firebird',
+      references_licenses_export: 'EGISZ_LICENSES: выгрузка из Firebird',
+      references_pg_staging: 'Справочники: запись staging в PostgreSQL',
+      references_merge_dim: 'Справочники: merge dim_clinics из staging',
+      journal_messages_export: 'EGISZ_MESSAGES: выгрузка из Firebird в PostgreSQL (staging журнала)',
+      counting: 'Перед журналом: last_log_id и etl_state.last_egmid (COUNT журнала в Firebird не выполняется)',
+      exchangelog_ready: 'Журнал EXCHANGELOG: подготовка к инкременту по LOGID',
       exchangelog_export: 'Чтение пакета EXCHANGELOG из Firebird',
       exchangelog_parse: 'Парсинг пакета журнала',
       parsing: 'Разбор строк журнала (пакет)',
       page_done: 'Пакет журнала обработан',
-      exchangelog_done: 'Журнал и сообщения — завершено',
+      exchangelog_done: 'Журнал — завершено',
       outbound_firebird: 'Исходящие документы: запрос к Firebird',
       outbound_fetch: 'Исходящие документы: выборка',
       outbound_parse: 'Исходящие документы: разбор',
@@ -441,7 +462,7 @@ PAGE = """
     const facts = Number(p.parsed_facts != null ? p.parsed_facts : p.journal_facts);
     const stag = Number(p.staging_errors);
     const logid = p.cursor_log_id;
-    const egm = p.messages_cursor_egmid;
+    const egm = p.etl_last_egmid;
     const br = p.messages_batch_rows;
     const jb = Number(p.journal_batch_rows);
     const cache = p.messages_msgid_cache_size;
@@ -459,21 +480,25 @@ PAGE = """
       if (diag) parts.push(diag);
       return { title: 'Синхронизация: ошибка / прерывание', detail: parts.join(' · ') };
     }
-    if (ph === 'messages_incremental') {
+    if (ph === 'references_jpersons_export' || ph === 'references_licenses_export') {
       const parts = [];
-      if (!(Number.isFinite(lo) && lo > 0)) parts.push('запрос к Firebird…');
-      if (Number.isFinite(lo) && lo > 0) parts.push('сообщений ' + fmtIntRu(lo));
-      if (Number.isFinite(page) && page > 0) parts.push('страница ' + fmtIntRu(page));
-      if (egm != null && egm !== '') parts.push('курсор EGMID ' + String(egm));
-      if (Number.isFinite(br) && br > 0) parts.push('в пакете ' + fmtIntRu(br) + ' строк');
-      if (Number.isFinite(cache) && cache > 0) parts.push('MSGID в кэше ' + fmtIntRu(cache));
-      return { title: 'Выгрузка EGISZ_MESSAGES по курсору EGMID', detail: parts.join(' · ') };
+      if (Number.isFinite(lo) && lo >= 0) parts.push('строк ' + fmtIntRu(lo));
+      const title =
+        ph === 'references_jpersons_export'
+          ? 'JPERSONS: выгрузка из Firebird'
+          : 'EGISZ_LICENSES: выгрузка из Firebird';
+      return { title: title, detail: parts.join(' · ') };
     }
-    if (ph === 'messages_counting') {
+    if (ph === 'journal_messages_export') {
       const parts = [];
-      if (Number.isFinite(lo) && lo > 0) parts.push('дозагрузка по MSGID журнала — ' + fmtIntRu(lo) + ' строк');
-      if (Number.isFinite(cache) && cache > 0) parts.push('уникальных MSGID в кэше ' + fmtIntRu(cache));
-      return { title: 'EGISZ_MESSAGES', detail: parts.join(', ') };
+      if (Number.isFinite(lo) && lo > 0) parts.push('загружено строк ' + fmtIntRu(lo));
+      if (Number.isFinite(page) && page > 0) parts.push('страница ' + fmtIntRu(page));
+      const fbWait = Number(p.firebird_elapsed_sec);
+      if (Number.isFinite(fbWait) && fbWait > 0) parts.push(fmtIntRu(fbWait) + ' с');
+      return {
+        title: 'EGISZ_MESSAGES: выгрузка из Firebird в PostgreSQL',
+        detail: parts.join(' · '),
+      };
     }
     if (ph === 'parsing') {
       const parts = [];
@@ -482,10 +507,11 @@ PAGE = """
       if (Number.isFinite(lo) && lo > 0) parts.push('строк журнала обработано ' + fmtIntRu(lo));
       if (Number.isFinite(facts) && facts >= 0) parts.push('фактов ' + fmtIntRu(facts));
       if (logid != null && logid !== '') parts.push('LOGID ' + String(logid));
-      return { title: 'Разбор строк журнала (пакет)', detail: parts.join(' · ') };
+      return { title: 'EXCHANGELOG: разбор строк пакета (прогресс)', detail: parts.join(' · ') };
     }
     if (ph === 'exchangelog_export' || ph === 'exchangelog_parse' || ph === 'page_done') {
       const segs = [];
+      if (Number.isFinite(cache) && cache > 0) segs.push('MSGID в кэше пакета ' + fmtIntRu(cache));
       if (Number.isFinite(page) && page > 0) segs.push('пакет ' + fmtIntRu(page));
       if (Number.isFinite(jb) && jb > 0) segs.push('строк в пакете ' + fmtIntRu(jb));
       if (Number.isFinite(lo) && lo > 0) segs.push('всего обработано журнала ' + fmtIntRu(lo));
@@ -498,11 +524,11 @@ PAGE = """
     }
     if (ph === 'exchangelog_ready') {
       const parts = [];
-      parts.push('далее пакет EGISZ_MESSAGES, затем EXCHANGELOG');
-      if (egm != null && egm !== '') parts.push('курсор EGMID ' + String(egm));
-      if (logid != null && logid !== '') parts.push('курсор LOGID ' + String(logid));
+      parts.push('MSGID в пакете журнала сопоставляются со staging EGISZ_MESSAGES в PostgreSQL');
+      if (egm != null && egm !== '') parts.push('last_egmid ' + String(egm));
+      if (logid != null && logid !== '') parts.push('last_log_id ' + String(logid));
       if (Number.isFinite(tot) && tot > 0) parts.push('оценка строк журнала ' + fmtIntRu(tot));
-      return { title: 'Инкремент Firebird: сообщения и журнал', detail: parts.join(' · ') };
+      return { title: 'Журнал EXCHANGELOG: подготовка к инкременту', detail: parts.join(' · ') };
     }
     if (ph === 'exchangelog_done') {
       const parts = [];
@@ -516,13 +542,12 @@ PAGE = """
       if (Number.isFinite(facts) && facts >= 0 && ph !== 'outbound_fetch') parts.push('staging ' + fmtIntRu(facts));
       return { title: 'Исходящие документы', detail: parts.join(' · ') };
     }
-    if (ph === 'enrichment_firebird') return { title: 'Справочники Firebird', detail: 'лицензии, JPERSONS' };
     if (ph === 'counting') {
       const parts = [];
       parts.push('без COUNT по журналу в Firebird');
-      if (egm != null && egm !== '') parts.push('курсор EGMID ' + String(egm));
-      if (logid != null && logid !== '') parts.push('курсор LOGID ' + String(logid));
-      return { title: 'Перед чередованием EGISZ_MESSAGES / EXCHANGELOG', detail: parts.join(' · ') };
+      if (egm != null && egm !== '') parts.push('last_egmid ' + String(egm));
+      if (logid != null && logid !== '') parts.push('last_log_id ' + String(logid));
+      return { title: 'Перед инкрементом журнала', detail: parts.join(' · ') };
     }
     const short = etlPhaseLabelRu(ph);
     return { title: short || ph, detail: '' };
@@ -539,10 +564,10 @@ PAGE = """
     if (ph === 'sync_failed') {
       return { indeterminate: true, pct: null, label: '…' };
     }
-    if (ph === 'pipeline_bootstrap' || ph === 'enrichment_firebird' || ph === 'counting' || ph === 'messages_counting') {
+    if (ph === 'pipeline_bootstrap' || ph === 'counting') {
       return { indeterminate: true, pct: null, label: '…' };
     }
-    if (ph === 'messages_incremental' || ph === 'exchangelog_ready') {
+    if (ph === 'exchangelog_ready') {
       return { indeterminate: true, pct: null, label: '…' };
     }
     if (ph === 'exchangelog_done') {
@@ -695,6 +720,7 @@ PAGE = """
   function syncMetricsLines() {
     const logEl = document.getElementById('pgSnapLogId');
     const egEl = document.getElementById('pgSnapEgmid');
+    const msgScanEl = document.getElementById('pgSnapMsgScan');
     const licEl = document.getElementById('pgSnapLicMd');
     function rawFrom(el) {
       if (!el) return '—';
@@ -705,6 +731,7 @@ PAGE = """
     }
     let logV = rawFrom(logEl);
     let egV = rawFrom(egEl);
+    let msgScanV = rawFrom(msgScanEl);
     let licV = rawFrom(licEl);
     function fmtNum(s) {
       if (s === '—') return '—';
@@ -713,7 +740,8 @@ PAGE = """
     }
     return [
       'LOGID: ' + fmtNum(logV),
-      'EGMID: ' + fmtNum(egV),
+      'last_egmid: ' + fmtNum(egV),
+      'messages_snapshot_high_egmid: ' + fmtNum(msgScanV),
       'LICENSES.MODIFYDATE: ' + licV,
     ];
   }
@@ -766,6 +794,7 @@ PAGE = """
   async function loadPgSyncSnapshotOnce() {
     const logEl = document.getElementById('pgSnapLogId');
     const egEl = document.getElementById('pgSnapEgmid');
+    const msgScanEl = document.getElementById('pgSnapMsgScan');
     const licEl = document.getElementById('pgSnapLicMd');
     if (!logEl || !egEl || !licEl) return;
     function clearSnap() {
@@ -775,6 +804,11 @@ PAGE = """
       egEl.textContent = '—';
       egEl.setAttribute('data-raw', '');
       egEl.title = '';
+      if (msgScanEl) {
+        msgScanEl.textContent = '—';
+        msgScanEl.setAttribute('data-raw', '');
+        msgScanEl.title = '';
+      }
       licEl.textContent = '—';
       licEl.setAttribute('data-raw', '');
       licEl.title = '';
@@ -809,6 +843,19 @@ PAGE = """
         egEl.textContent = '—';
         egEl.setAttribute('data-raw', '');
         egEl.title = '';
+      }
+      if (msgScanEl) {
+        const msStr = j.messages_snapshot_high_egmid != null ? String(j.messages_snapshot_high_egmid) : null;
+        if (msStr != null && msStr !== '') {
+          const mn = Number(msStr);
+          msgScanEl.textContent = Number.isFinite(mn) ? mn.toLocaleString('ru-RU') : msStr;
+          msgScanEl.setAttribute('data-raw', msStr);
+          msgScanEl.title = msStr;
+        } else {
+          msgScanEl.textContent = '—';
+          msgScanEl.setAttribute('data-raw', '');
+          msgScanEl.title = '';
+        }
       }
       const licRaw = j.licenses_modifydate != null && String(j.licenses_modifydate).trim() !== '' ? String(j.licenses_modifydate) : null;
       if (licRaw) {
@@ -933,8 +980,8 @@ PAGE = """
         { label: 'Очередь > 24ч', value: fmtNum(p.pending_older_24h) },
         { label: 'Очередь 1–24ч', value: fmtNum(p.pending_1_24h) },
         { label: 'Staging max EGMID', value: fmtNum(p.staging_max_egmid) },
-        { label: 'Firebird max EGMID', value: fmtNum(p.fb_max_egmid) },
-        { label: 'EGMID lag', value: fmtNum(p.egmid_lag) },
+        { label: 'max(last_egmid, source_max_egmid)', value: fmtNum(p.etl_cursor_egmid) },
+        { label: 'Лаг пика etl_state vs staging', value: fmtNum(p.egmid_lag) },
         { label: 'last_log_id', value: fmtNum(p.etl_last_log_id) },
       ];
       if (p.fact_rows != null) items.push({ label: 'Витрина: строк', value: fmtNum(p.fact_rows) });
@@ -985,8 +1032,6 @@ PAGE = """
       }
     });
   });
-  // Счётчики последовательных сбоев fetch: сценарий «conf-ui pod пересоздаётся, port-forward
-  // разорван» теперь сначала молчит, потом показывает аккуратную диагностику без визуального шума.
   const POLL_FAIL = { sync: 0, snap: 0, hc: 0 };
   /** Пока идёт POST /api/sync/start — pollSync не перезаписывает #syncStatus (иначе тик 1.5 с затирает «Запрос…» и кажется, что клик ничего не сделал). */
   var syncStartInFlight = false;
@@ -1026,13 +1071,16 @@ PAGE = """
       applySyncStatusFromPoll(j, el);
     } catch (e) {
       POLL_FAIL.sync += 1;
-      // Один-два пропущенных тика во время rollout/port-forward — нормальное явление, не шумим.
       if (POLL_FAIL.sync <= 2) return;
       const transport = isFetchTransportError(e);
-      const reason = transport
-        ? 'conf-ui недоступен (rollout / port-forward / sleep). Повтор через несколько секунд.'
-        : ('Ошибка опроса: ' + (e && e.message ? e.message : e));
       if (el && !syncStartInFlight) {
+        if (transport && lastSyncJson && lastSyncJson.running) {
+          applySyncStatusFromPoll(lastSyncJson, el);
+          return;
+        }
+        const reason = transport
+          ? 'Нет связи с conf-ui'
+          : ('Ошибка опроса: ' + (e && e.message ? e.message : e));
         el.textContent = reason;
         el.setAttribute('data-raw', reason);
       }
@@ -1140,6 +1188,27 @@ PAGE = """
       showCfgMessage(false, String(e), { strip: 'Ошибка', logBody: String(e) });
     }
   });
+  bindClick('btnMbExportDir', async function () {
+    if (typeof window.showDirectoryPicker !== 'function') {
+      showCfgMessage(false, 'Выбор папки для ZIP поддерживается в Chromium (Chrome, Edge, Яндекс.Браузер). Иначе архив сохранится через загрузки браузера.', {
+        strip: 'Metabase',
+        logBody: 'showDirectoryPicker недоступен',
+      });
+      return;
+    }
+    try {
+      mbExportDirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+      const hint = document.getElementById('mbExportDirHint');
+      if (hint) {
+        hint.textContent = 'ZIP Metabase: ' + (mbExportDirHandle.name || 'папка');
+        hint.classList.remove('hidden');
+        hint.title = hint.textContent;
+      }
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+      showCfgMessage(false, String(e && e.message ? e.message : e), { strip: 'Metabase', logBody: String(e) });
+    }
+  });
   bindClick('btnPgBackupDir', async function () {
     if (typeof window.showDirectoryPicker !== 'function') {
       showCfgMessage(false, 'Выбор папки для сохранения поддерживается в Chromium (Chrome, Edge, Яндекс.Браузер). Иначе дамп уйдёт в папку загрузок по умолчанию.', {
@@ -1183,6 +1252,79 @@ PAGE = """
       }
     });
   })();
+  bindClick('btnMbExport', async function () {
+    let r;
+    try {
+      r = await fetch('/api/metabase/export-dashboards-json', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { Accept: 'application/zip' },
+      });
+    } catch (e) {
+      showCfgMessage(false, String(e), { strip: 'Metabase', logBody: String(e) });
+      return;
+    }
+    if (!r.ok) {
+      const raw = await r.text();
+      let j;
+      try {
+        j = JSON.parse(raw);
+      } catch (e2) {
+        showCfgMessage(false, 'Metabase export: код ' + r.status + '. ' + raw.slice(0, 400), { strip: 'Ошибка', logBody: raw });
+        return;
+      }
+      const errMsg = (j && j.message) || raw.slice(0, 400);
+      showCfgMessage(false, errMsg, { strip: 'Metabase export', logBody: errMsg });
+      return;
+    }
+    const blob = await r.blob();
+    const cd = r.headers.get('Content-Disposition') || '';
+    const srcHdr = (r.headers.get('X-Egisz-Metabase-Export-Source') || '').trim().toLowerCase();
+    const fromBundled = srcHdr === 'bundled';
+    let name = 'egisz_metabase_dashboards.zip';
+    const m = cd.match(/filename="([^"]+)"/i);
+    if (m && m[1]) {
+      try {
+        name = decodeURIComponent(m[1].replace(/\"/g, '').trim());
+      } catch (e3) {
+        name = m[1].replace(/\"/g, '').trim() || name;
+      }
+    }
+    if (mbExportDirHandle && typeof mbExportDirHandle.getFileHandle === 'function') {
+      try {
+        const fh = await mbExportDirHandle.getFileHandle(name, { create: true });
+        const w = await fh.createWritable();
+        await w.write(blob);
+        await w.close();
+        showCfgMessage(
+          true,
+          fromBundled
+            ? 'Скачан эталонный ZIP из образа (metabase_dashboards/). Живая выгрузка Metabase недоступна — проверьте Secret или api_key.'
+            : 'Архив JSON из Metabase записан в выбранную папку.',
+          { strip: 'Metabase', logBody: 'ZIP: ' + name + (fromBundled ? ' (bundled)' : ' (live)') },
+        );
+        return;
+      } catch (e) {
+        showCfgMessage(false, String(e && e.message ? e.message : e), { strip: 'Metabase', logBody: String(e) });
+        return;
+      }
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showCfgMessage(
+      true,
+      fromBundled
+        ? 'Скачан эталонный ZIP из образа (metabase_dashboards/). Для выгрузки с живого Metabase задайте api_key или пароль в Secret.'
+        : 'Архив JSON из Metabase скачан.',
+      { strip: 'Metabase', logBody: 'ZIP: ' + name + (fromBundled ? ' (bundled)' : ' (live)') },
+    );
+  });
   bindClick('btnPgBackup', async function () {
     const fd = new FormData(document.getElementById('configForm'));
     let r;
@@ -1432,16 +1574,24 @@ def _merged_yaml_dict_from_form(p: Path, form: Mapping[str, Any]) -> dict[str, A
     """Merge POSTed form fields into the YAML root dict on disk (passwords unchanged if left blank)."""
     import yaml
 
+    def _ensure_dict(root: dict[str, Any], key: str) -> dict[str, Any]:
+        cur = root.get(key)
+        if not isinstance(cur, dict):
+            cur = {}
+            root[key] = cur
+        return cur
+
     old: dict[str, Any] = {}
     if p.is_file():
         loaded = yaml.safe_load(p.read_text(encoding="utf-8"))
         if isinstance(loaded, dict):
             old = loaded
-    old.setdefault("firebird", {})
-    old.setdefault("postgres", {})
-    old.setdefault("etl", {})
-    old.setdefault("metabase", old.get("metabase") or {})
-    old.setdefault("auto_sync", {})
+    _ensure_dict(old, "firebird")
+    _ensure_dict(old, "postgres")
+    _ensure_dict(old, "etl")
+    mb_cur = old.get("metabase")
+    old["metabase"] = dict(mb_cur) if isinstance(mb_cur, dict) else {}
+    _ensure_dict(old, "auto_sync")
 
     fb_updates: dict[str, object] = {
         "host": str(form.get("fb_host", "") or "").strip(),
@@ -1467,11 +1617,7 @@ def _merged_yaml_dict_from_form(p: Path, form: Mapping[str, Any]) -> dict[str, A
 
     old["etl"]["batch_size"] = int(form.get("etl_batch") or 500)
     old["etl"]["sync_window_days"] = int(form.get("etl_sync_days") or 30)
-    try:
-        interleave = int(form.get("etl_interleave_page_rows") or 8192)
-    except (TypeError, ValueError):
-        interleave = int(old["etl"].get("interleave_page_rows") or 8192)
-    old["etl"]["interleave_page_rows"] = max(1, min(65000, interleave))
+    old["etl"].pop("messages_snapshot_full_refresh", None)
 
     old["auto_sync"]["enabled"] = bool(form.get("auto_sync_enabled"))
     cron_in = str(form.get("auto_sync_schedule_cron", "") or "").strip()
@@ -1562,7 +1708,10 @@ def create_app() -> Flask:
         except Exception as e:
             return jsonify({"ok": False, "message": f"Файл записан, но конфиг не читается: {e}"})
         cron_ok, cron_detail = reconcile_egisz_monitor_sync_cronjob(merged.get("auto_sync") or {})
-        base = "Сохранено."
+        etl_sec = merged.get("etl") if isinstance(merged.get("etl"), dict) else {}
+        bs = etl_sec.get("batch_size")
+        sw = etl_sec.get("sync_window_days")
+        base = f"Сохранено. ETL: batch_size={bs}, sync_window_days={sw}."
         if cron_ok:
             msg = f"{base} {cron_detail}"
         else:
@@ -1600,6 +1749,24 @@ def create_app() -> Flask:
         except Exception as e:  # pragma: no cover
             return jsonify({"ok": False, "message": f"PostgreSQL: {e}"})
         return jsonify({"ok": True, "message": "PostgreSQL: OK"})
+
+    @app.post("/api/metabase/export-dashboards-json")
+    def api_metabase_export_dashboards_json():  # type: ignore[no-untyped-def]
+        """ZIP с JSON дашбордов: сначала живой Metabase; при ошибке — эталон из образа (metabase_dashboards/)."""
+        try:
+            blob, fn, source = build_export_zip_bytes()
+        except RuntimeError as e:
+            return jsonify({"ok": False, "message": str(e)}), 400
+        except Exception as e:  # pragma: no cover
+            return jsonify({"ok": False, "message": f"Metabase export: {e}"}), 502
+        return Response(
+            blob,
+            mimetype="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{fn}"',
+                "X-Egisz-Metabase-Export-Source": source,
+            },
+        )
 
     @app.post("/api/pg/backup")
     def api_pg_backup():  # type: ignore[no-untyped-def]
@@ -1714,43 +1881,39 @@ def create_app() -> Flask:
         if snap.get("errors"):
             result["ok"] = False
 
-        # Опрос Firebird — timeout; при неудаче подставляем source_max_* из etl_state (последний успешный ETL).
+        # Опрос Firebird — только MAX(MODIFYDATE) по лицензиям (timeout); пик EGMID в proxy_db — из PG healthcheck (etl_state).
         from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutureTimeout
 
-        fb_peaks: dict[str, Any] = {"max_egmid": None, "max_licenses_modifydate": None, "error": None}
+        fb_lic: dict[str, Any] = {"max_licenses_modifydate": None, "error": None}
         ex = ThreadPoolExecutor(max_workers=1)
         try:
-            fut = ex.submit(fetch_firebird_source_peaks, cfg.firebird)
+            fut = ex.submit(fetch_firebird_max_license_modifydate, cfg.firebird)
             try:
-                fb_peaks = fut.result(timeout=20.0)
+                fb_lic = fut.result(timeout=20.0)
             except _FutureTimeout:
-                fb_peaks = {"max_egmid": None, "max_licenses_modifydate": None, "error": "timeout"}
+                fb_lic = {"max_licenses_modifydate": None, "error": "timeout"}
             except Exception as e:  # pragma: no cover
-                fb_peaks = {"max_egmid": None, "max_licenses_modifydate": None, "error": str(e)}
+                fb_lic = {"max_licenses_modifydate": None, "error": str(e)}
         finally:
             ex.shutdown(wait=False, cancel_futures=True)
 
-        if fb_peaks.get("max_egmid") is None and pg_cached_peaks.get("source_max_egmid") is not None:
-            fb_peaks["max_egmid"] = pg_cached_peaks["source_max_egmid"]
-        if fb_peaks.get("max_licenses_modifydate") is None and pg_cached_peaks.get(
+        if fb_lic.get("max_licenses_modifydate") is None and pg_cached_peaks.get(
             "source_max_licenses_modifydate"
         ):
-            fb_peaks["max_licenses_modifydate"] = pg_cached_peaks["source_max_licenses_modifydate"]
+            fb_lic["max_licenses_modifydate"] = pg_cached_peaks["source_max_licenses_modifydate"]
 
-        peaks_resolved = fb_peaks.get("max_egmid") is not None or bool(
-            fb_peaks.get("max_licenses_modifydate")
-        )
+        peaks_resolved = bool(fb_lic.get("max_licenses_modifydate"))
 
         proxy_db = result.get("proxy_db") or {}
-        if fb_peaks.get("max_egmid") is not None:
-            proxy_db["fb_max_egmid"] = fb_peaks["max_egmid"]
-            staging_max = proxy_db.get("staging_max_egmid")
-            if isinstance(staging_max, int) and isinstance(fb_peaks["max_egmid"], int):
-                proxy_db["egmid_lag"] = max(0, fb_peaks["max_egmid"] - staging_max)
-        if fb_peaks.get("max_licenses_modifydate"):
-            proxy_db["fb_max_licenses_modifydate"] = fb_peaks["max_licenses_modifydate"]
-        if fb_peaks.get("error") and not peaks_resolved:
-            result.setdefault("errors", []).append(f"Firebird peaks: {fb_peaks['error']}")
+        ec = proxy_db.get("etl_cursor_egmid")
+        st = proxy_db.get("staging_max_egmid")
+        if isinstance(ec, int) and isinstance(st, int):
+            proxy_db["egmid_lag"] = max(0, ec - st)
+
+        if fb_lic.get("max_licenses_modifydate"):
+            proxy_db["fb_max_licenses_modifydate"] = fb_lic["max_licenses_modifydate"]
+        if fb_lic.get("error") and not peaks_resolved:
+            result.setdefault("errors", []).append(f"Firebird licenses peak: {fb_lic['error']}")
         result["proxy_db"] = proxy_db
 
         return jsonify(result)

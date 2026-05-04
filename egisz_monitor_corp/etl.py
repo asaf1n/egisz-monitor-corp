@@ -1,66 +1,70 @@
 """Firebird → PostgreSQL ETL for corp fact table (LOGID cursor, not MODIFYDATE).
 
-Источники Firebird в `run_sync` (четыре таблицы, затем витрина):
-  • Полная перезагрузка в staging: **JPERSONS**, **EGISZ_LICENSES** (`_export_egisz_licenses_full`).
-  • Инкремент по ключу: **EGISZ_MESSAGES** (курсор EGMID), **EXCHANGELOG** (курсор LOGID) — чередование
-    пакетов по 65k, дозагрузка MSGID, парсинг и UPSERT фактов.
-  • Дополнительно: `_refresh_outbound_documents` — снимок исходящих по EGMID.
+Термины (EGISZ_MESSAGES / журнал):
+  • **MSGID** — идентификатор сообщения в контуре обмена и интеграций; в **EXCHANGELOG** ссылка в колонке **MSGID**;
+    тело ответа РЭМД при наличии — в **EXCHANGELOG.MSGTEXT**.
+  • **EGMID** — суррогатный ключ **строки** в таблице **EGISZ_MESSAGES** (фиксация исходящего при отправке в РЭМД ЕГИСЗ).
 
-Архитектура (сначала выгрузка из FB, затем парсинг/UPSERT):
-  1. `_export_egisz_licenses_full` — JPERSONS и EGISZ_LICENSES отдельными SELECT из FB; в PostgreSQL — `stg_jpersons_import`, `stg_egisz_licenses_import`, сшивка JNAME/JINN/FIR_OID в SQL (`UPDATE … FROM`), staging, merge в `dim_clinics`.
-  2. `_count_exchangelog_total` — заглушка (без COUNT в Firebird); в payload UI поле `total_rows` не передаётся, пока объём неизвестен.
-  3. Чередование пакетов по 65k: EGISZ_MESSAGES (EGMID) и EXCHANGELOG (LOGID); дозагрузка сообщений по MSGID строки журнала;
-     пока парсится/пишется страница журнала, в фоне запрашивается следующая страница сообщений из Firebird.
-  4. `_process_exchangelog_pages` — полный проход журнала (тесты); в `run_sync` используется потоковое чередование.
-  5. `_refresh_outbound_documents` — полная перезапись `stg_egisz_outbound_documents` из Firebird и запись в PostgreSQL.
+Источники Firebird в `run_sync`:
+  • **JPERSONS** и **EGISZ_LICENSES** — первый шаг после lock: staging, merge **dim_clinics**, кэш для **build_record**.
+  • **EGISZ_MESSAGES** и **EXCHANGELOG** — чередование страниц (``batch_size``); снимок **stg_egisz_messages_journal**
+    инкрементально по **EGMID** с водяным знаком **etl_state.messages_snapshot_high_egmid** (и prune по окну дат);
+    при **sync_window_days <= 0** — для **EXCHANGELOG** и **EGISZ_MESSAGES**/**исходящих** без фильтра по
+    дате в Firebird (все записи за курсорами **LOGID**/ключом снимка); для **`stg_egisz_messages_journal`** —
+    полный пересъём (**TRUNCATE** + сброс **messages_snapshot_high_egmid**); журнал по **LOGID**; догрузка по **MSGID**.
+  • Исходящие: `_refresh_outbound_documents` (окно **CREATEDATE** при ``sync_window_days`` > 0).
 
-Расщепление сделано для тестируемости (`tests/test_etl_*`) и читаемости логов: фазы в
-`EtlProgressPayload.phase` для UI; частые обновления одной и той же фазы троттлятся в `run_sync`, смена фазы — сразу.
+Кооперативная остановка: проверка **перед** каждым SELECT к Firebird (справочники, страницы журнала и снимка сообщений).
 
-Безопасность параллельного запуска: `pg_try_advisory_lock(hash(pipeline))` — CronJob и
-UI-кнопка теперь не могут стартовать sync одновременно, выполнится только первый.
+Безопасность параллельного запуска: `pg_try_advisory_lock(hash(pipeline))`.
 """
 
 from __future__ import annotations
 
 import time
-from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping, Sequence, TypedDict
 
 from egisz_monitor_corp.config_loader import CorpAppConfig, load_corp_config
 from egisz_monitor_corp.fb_client import fetch_all
-from egisz_monitor_corp.parser import EgiszMonitorParser, StagingParseError, _norm_kind_code, extract_parse_hints
+from egisz_monitor_corp.parser import EgiszMonitorParser, StagingParseError, extract_parse_hints
 from egisz_monitor_corp.pg_warehouse import (
     PipelineLockBusyError,
     apply_reports_schema,
     connect_pg,
     ensure_etl_state_table,
+    fetch_journal_messages_by_msgids,
     fetch_license_rows_for_enrichment,
+    journal_msgids_present_in_staging,
     get_last_egmid,
     get_last_log_id,
+    get_messages_snapshot_high_egmid,
+    insert_journal_messages_staging_rows,
     insert_staging_errors,
     merge_dim_clinics_from_license_staging,
     refresh_license_staging_from_firebird_exports,
     refresh_outbound_documents_staging,
     release_pipeline_lock,
     set_etl_source_peaks,
+    prune_stg_egisz_messages_journal_by_sync_window,
     set_last_egmid,
     set_last_log_id,
+    set_messages_snapshot_high_egmid,
     try_acquire_pipeline_lock,
+    truncate_journal_messages_staging,
     upsert_dim_clinic,
     upsert_dim_semd,
     upsert_facts_batch,
 )
 from egisz_monitor_corp.sql_util import (
+    default_egisz_licenses_select_sql,
+    default_jpersons_select_sql,
     egisz_messages_by_msgids_sql,
-    egisz_messages_incremental_page_max_egmid_sql,
-    egisz_messages_incremental_sql,
-    enrichment_egisz_licenses_only_sql,
     exchangelog_inner_sql_for_etl,
-    jpersons_all_sql,
+    journal_messages_staging_base_sql,
     outbound_documents_staging_select,
+    journal_messages_keyset_page_sql,
     paginated_exchangelog_sql,
 )
 
@@ -69,41 +73,27 @@ CancelCheck = Callable[[], None] | None
 # Минимальный интервал между одинаковыми фазами в progress_detail_cb (сек.): UI не должен замедлять ETL.
 _DETAIL_THROTTLE_SEC = 0.22
 
-_MSGBACKFILL_IN_CHUNK = 180
-
 
 def _etl_sync_window_days(cfg: CorpAppConfig) -> int | None:
     d = int(cfg.etl.sync_window_days)
     return d if d > 0 else None
 
 
-def _egisz_messages_page_max_egmid_from_fb(
-    cfg: CorpAppConfig, last_egmid: int, limit: int
-) -> int | None:
-    sql = egisz_messages_incremental_page_max_egmid_sql(
-        last_egmid=last_egmid,
-        limit=limit,
-        sync_window_days=_etl_sync_window_days(cfg),
-    )
-    rows = _etl_fb_fetch(cfg, sql)
-    if not rows:
-        return None
-    raw = rows[0].get("max_egmid")
-    if raw is None:
-        raw = rows[0].get("MAX_EGMID")
-    if raw is None:
-        return None
-    try:
-        n = int(raw)
-    except (TypeError, ValueError):
-        return None
-    return n
+def _messages_journal_full_rescan(cfg: CorpAppConfig) -> bool:
+    """TRUNCATE снимка сообщений при отсутствии окна по датам (sync_window_days <= 0).
+
+    Само окно для EXCHANGELOG/исходящих задаётся через `_etl_sync_window_days` → ``None`` — без предиката LOGDATE/CREATEDATE.
+    """
+    return int(cfg.etl.sync_window_days) <= 0
 
 
 def _etl_fb_fetch(
     cfg: CorpAppConfig,
     sql: str,
     params: Sequence[Any] | Mapping[str, Any] | None = None,
+    *,
+    wait_tick_sec: int | None = None,
+    on_wait_tick: Callable[[int], None] | None = None,
 ) -> list[dict[str, Any]]:
     """SELECT к Firebird с таймаутом из конфига (COUNT и постраничные выгрузки)."""
     return fetch_all(
@@ -111,7 +101,411 @@ def _etl_fb_fetch(
         sql,
         params,
         timeout_sec=cfg.etl.firebird_query_timeout_sec,
+        wait_tick_sec=wait_tick_sec,
+        on_wait_tick=on_wait_tick,
     )
+
+
+def _max_license_modifydate(license_rows: list[dict[str, Any]]) -> Any:
+    best: Any = None
+    for r in license_rows:
+        md = r.get("modifydate")
+        if md is None:
+            continue
+        if best is None:
+            best = md
+            continue
+        try:
+            if md > best:
+                best = md
+        except TypeError:
+            pass
+    return best
+
+
+def _best_license_row_by_jid(license_rows: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
+    """Первая строка на JID в порядке fetch (ORDER BY jid, modifydate DESC …) — самая свежая лицензия."""
+    out: dict[int, dict[str, Any]] = {}
+    for r in license_rows:
+        ji = _to_int(r.get("jid"))
+        if ji is None:
+            continue
+        if ji not in out:
+            out[ji] = r
+    return out
+
+
+def _build_mo_uid_to_jid(license_rows: list[dict[str, Any]]) -> dict[str, int]:
+    """MO_UID → JID; при нескольких строках на один MO_UID — по наиболее свежему MODIFYDATE."""
+
+    def _md_utc(r: dict[str, Any]) -> datetime:
+        md = r.get("modifydate")
+        if isinstance(md, datetime):
+            if md.tzinfo is None:
+                return md.replace(tzinfo=timezone.utc)
+            return md.astimezone(timezone.utc)
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+    sorted_rows = sorted(license_rows, key=_md_utc, reverse=True)
+    out: dict[str, int] = {}
+    for r in sorted_rows:
+        raw = r.get("mo_uid")
+        mou = (str(raw).strip() if raw is not None else "") or ""
+        if not mou:
+            continue
+        ji = _to_int(r.get("jid"))
+        if ji is not None and mou not in out:
+            out[mou] = ji
+    return out
+
+
+def _license_row_for_host_jids(
+    host_part: dict[str, Any], best_by_jid: dict[int, dict[str, Any]]
+) -> dict[str, Any] | None:
+    for key in ("jid_url", "jid_gost_log", "jid_gost_reply"):
+        j = host_part.get(key)
+        if isinstance(j, int) and j > 0:
+            row = best_by_jid.get(j)
+            if row:
+                return row
+    return None
+
+
+def _load_reference_tables(
+    cfg: CorpAppConfig,
+    pg: Any,
+    *,
+    pipeline: str,
+    log: Callable[[str], None],
+    detail: Callable[[EtlProgressPayload], None],
+    cancel_check: CancelCheck,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """JPERSONS затем EGISZ_LICENSES из Firebird; staging + dim_clinics; пик MODIFYDATE лицензий в etl_state."""
+    _raise_if_cancel(cancel_check)
+    jp_rows = _etl_fb_fetch(cfg, default_jpersons_select_sql())
+    _raise_if_cancel(cancel_check)
+    detail(
+        {
+            "phase": "references_jpersons_export",
+            "loaded_rows": len(jp_rows),
+            "parsed_facts": 0,
+            "journal_facts": 0,
+            "staging_errors": 0,
+        }
+    )
+    log(f"JPERSONS: выгрузка из Firebird — {len(jp_rows)} строк.")
+    lic_rows = _etl_fb_fetch(cfg, default_egisz_licenses_select_sql())
+    _raise_if_cancel(cancel_check)
+    detail(
+        {
+            "phase": "references_licenses_export",
+            "loaded_rows": len(lic_rows),
+            "parsed_facts": 0,
+            "journal_facts": 0,
+            "staging_errors": 0,
+        }
+    )
+    log(f"EGISZ_LICENSES: выгрузка из Firebird — {len(lic_rows)} строк.")
+    _raise_if_cancel(cancel_check)
+    detail(
+        {
+            "phase": "references_pg_staging",
+            "loaded_rows": 0,
+            "parsed_facts": 0,
+            "journal_facts": 0,
+            "staging_errors": 0,
+        }
+    )
+    ichunk = max(500, min(int(cfg.etl.batch_size), 20_000))
+    refresh_license_staging_from_firebird_exports(
+        pg,
+        jpersons_rows=jp_rows,
+        license_rows=lic_rows,
+        insert_chunk_size=ichunk,
+    )
+    detail(
+        {
+            "phase": "references_merge_dim",
+            "loaded_rows": 0,
+            "parsed_facts": 0,
+            "journal_facts": 0,
+            "staging_errors": 0,
+        }
+    )
+    merge_dim_clinics_from_license_staging(pg)
+    pg.commit()
+    peak_lic = _max_license_modifydate(lic_rows)
+    set_etl_source_peaks(pg, pipeline, None, peak_lic)
+    pg.commit()
+    log(
+        "Справочники: запись staging, merge dim_clinics (JPERSONS + EGISZ_LICENSES), пик лицензий в etl_state."
+    )
+    return jp_rows, lic_rows
+
+
+def _ensure_exchangelog_msgids_in_staging_from_firebird(
+    cfg: CorpAppConfig,
+    pg: Any,
+    journal_rows: list[dict[str, Any]],
+    *,
+    log: Callable[[str], None],
+    cancel_check: CancelCheck = None,
+) -> None:
+    """Строки EGISZ_MESSAGES по MSGID из пакета журнала, отсутствующие в staging, — SELECT из Firebird и UPSERT в PG."""
+    ids: list[str] = []
+    seen: set[str] = set()
+    for r in journal_rows:
+        mk = _norm_msgid_key(r.get("msgid"))
+        if mk and mk not in seen:
+            seen.add(mk)
+            ids.append(mk)
+    if not ids or pg is None:
+        return
+    present = journal_msgids_present_in_staging(pg, ids)
+    missing = [m for m in ids if m not in present]
+    if not missing:
+        return
+    qmax = max(1, min(int(cfg.etl.batch_size), 500))
+    loaded = 0
+    for i in range(0, len(missing), qmax):
+        _raise_if_cancel(cancel_check)
+        part = missing[i : i + qmax]
+        ph = ", ".join(["?"] * len(part))
+        sql = egisz_messages_by_msgids_sql(ph)
+        fb_rows = _etl_fb_fetch(cfg, sql, tuple(part))
+        if fb_rows:
+            insert_journal_messages_staging_rows(pg, fb_rows)
+            pg.commit()
+            loaded += len(fb_rows)
+    if loaded:
+        log(
+            f"EGISZ_MESSAGES: догрузка по MSGID из пакета журнала — {loaded} строк из Firebird "
+            f"(уникальных MSGID не в staging: {len(missing)})."
+        )
+
+
+def _max_egmid_in_fb_message_rows(rows: list[dict[str, Any]]) -> int | None:
+    best: int | None = None
+    for r in rows:
+        v = _egmid_sql_int(r.get("egmid"))
+        if v is None:
+            continue
+        vi = int(v)
+        if best is None or vi > best:
+            best = vi
+    return best
+
+
+def _journal_messages_staging_fetch_keyset_page(
+    cfg: CorpAppConfig,
+    pg: Any,
+    *,
+    base_inner: str,
+    after_egmid: int,
+    batch: int,
+    page: int,
+    total_before: int,
+    detail: Callable[[EtlProgressPayload], None],
+    cancel_check: CancelCheck,
+) -> tuple[int, int, bool]:
+    """Одна страница снимка EGISZ_MESSAGES (EGMID > after) → staging. Возвращает (новый after_egmid, прирост строк, конец)."""
+    _raise_if_cancel(cancel_check)
+    detail(
+        {
+            "phase": "journal_messages_export",
+            "loaded_rows": total_before,
+            "parsed_facts": 0,
+            "journal_facts": 0,
+            "staging_errors": 0,
+            "page": page,
+            "journal_batch_rows": batch,
+        }
+    )
+    sql = journal_messages_keyset_page_sql(base_inner, after_egmid=after_egmid, limit=batch)
+    fb_timeout = max(1, int(cfg.etl.firebird_query_timeout_sec))
+    tick_sec = min(15, max(5, fb_timeout // 60))
+
+    def _fb_wait_tick(elapsed_sec: int) -> None:
+        _raise_if_cancel(cancel_check)
+        detail(
+            {
+                "phase": "journal_messages_export",
+                "loaded_rows": total_before,
+                "parsed_facts": 0,
+                "journal_facts": 0,
+                "staging_errors": 0,
+                "page": page,
+                "journal_batch_rows": batch,
+                "firebird_elapsed_sec": int(elapsed_sec),
+            }
+        )
+
+    rows = _etl_fb_fetch(
+        cfg,
+        sql,
+        wait_tick_sec=tick_sec,
+        on_wait_tick=_fb_wait_tick,
+    )
+    if not rows:
+        return after_egmid, 0, True
+    insert_journal_messages_staging_rows(pg, rows)
+    pg.commit()
+    mx = _max_egmid_in_fb_message_rows(rows)
+    new_after = int(mx) if mx is not None else after_egmid
+    n = len(rows)
+    return new_after, n, n < batch
+
+
+def _sync_journal_snapshot_interleaved(
+    cfg: CorpAppConfig,
+    pg: Any,
+    *,
+    base_sql: str,
+    last_id: int,
+    total_exchangelog: int,
+    progress_detail_cb: Callable[[EtlProgressPayload], None] | None,
+    log: Callable[[str], None],
+    detail: Callable[[EtlProgressPayload], None],
+    cancel_check: CancelCheck = None,
+    best_lic_by_jid: dict[int, dict[str, Any]] | None = None,
+    mo_uid_to_jid: dict[str, int] | None = None,
+) -> _PageStats:
+    """Чередование страниц снимка EGISZ_MESSAGES и журнала EXCHANGELOG; затем дочитывание снимка до конца."""
+    if pg is None:
+        return _process_exchangelog_pages(
+            cfg,
+            pg,
+            base_sql=base_sql,
+            last_id=last_id,
+            total_exchangelog=total_exchangelog,
+            progress_detail_cb=progress_detail_cb,
+            log=log,
+            detail=detail,
+            cancel_check=cancel_check,
+            best_lic_by_jid=best_lic_by_jid,
+            mo_uid_to_jid=mo_uid_to_jid,
+        )
+
+    batch = max(1, cfg.etl.batch_size)
+    base_msgs = journal_messages_staging_base_sql(sync_window_days=_etl_sync_window_days(cfg))
+    pipeline = cfg.etl.pipeline_name
+
+    if _messages_journal_full_rescan(cfg):
+        truncate_journal_messages_staging(pg)
+        set_messages_snapshot_high_egmid(pg, pipeline, 0)
+        pg.commit()
+        msg_scan = 0
+    else:
+        prune_stg_egisz_messages_journal_by_sync_window(pg, _etl_sync_window_days(cfg))
+        msg_scan = get_messages_snapshot_high_egmid(pg, pipeline)
+        pg.commit()
+
+    parser = EgiszMonitorParser()
+    staging_buffer: list[tuple] = []
+    fact_buffer: list[dict[str, Any]] = []
+    stats = _PageStats(last_id=last_id, messages_snapshot_scan_high_egmid=msg_scan)
+
+    msg_page = 0
+    msg_total = 0
+    msgs_done = False
+    journal_exhausted = False
+    journal_page = 0
+
+    while not journal_exhausted:
+        _raise_if_cancel(cancel_check)
+        if not msgs_done:
+            msg_page += 1
+            msg_scan, inc, partial = _journal_messages_staging_fetch_keyset_page(
+                cfg,
+                pg,
+                base_inner=base_msgs,
+                after_egmid=msg_scan,
+                batch=batch,
+                page=msg_page,
+                total_before=msg_total,
+                detail=detail,
+                cancel_check=cancel_check,
+            )
+            msg_total += inc
+            stats.messages_snapshot_scan_high_egmid = msg_scan
+            if partial:
+                msgs_done = True
+
+        journal_page += 1
+        detail(
+            {
+                "phase": "exchangelog_export",
+                "loaded_rows": stats.fetched,
+                "parsed_facts": stats.facts,
+                "journal_facts": stats.facts,
+                "staging_errors": stats.staging_n,
+                "page": journal_page,
+                "journal_batch_rows": batch,
+                "cursor_log_id": stats.last_id,
+                **_progress_payload_total_rows(total_exchangelog),
+            }
+        )
+        jrows = _export_exchangelog_page(cfg, base_sql, last_log_id=stats.last_id, limit=batch)
+        if not jrows:
+            journal_exhausted = True
+            break
+        log(f"EXCHANGELOG: пакет {journal_page} — выгрузка из Firebird, строк {len(jrows)}.")
+        _ensure_exchangelog_msgids_in_staging_from_firebird(
+            cfg, pg, jrows, log=log, cancel_check=cancel_check
+        )
+        _ingest_exchangelog_rows_chunk(
+            cfg,
+            pg,
+            rows=jrows,
+            page=journal_page,
+            total_exchangelog=total_exchangelog,
+            parser=parser,
+            staging_buffer=staging_buffer,
+            fact_buffer=fact_buffer,
+            stats=stats,
+            pipeline=pipeline,
+            progress_detail_cb=progress_detail_cb,
+            detail=detail,
+            log=log,
+            cancel_check=cancel_check,
+            best_lic_by_jid=best_lic_by_jid,
+            mo_uid_to_jid=mo_uid_to_jid,
+        )
+        if len(jrows) < batch:
+            journal_exhausted = True
+
+    while not msgs_done:
+        _raise_if_cancel(cancel_check)
+        msg_page += 1
+        msg_scan, inc, partial = _journal_messages_staging_fetch_keyset_page(
+            cfg,
+            pg,
+            base_inner=base_msgs,
+            after_egmid=msg_scan,
+            batch=batch,
+            page=msg_page,
+            total_before=msg_total,
+            detail=detail,
+            cancel_check=cancel_check,
+        )
+        msg_total += inc
+        stats.messages_snapshot_scan_high_egmid = msg_scan
+        if partial:
+            msgs_done = True
+
+    log(
+        f"EGISZ_MESSAGES: выгрузка из Firebird в PostgreSQL — {msg_total} строк в stg_egisz_messages_journal "
+        f"(инкремент по EGMID, high={stats.messages_snapshot_scan_high_egmid})."
+    )
+
+    if fact_buffer:
+        _upsert_facts_from_buffer(pg, fact_buffer, cfg)
+        pg.commit()
+    if staging_buffer:
+        insert_staging_errors(pg, staging_buffer)
+        pg.commit()
+
+    return stats
 
 
 @dataclass
@@ -132,23 +526,11 @@ def _raise_if_cancel(cancel_check: CancelCheck) -> None:
         cancel_check()
 
 
-@dataclass(frozen=True)
-class LicenseReplyRow:
-    """Строка лицензии с MO_DOMEN для сопоставления с REPLYTO (подстрока домена в адресе)."""
-
-    mo_domen: str
-    modifydate: datetime | None
-    lic_id: int
-    jid: int | None
-    kind: Any
-    mo_uid: str | None
-
-
 class EtlProgressPayload(TypedDict, total=False):
     """Снимок прогресса для UI (все поля опциональны кроме phase).
 
-    phase: pipeline_bootstrap | pg_schema_apply | firebird_* | enrichment_firebird | counting | messages_* | …
-    pipeline_step / pipeline_steps — доля «холодного старта» до журнала (для фонового sync и полоски %).
+    phase: pipeline_bootstrap | pg_schema_apply | references_* | journal_messages_export |
+           counting | exchangelog_* | outbound_* | sync_failed …
     """
 
     phase: str
@@ -162,30 +544,12 @@ class EtlProgressPayload(TypedDict, total=False):
     outbound_loaded: int
     outbound_total: int
     journal_facts: int
-    messages_cursor_egmid: int
+    etl_last_egmid: int
     messages_batch_rows: int
     messages_msgid_cache_size: int
     journal_batch_rows: int
     cursor_log_id: int
-    licenses_modifydate_iso: str
-
-
-@dataclass
-class EnrichmentCache:
-    """Справочники Firebird, загруженные в начале run_sync (O(1) lookups в горячем цикле)."""
-
-    mo_uid_to_jid_from_egisz_licenses: dict[str, int] = field(default_factory=dict)
-    # Первая строка EGISZ_LICENSES по JID (порядок как в clinics) — для upsert_dim_clinic без O(n) по списку.
-    clinic_dim_by_jid: dict[int, tuple[str | None, str | None, str | None]] = field(default_factory=dict)
-    clinics: list[tuple[int, str | None, str | None, str | None, str | None]] = field(
-        default_factory=list
-    )
-    jname_by_jid: dict[int, str] = field(default_factory=dict)
-    jpersons_by_jid: dict[int, tuple[str | None, str | None, str | None]] = field(
-        default_factory=dict
-    )
-    license_reply_rows: tuple[LicenseReplyRow, ...] = ()
-    max_licenses_modifydate: datetime | None = None
+    firebird_elapsed_sec: int
 
 
 def _to_int(v: Any) -> int | None:
@@ -199,7 +563,7 @@ def _to_int(v: Any) -> int | None:
 
 
 def _egmid_sql_int(v: Any) -> int | None:
-    """Целый EGMID из Firebird для продвижения курсора (0 допустим; иначе _to_int отбрасывает 0 и ломает цикл)."""
+    """EGMID как целое (0 допустим для last_egmid из etl_state; иначе _to_int отбрасывает 0)."""
     if v is None:
         return None
     try:
@@ -243,33 +607,6 @@ def _norm_msgid_key(v: Any) -> str | None:
     return s or None
 
 
-def _license_for_reply_to(
-    reply_to: str | None, rows: Sequence[LicenseReplyRow]
-) -> LicenseReplyRow | None:
-    """Эквивалент FB: POSITION(TRIM(MO_DOMEN) IN TRIM(REPLYTO)) с выбором FIRST 1 ORDER BY MODIFYDATE DESC, ID DESC."""
-    if not reply_to or not rows:
-        return None
-    rt = str(reply_to).strip()
-    if not rt:
-        return None
-    candidates: list[LicenseReplyRow] = []
-    for row in rows:
-        dom = row.mo_domen
-        if dom and dom in rt:
-            candidates.append(row)
-    if not candidates:
-        return None
-
-    def sort_key(row: LicenseReplyRow) -> tuple[datetime, int]:
-        md = row.modifydate
-        if md is not None and md.tzinfo is not None:
-            md = md.replace(tzinfo=None)
-        base = md or datetime.min
-        return (base, row.lic_id)
-
-    return max(candidates, key=sort_key)
-
-
 def _is_test_clinic(jname: str | None) -> bool:
     """Тестовые клиники: jname содержит 'test' или 'тест' (в нижнем регистре). Решение зафиксировано в .cursorrules."""
     if not jname:
@@ -278,66 +615,49 @@ def _is_test_clinic(jname: str | None) -> bool:
     return "test" in low or "тест" in low
 
 
-def _clean_license_rows_after_firebird(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Строки с валидным JID (как отбор в fetch_license_rows_for_enrichment в PostgreSQL)."""
-    return [r for r in raw if _to_int(r.get("jid")) is not None]
-
-
-def _jpersons_map_from_firebird_rows(jp_rows: list[dict[str, Any]]) -> dict[int, tuple[str | None, str | None, str | None]]:
-    m: dict[int, tuple[str | None, str | None, str | None]] = {}
-    for r in jp_rows:
-        jid = _to_int(r.get("jid"))
-        if not jid:
-            continue
-        m[jid] = (_to_str(r.get("jname")), _to_str(r.get("jinn")), _to_str(r.get("fir_oid")))
-    return m
-
-
-def _license_rows_with_jpersons(
-    lic_rows: list[dict[str, Any]], jp_by_jid: dict[int, tuple[str | None, str | None, str | None]]
-) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
-    for r in lic_rows:
-        rr = dict(r)
-        jid = _to_int(rr.get("jid"))
-        jn, jinn, fir = jp_by_jid.get(jid, (None, None, None)) if jid else (None, None, None)
-        rr["jname"] = jn
-        rr["jinn"] = jinn
-        rr["fir_oid"] = fir
-        out.append(rr)
-    return out
-
-
-def _fetch_jpersons_and_licenses_separate(
+def _build_msg_cache_for_journal_page(
     cfg: CorpAppConfig,
+    pg: Any,
+    rows: list[dict[str, Any]],
     log: Callable[[str], None],
     *,
-    before_jpersons: Callable[[], None] | None = None,
-    before_licenses: Callable[[], None] | None = None,
     cancel_check: CancelCheck = None,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    if before_jpersons:
-        before_jpersons()
-    log("Firebird [1/2]: выгрузка JPERSONS (все JID)…")
-    jp_rows = _etl_fb_fetch(cfg, jpersons_all_sql())
-    log(f"JPERSONS: прочитано {len(jp_rows)} строк из Firebird.")
-    _raise_if_cancel(cancel_check)
-    if before_licenses:
-        before_licenses()
-    log("Firebird [2/2]: выгрузка EGISZ_LICENSES (без JOIN)…")
-    lic_rows = _etl_fb_fetch(cfg, enrichment_egisz_licenses_only_sql())
-    log(f"EGISZ_LICENSES: прочитано {len(lic_rows)} строк из Firebird.")
-    return jp_rows, lic_rows
-
-
-def _fetch_egisz_licenses_raw_from_firebird(
-    cfg: CorpAppConfig, log: Callable[[str], None]
-) -> list[dict[str, Any]]:
-    """Сшивка JPERSONS + лицензии в Python (режим без PostgreSQL, например dry-run)."""
-    jp_rows, lic_rows = _fetch_jpersons_and_licenses_separate(cfg, log)
-    merged = _license_rows_with_jpersons(lic_rows, _jpersons_map_from_firebird_rows(jp_rows))
-    log(f"EGISZ_LICENSES: сшивка с JPERSONS в Python → {len(merged)} строк.")
-    return merged
+) -> dict[str, dict[str, Any]]:
+    """MSGID → поля сообщения: из PostgreSQL stg_egisz_messages_journal (после снимка EGISZ_MESSAGES с Firebird)."""
+    cache: dict[str, dict[str, Any]] = {}
+    ids: list[str] = []
+    seen: set[str] = set()
+    for r in rows:
+        mk = _norm_msgid_key(r.get("msgid"))
+        if mk and mk not in seen:
+            seen.add(mk)
+            ids.append(mk)
+    if not ids or pg is None:
+        return cache
+    qbatch = max(1, min(int(cfg.etl.batch_size), 10_000))
+    n_pg = 0
+    for i in range(0, len(ids), qbatch):
+        _raise_if_cancel(cancel_check)
+        part = ids[i : i + qbatch]
+        got = fetch_journal_messages_by_msgids(pg, part)
+        n_pg += len(got)
+        for row in got:
+            mk = _norm_msgid_key(row.get("msgid"))
+            if not mk:
+                continue
+            cache[mk] = {
+                "msgid": mk,
+                "replyto": row.get("replyto"),
+                "documentid": row.get("documentid"),
+                "egmid": row.get("egmid"),
+                "msg_created_at": row.get("msg_created_at"),
+            }
+    if n_pg:
+        log(
+            f"EGISZ_MESSAGES: сопоставление из PostgreSQL — {n_pg} строк по MSGID в пакете журнала, "
+            f"уникальных MSGID в кэше {len(cache)}."
+        )
+    return cache
 
 
 def _upsert_facts_from_buffer(pg: Any, fact_buffer: list[dict[str, Any]], cfg: CorpAppConfig) -> None:
@@ -348,112 +668,6 @@ def _upsert_facts_from_buffer(pg: Any, fact_buffer: list[dict[str, Any]], cfg: C
         commit_each_chunk=True,
         statement_timeout_sec=cfg.etl.pg_upsert_statement_timeout_sec,
     )
-
-
-def _build_enrichment_cache_from_license_rows(
-    egisz_licenses_rows: list[dict[str, Any]],
-) -> EnrichmentCache:
-    cache = EnrichmentCache()
-    reply_rows: list[LicenseReplyRow] = []
-    max_lic_md: datetime | None = None
-    for r in egisz_licenses_rows:
-        mo = _to_str(r.get("mo_uid"))
-        jid = _to_int(r.get("jid"))
-        jn = _to_str(r.get("jname"))
-        if jid:
-            jinn_v = _to_str(r.get("jinn"))
-            fir_v = _to_str(r.get("fir_oid"))
-            prev = cache.jpersons_by_jid.get(jid)
-            if prev is None or (jn and not prev[0]):
-                cache.jpersons_by_jid[jid] = (jn, jinn_v, fir_v)
-            if jn:
-                cache.jname_by_jid[jid] = jn
-        md_raw = r.get("modifydate")
-        if isinstance(md_raw, datetime):
-            if max_lic_md is None or md_raw > max_lic_md:
-                max_lic_md = md_raw
-        dom_raw = _to_str(r.get("mo_domen"))
-        if dom_raw:
-            md = r.get("modifydate")
-            md_dt = md if isinstance(md, datetime) else None
-            lic_id = _to_int(r.get("id")) or 0
-            reply_rows.append(
-                LicenseReplyRow(
-                    mo_domen=dom_raw.strip(),
-                    modifydate=md_dt,
-                    lic_id=lic_id,
-                    jid=jid,
-                    kind=r.get("egisz_licenses_kind"),
-                    mo_uid=mo,
-                )
-            )
-        if mo and jid:
-            cache.mo_uid_to_jid_from_egisz_licenses[mo] = jid
-        if jid:
-            jinn_row = _to_str(r.get("jinn"))
-            fir_row = _to_str(r.get("fir_oid"))
-            if jid not in cache.clinic_dim_by_jid:
-                cache.clinic_dim_by_jid[jid] = (jn, jinn_row, fir_row)
-            cache.clinics.append(
-                (
-                    jid,
-                    jn,
-                    mo,
-                    jinn_row,
-                    fir_row,
-                )
-            )
-            if jn and jid not in cache.jname_by_jid:
-                cache.jname_by_jid[jid] = jn
-    cache.license_reply_rows = tuple(reply_rows)
-    cache.max_licenses_modifydate = max_lic_md
-    return cache
-
-
-def _export_egisz_licenses_full(
-    cfg: CorpAppConfig,
-    log: Callable[[str], None],
-    *,
-    pg: Any | None = None,
-    before_jpersons: Callable[[], None] | None = None,
-    before_licenses: Callable[[], None] | None = None,
-    before_pg_staging: Callable[[], None] | None = None,
-    cancel_check: CancelCheck = None,
-) -> EnrichmentCache:
-    """Полная выгрузка JPERSONS и EGISZ_LICENSES с Firebird; при PG — staging, сшивка JNAME/JINN/FIR_OID в SQL, merge dim_clinics."""
-    jp_rows, lic_rows = _fetch_jpersons_and_licenses_separate(
-        cfg,
-        log,
-        before_jpersons=before_jpersons,
-        before_licenses=before_licenses,
-        cancel_check=cancel_check,
-    )
-    if pg is not None:
-        _raise_if_cancel(cancel_check)
-        if before_pg_staging:
-            before_pg_staging()
-        log(
-            "PostgreSQL: staging JPERSONS + лицензий, сшивка полей юрлица в SQL (UPDATE … FROM), merge dim_clinics…"
-        )
-        insert_chunk = max(1000, min(cfg.etl.facts_upsert_chunk_size * 4, 20_000))
-        refresh_license_staging_from_firebird_exports(
-            pg,
-            jpersons_rows=jp_rows,
-            license_rows=lic_rows,
-            insert_chunk_size=insert_chunk,
-        )
-        merge_dim_clinics_from_license_staging(pg)
-        rows = fetch_license_rows_for_enrichment(pg)
-        pg.commit()
-    else:
-        raw = _license_rows_with_jpersons(lic_rows, _jpersons_map_from_firebird_rows(jp_rows))
-        rows = _clean_license_rows_after_firebird(raw)
-        dropped = len(raw) - len(rows)
-        if dropped:
-            log(
-                f"EGISZ_LICENSES: отброшено {dropped} строк без JID (режим без записи в PostgreSQL)."
-            )
-    return _build_enrichment_cache_from_license_rows(rows)
 
 
 def _count_exchangelog_total() -> int:
@@ -475,90 +689,8 @@ class _PageStats:
     staging_n: int = 0
     max_log_id: int = 0
     last_id: int = 0
-
-
-def _messages_page_after_egmid(
-    cfg: CorpAppConfig,
-    cursor: int,
-    limit: int,
-    log: Callable[[str], None] | None = None,
-) -> tuple[list[dict[str, Any]], int, int]:
-    """Одна страница EGISZ_MESSAGES по EGMID. Возвращает (rows, new_cursor, prev_cursor)."""
-    prev = int(cursor)
-    sql = egisz_messages_incremental_sql(
-        last_egmid=cursor,
-        limit=limit,
-        sync_window_days=_etl_sync_window_days(cfg),
-    )
-    rows = _etl_fb_fetch(cfg, sql)
-    if not rows:
-        return rows, prev, prev
-    page_max = prev
-    for r in rows:
-        eg = _egmid_sql_int(r.get("egmid"))
-        if eg is not None:
-            page_max = max(page_max, eg)
-    if limit > 0 and len(rows) >= limit and page_max == prev:
-        fb_max = _egisz_messages_page_max_egmid_from_fb(cfg, prev, limit)
-        if fb_max is not None and fb_max > prev:
-            if log:
-                log(
-                    "EGISZ_MESSAGES: полная страница, курсор по строкам драйвера не сдвинулся; "
-                    f"MAX(EGMID) в Firebird={fb_max} — продолжаем (строки уже в кэше MSGID)."
-                )
-            page_max = fb_max
-        elif log:
-            log(
-                "EGISZ_MESSAGES: полная страница, курсор не сдвигается и MAX(EGMID) в Firebird не помог; "
-                "остановка выгрузки сообщений (проверьте EGMID в Firebird и charset)."
-            )
-    return rows, page_max, prev
-
-
-def _merge_messages_rows_into_map(
-    rows: list[dict[str, Any]], msg_by_msgid: dict[str, dict[str, Any]]
-) -> None:
-    for r in rows:
-        mk = _norm_msgid_key(r.get("msgid"))
-        if mk:
-            msg_by_msgid[mk] = r
-
-
-def _backfill_messages_for_msgids(
-    cfg: CorpAppConfig,
-    msgids: list[str],
-    msg_by_msgid: dict[str, dict[str, Any]],
-    log: Callable[[str], None],
-    *,
-    cancel_check: CancelCheck = None,
-) -> None:
-    need = [m for m in msgids if m and m not in msg_by_msgid]
-    if not need:
-        return
-    n = 0
-    for i in range(0, len(need), _MSGBACKFILL_IN_CHUNK):
-        _raise_if_cancel(cancel_check)
-        chunk = need[i : i + _MSGBACKFILL_IN_CHUNK]
-        ph = ",".join("?" * len(chunk))
-        sql = egisz_messages_by_msgids_sql(ph)
-        got = _etl_fb_fetch(cfg, sql, tuple(chunk))
-        _merge_messages_rows_into_map(got, msg_by_msgid)
-        n += len(got)
-    if n:
-        log(f"EGISZ_MESSAGES: дозагрузка по MSGID журнала — {n} строк, уникальных MSGID в кэше {len(msg_by_msgid)}.")
-
-
-def _collect_missing_msgids_for_journal_rows(
-    rows: list[dict[str, Any]], msg_by_msgid: dict[str, dict[str, Any]]
-) -> list[str]:
-    out: list[str] = []
-    seen: set[str] = set()
-    for r in rows:
-        mk = _norm_msgid_key(r.get("msgid"))
-        if mk and mk not in msg_by_msgid and mk not in seen:
-            seen.add(mk)
-            out.append(mk)
-    return out
+    max_egmid_seen: int = 0
+    messages_snapshot_scan_high_egmid: int = 0
 
 
 def _ingest_exchangelog_rows_chunk(
@@ -567,8 +699,6 @@ def _ingest_exchangelog_rows_chunk(
     *,
     rows: list[dict[str, Any]],
     page: int,
-    enrichment: EnrichmentCache,
-    msg_by_msgid: dict[str, dict[str, Any]],
     total_exchangelog: int,
     parser: EgiszMonitorParser,
     staging_buffer: list[tuple],
@@ -578,15 +708,15 @@ def _ingest_exchangelog_rows_chunk(
     progress_detail_cb: Callable[[EtlProgressPayload], None] | None,
     detail: Callable[[EtlProgressPayload], None],
     log: Callable[[str], None],
-    licenses_modifydate_iso: str | None = None,
+    cancel_check: CancelCheck = None,
+    best_lic_by_jid: dict[int, dict[str, Any]] | None = None,
+    mo_uid_to_jid: dict[str, int] | None = None,
 ) -> None:
-    """Парсинг и UPSERT одной порции строк журнала (LOGID уже выбраны из Firebird)."""
+    """Парсинг и UPSERT одной порции строк журнала; поля EGISZ_MESSAGES — из PostgreSQL по MSGID."""
 
     def _d(payload: EtlProgressPayload) -> None:
         pl = dict(payload)
         pl["cursor_log_id"] = stats.last_id
-        if licenses_modifydate_iso:
-            pl["licenses_modifydate_iso"] = licenses_modifydate_iso
         detail(pl)  # type: ignore[arg-type]
 
     def on_stage(err: StagingParseError) -> None:
@@ -596,6 +726,11 @@ def _ingest_exchangelog_rows_chunk(
             insert_staging_errors(pg, staging_buffer)
             pg.commit()
             staging_buffer.clear()
+
+    msg_by_msgid = _build_msg_cache_for_journal_page(cfg, pg, rows, log, cancel_check=cancel_check)
+
+    best_map = best_lic_by_jid or {}
+    mo_map = mo_uid_to_jid or {}
 
     stats.fetched += len(rows)
     _d(
@@ -607,6 +742,7 @@ def _ingest_exchangelog_rows_chunk(
             "staging_errors": stats.staging_n,
             "page": page,
             "journal_batch_rows": len(rows),
+            "messages_msgid_cache_size": len(msg_by_msgid),
             **_progress_payload_total_rows(total_exchangelog),
         }
     )
@@ -633,15 +769,17 @@ def _ingest_exchangelog_rows_chunk(
             reply_to = doc_id = None
             msg_created = None
 
-        joined_msg_egmid = _egmid_sql_int(r.get("message_egmid"))
-        cached_msg_egmid = _egmid_sql_int(mrow.get("egmid")) if mrow else None
-        row_msg_egmid = joined_msg_egmid if joined_msg_egmid is not None else cached_msg_egmid
+        # EGMID только из снимка stg_egisz_messages_journal (журнал EXCHANGELOG в Firebird без JOIN к EGISZ_MESSAGES).
+        row_msg_egmid = _egmid_sql_int(mrow.get("egmid")) if mrow else None
+        if row_msg_egmid is not None and row_msg_egmid > stats.max_egmid_seen:
+            stats.max_egmid_seen = int(row_msg_egmid)
         row_log_id = _fb_sql_bigint(r.get("logid"))
 
-        lic = _license_for_reply_to(reply_to, enrichment.license_reply_rows)
-        egisz_licenses_kind = lic.kind if lic else None
-        mo_uid = lic.mo_uid if lic else None
-        egisz_licenses_jid = lic.jid if lic else None
+        host_part = parser.extract_jid(logtext, reply_to=reply_to, msg_text=msgtext)
+        lic_r = _license_row_for_host_jids(host_part, best_map)
+        kind_from = lic_r.get("egisz_licenses_kind") if lic_r else None
+        mo_uid_from = _to_str(lic_r.get("mo_uid")) if lic_r else None
+        jid_from_row = _to_int(lic_r.get("jid")) if lic_r else None
 
         log_created = _sent_at_utc(r.get("log_created_at"))
         lim = cfg.etl.max_msgtext_bytes
@@ -675,10 +813,10 @@ def _ingest_exchangelog_rows_chunk(
         rec = parser.build_record(
             logtext,
             msg_text=msgtext,
-            kind_from_egisz_licenses=egisz_licenses_kind,
-            mo_uid_from_egisz_licenses=_to_str(mo_uid),
-            jid_from_egisz_licenses_row=egisz_licenses_jid,
-            jid_by_mo_uid_from_egisz_licenses=enrichment.mo_uid_to_jid_from_egisz_licenses,
+            kind_from_egisz_licenses=kind_from,
+            mo_uid_from_egisz_licenses=mo_uid_from,
+            jid_from_egisz_licenses_row=jid_from_row,
+            jid_by_mo_uid_from_egisz_licenses=mo_map,
             reply_to=reply_to,
             document_id=doc_id,
             msg_created_at=msg_created,
@@ -705,35 +843,14 @@ def _ingest_exchangelog_rows_chunk(
         if rec is None:
             continue
 
-        jn = enrichment.jname_by_jid.get(rec.jid) if rec.jid else None
-        if _is_test_clinic(jn):
-            continue
-
         fact_buffer.append(rec.as_fact_row())
         stats.facts += 1
 
         if rec.kind_code and rec.kind_name and pg is not None:
             upsert_dim_semd(pg, rec.kind_code, rec.kind_name)
 
-        if rec.jid and rec.jid > 0:
-            jn_dim = jinn_v = fir_v = None
-            dim_row = enrichment.clinic_dim_by_jid.get(rec.jid)
-            if dim_row:
-                jn_dim, jinn_v, fir_v = dim_row
-            if rec.jid in enrichment.jpersons_by_jid:
-                pjn, pjinn, pfir = enrichment.jpersons_by_jid[rec.jid]
-                jn_dim = jn_dim or pjn
-                jinn_v = jinn_v or pjinn
-                fir_v = fir_v or pfir
-            if pg is not None:
-                upsert_dim_clinic(
-                    pg,
-                    rec.jid,
-                    jn_dim,
-                    _to_str(mo_uid) or rec.org_oid,
-                    jinn=jinn_v,
-                    fir_oid=fir_v,
-                )
+        if rec.jid and rec.jid > 0 and pg is not None:
+            upsert_dim_clinic(pg, rec.jid, None, rec.org_oid, jinn=None, fir_oid=None)
 
     if pg is not None and fact_buffer:
         _upsert_facts_from_buffer(pg, fact_buffer, cfg)
@@ -752,7 +869,7 @@ def _ingest_exchangelog_rows_chunk(
             pg.commit()
 
     log(
-        f"EXCHANGELOG: пакет {page} — строк в пакете {len(rows)}, всего обработано журнала {stats.fetched}, "
+        f"EXCHANGELOG: пакет {page} — парсинг и UPSERT: всего журнала {stats.fetched}, "
         f"LOGID курсор {stats.last_id}, фактов {stats.facts}."
     )
     _d(
@@ -767,99 +884,6 @@ def _ingest_exchangelog_rows_chunk(
             **_progress_payload_total_rows(total_exchangelog),
         }
     )
-
-
-def _export_egisz_messages_by_egmid(
-    cfg: CorpAppConfig,
-    last_egmid: int,
-    *,
-    log: Callable[[str], None],
-    detail: Callable[[EtlProgressPayload], None] | None = None,
-) -> tuple[dict[str, dict[str, Any]], int]:
-    """Выгрузка из Firebird: EGISZ_MESSAGES страницами с EGMID выше курсора (без окна по CREATEDATE)."""
-    batch = max(1, cfg.etl.batch_size)
-    msg_by_msgid: dict[str, dict[str, Any]] = {}
-    cursor = int(last_egmid)
-    total = 0
-    page_n = 0
-    last_batch_rows = 0
-    if detail is not None:
-        detail(
-            {
-                "phase": "messages_incremental",
-                "loaded_rows": 0,
-                "page": 0,
-                "parsed_facts": 0,
-                "journal_facts": 0,
-                "staging_errors": 0,
-                "messages_cursor_egmid": cursor,
-                "messages_batch_rows": 0,
-                "messages_msgid_cache_size": 0,
-            }
-        )
-    log("Выгрузка EGISZ_MESSAGES из Firebird по курсору EGMID (опционально окно CREATEDATE — etl.sync_window_days)…")
-    while True:
-        page_n += 1
-        prev_cursor = cursor
-        sql = egisz_messages_incremental_sql(
-            last_egmid=cursor,
-            limit=batch,
-            sync_window_days=_etl_sync_window_days(cfg),
-        )
-        rows = _etl_fb_fetch(cfg, sql)
-        if not rows:
-            break
-        total += len(rows)
-        page_max = cursor
-        for r in rows:
-            eg = _egmid_sql_int(r.get("egmid"))
-            if eg is not None:
-                page_max = max(page_max, eg)
-            mk = _norm_msgid_key(r.get("msgid"))
-            if mk:
-                msg_by_msgid[mk] = r
-        if len(rows) >= batch and page_max == prev_cursor:
-            fb_max = _egisz_messages_page_max_egmid_from_fb(cfg, prev_cursor, batch)
-            if fb_max is not None and fb_max > prev_cursor:
-                log(
-                    "EGISZ_MESSAGES: полная страница, курсор по строкам драйвера не сдвинулся; "
-                    f"MAX(EGMID) в Firebird={fb_max} — продолжаем."
-                )
-                cursor = fb_max
-            else:
-                log(
-                    "Предупреждение: EGISZ_MESSAGES — полная страница, но курсор EGMID не сдвинулся; "
-                    "останавливаем загрузку (проверьте EGMID в Firebird и charset)."
-                )
-                break
-        else:
-            cursor = page_max
-        last_batch_rows = len(rows)
-        if detail is not None and (
-            page_n == 1 or page_n % 4 == 0 or len(rows) < batch
-        ):
-            detail(
-                {
-                    "phase": "messages_incremental",
-                    "loaded_rows": total,
-                    "page": page_n,
-                    "parsed_facts": 0,
-                    "journal_facts": 0,
-                    "staging_errors": 0,
-                    "messages_cursor_egmid": cursor,
-                    "messages_batch_rows": last_batch_rows,
-                    "messages_msgid_cache_size": len(msg_by_msgid),
-                }
-            )
-        if page_n == 1 or page_n % 20 == 0:
-            log(f"EGISZ_MESSAGES: страница {page_n}, всего строк {total}, курсор EGMID={cursor}")
-        if len(rows) < batch:
-            break
-    log(
-        f"EGISZ_MESSAGES: загружено {total} строк после EGMID={last_egmid}, "
-        f"уникальных MSGID={len(msg_by_msgid)}, курсор EGMID={cursor}"
-    )
-    return msg_by_msgid, cursor
 
 
 def _export_exchangelog_page(
@@ -879,15 +903,16 @@ def _process_exchangelog_pages(
     pg: Any,
     *,
     base_sql: str,
-    enrichment: EnrichmentCache,
-    msg_by_msgid: dict[str, dict[str, Any]],
     last_id: int,
     total_exchangelog: int,
     progress_detail_cb: Callable[[EtlProgressPayload], None] | None,
     log: Callable[[str], None],
     detail: Callable[[EtlProgressPayload], None],
+    cancel_check: CancelCheck = None,
+    best_lic_by_jid: dict[int, dict[str, Any]] | None = None,
+    mo_uid_to_jid: dict[str, int] | None = None,
 ) -> _PageStats:
-    """Постранично: выгрузка EXCHANGELOG из Firebird по LOGID, затем склейка с выгруженными EGISZ_MESSAGES по MSGID, парсинг, UPSERT."""
+    """Постранично: EXCHANGELOG из Firebird; EGISZ_MESSAGES — снимок в PostgreSQL; парсинг, UPSERT."""
     pipeline = cfg.etl.pipeline_name
     batch = max(1, cfg.etl.batch_size)
     parser = EgiszMonitorParser()
@@ -896,25 +921,35 @@ def _process_exchangelog_pages(
     stats = _PageStats(last_id=last_id)
 
     page = 0
-    lic_md_iso = (
-        enrichment.max_licenses_modifydate.isoformat()
-        if enrichment.max_licenses_modifydate
-        else None
-    )
     while True:
+        _raise_if_cancel(cancel_check)
         page += 1
+        detail(
+            {
+                "phase": "exchangelog_export",
+                "loaded_rows": stats.fetched,
+                "parsed_facts": stats.facts,
+                "journal_facts": stats.facts,
+                "staging_errors": stats.staging_n,
+                "page": page,
+                "journal_batch_rows": batch,
+                "cursor_log_id": stats.last_id,
+                **_progress_payload_total_rows(total_exchangelog),
+            }
+        )
         rows = _export_exchangelog_page(
             cfg, base_sql, last_log_id=stats.last_id, limit=batch
         )
         if not rows:
             break
+        log(
+            f"EXCHANGELOG: пакет {page} — выгрузка из Firebird, строк {len(rows)}."
+        )
         _ingest_exchangelog_rows_chunk(
             cfg,
             pg,
             rows=rows,
             page=page,
-            enrichment=enrichment,
-            msg_by_msgid=msg_by_msgid,
             total_exchangelog=total_exchangelog,
             parser=parser,
             staging_buffer=staging_buffer,
@@ -924,7 +959,9 @@ def _process_exchangelog_pages(
             progress_detail_cb=progress_detail_cb,
             detail=detail,
             log=log,
-            licenses_modifydate_iso=lic_md_iso,
+            cancel_check=cancel_check,
+            best_lic_by_jid=best_lic_by_jid,
+            mo_uid_to_jid=mo_uid_to_jid,
         )
         if len(rows) < batch:
             break
@@ -943,28 +980,18 @@ def _refresh_outbound_documents(
     cfg: CorpAppConfig,
     pg: Any,
     *,
-    enrichment: EnrichmentCache,
     progress_state: dict[str, int],
-    outbound_min_egmid: int,
     progress_detail_cb: Callable[[EtlProgressPayload], None] | None,
     log: Callable[[str], None],
     detail: Callable[[EtlProgressPayload], None],
     cancel_check: CancelCheck = None,
 ) -> None:
-    """Полная перезапись `stg_egisz_outbound_documents`: FB только DOCUMENTID/EGMID/даты/REPLYTO; KIND/JID — в Python."""
+    """Полная перезапись `stg_egisz_outbound_documents`: Firebird EGISZ_MESSAGES в окне CREATEDATE (как журнал)."""
     log("Refreshing stg_egisz_outbound_documents (v_rpt_documents_no_response)...")
 
     pipeline = cfg.etl.pipeline_name
-    lic_iso_out = (
-        enrichment.max_licenses_modifydate.isoformat()
-        if enrichment.max_licenses_modifydate
-        else None
-    )
     cursor_log_pg = get_last_log_id(pg, pipeline)
-    metrics_ui: dict[str, Any] = {
-        "cursor_log_id": cursor_log_pg,
-        "licenses_modifydate_iso": lic_iso_out,
-    }
+    metrics_ui: dict[str, Any] = {"cursor_log_id": cursor_log_pg}
 
     base_progress: dict[str, Any] = {
         "loaded_rows": progress_state["fetched"],
@@ -977,9 +1004,9 @@ def _refresh_outbound_documents(
 
     _raise_if_cancel(cancel_check)
     omsg = _etl_fb_fetch(
-        cfg, outbound_documents_staging_select(min_egmid=outbound_min_egmid)
+        cfg,
+        outbound_documents_staging_select(sync_window_days=_etl_sync_window_days(cfg)),
     )
-    # SQL уже ORDER BY m.EGMID DESC: при монотонном EGMID первая строка на DOCUMENTID — самая новая.
     omsg_sorted = omsg
     outbound_n = len(omsg_sorted)
     detail(
@@ -1001,26 +1028,18 @@ def _refresh_outbound_documents(
         did = _to_str(r.get("documentid"))
         skip = not did or did in seen_doc
         reply_to = _to_str(r.get("replyto"))
-        lic = _license_for_reply_to(reply_to, enrichment.license_reply_rows)
-        jid = lic.jid if lic else None
-        if not skip:
-            jn = enrichment.jname_by_jid.get(jid) if jid else None
-            if _is_test_clinic(jn):
-                skip = True
         if not skip:
             seen_doc.add(did)  # type: ignore[arg-type]
             host_part = parser_oob.extract_jid(None, reply_to=reply_to)
-            kraw = lic.kind if lic else None
-            kc = _norm_kind_code(str(kraw).strip() if kraw is not None else None)
             stg_out.append(
                 {
                     "document_id": did,
                     "sent_at": _sent_at_utc(r.get("msg_sent_at")),
                     "reply_to": reply_to,
                     "gost_jid_token": host_part.get("gost_jid_token"),
-                    "kind_code": kc,
-                    "jid": jid,
-                    "egmid": _to_int(r.get("egmid")),
+                    "kind_code": None,
+                    "jid": None,
+                    "egmid": _egmid_sql_int(r.get("egmid")),
                 }
             )
         if progress_detail_cb and (oi % 500 == 0 or oi == outbound_n):
@@ -1060,162 +1079,6 @@ def _refresh_outbound_documents(
     )
 
 
-def _run_interleaved_messages_and_journal(
-    cfg: CorpAppConfig,
-    pg: Any,
-    *,
-    base_sql: str,
-    enrichment: EnrichmentCache,
-    last_egmid: int,
-    last_log_id: int,
-    total_exchangelog: int,
-    progress_detail_cb: Callable[[EtlProgressPayload], None] | None,
-    log: Callable[[str], None],
-    detail: Callable[[EtlProgressPayload], None],
-    cancel_check: CancelCheck = None,
-) -> tuple[_PageStats, int]:
-    """Пакеты EGISZ_MESSAGES (EGMID) / EXCHANGELOG (LOGID) размером interleave_page_rows; дозагрузка MSGID; параллельный SELECT."""
-    chunk = int(cfg.etl.interleave_page_rows)
-    msg_by_msgid: dict[str, dict[str, Any]] = {}
-    egmid_cursor = int(last_egmid)
-    pipeline = cfg.etl.pipeline_name
-    parser = EgiszMonitorParser()
-    staging_buffer: list[tuple] = []
-    fact_buffer: list[dict[str, Any]] = []
-    stats = _PageStats(last_id=last_log_id)
-    lic_md_iso = (
-        enrichment.max_licenses_modifydate.isoformat()
-        if enrichment.max_licenses_modifydate
-        else None
-    )
-    journal_page = 0
-    msg_page = 0
-    msg_total_loaded = 0
-    last_msg_batch_rows = 0
-    msg_done = False
-    journal_done = False
-
-    def msg_detail() -> None:
-        detail(
-            {
-                "phase": "messages_incremental",
-                "loaded_rows": msg_total_loaded,
-                "page": msg_page,
-                "parsed_facts": stats.facts,
-                "journal_facts": stats.facts,
-                "staging_errors": stats.staging_n,
-                "messages_cursor_egmid": egmid_cursor,
-                "messages_batch_rows": last_msg_batch_rows,
-                "messages_msgid_cache_size": len(msg_by_msgid),
-                "cursor_log_id": stats.last_id,
-                "licenses_modifydate_iso": lic_md_iso,
-            }
-        )
-
-    log(
-        f"Очередь EGISZ_MESSAGES → EXCHANGELOG: пакеты по {chunk} строк из Firebird; COUNT не используется; "
-        "пока парсится и пишется журнал, следующая страница EGISZ_MESSAGES читается параллельно."
-    )
-
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        fut_next_messages: Future | None = None
-
-        while not (msg_done and journal_done):
-            _raise_if_cancel(cancel_check)
-            if not msg_done:
-                rows_m: list[dict[str, Any]]
-                new_c: int
-                prev_c: int
-                if fut_next_messages is not None:
-                    # UI/логи: фаза «сообщения» до ожидания future — иначе после exchangelog_ready
-                    # кажется, что «зависли на журнале/LOGID», пока идёт долгий SELECT EGISZ_MESSAGES.
-                    msg_detail()
-                    rows_m, new_c, prev_c = fut_next_messages.result()
-                    fut_next_messages = None
-                else:
-                    msg_detail()
-                    rows_m, new_c, prev_c = _messages_page_after_egmid(cfg, egmid_cursor, chunk, log)
-                if not rows_m:
-                    msg_done = True
-                    log("EGISZ_MESSAGES: выше курсора EGMID строк нет (конец инкремента).")
-                else:
-                    _merge_messages_rows_into_map(rows_m, msg_by_msgid)
-                    msg_total_loaded += len(rows_m)
-                    egmid_cursor = new_c
-                    msg_page += 1
-                    last_msg_batch_rows = len(rows_m)
-                    if msg_page == 1 or msg_page % 3 == 0 or len(rows_m) < chunk:
-                        msg_detail()
-                    if len(rows_m) >= chunk and new_c == prev_c:
-                        msg_done = True
-                    elif len(rows_m) < chunk:
-                        msg_done = True
-
-            if not journal_done:
-                rows_j = _export_exchangelog_page(
-                    cfg, base_sql, last_log_id=stats.last_id, limit=chunk
-                )
-                if not rows_j:
-                    journal_done = True
-                    log("EXCHANGELOG: новых строк по курсору LOGID нет.")
-                else:
-                    miss = _collect_missing_msgids_for_journal_rows(rows_j, msg_by_msgid)
-                    if miss:
-                        _backfill_messages_for_msgids(
-                            cfg, miss, msg_by_msgid, log, cancel_check=cancel_check
-                        )
-                    if not msg_done:
-                        fut_next_messages = pool.submit(
-                            _messages_page_after_egmid, cfg, egmid_cursor, chunk, log
-                        )
-                    journal_page += 1
-                    detail(
-                        {
-                            "phase": "exchangelog_export",
-                            "loaded_rows": stats.fetched,
-                            "parsed_facts": stats.facts,
-                            "journal_facts": stats.facts,
-                            "staging_errors": stats.staging_n,
-                            "page": journal_page,
-                            "journal_batch_rows": len(rows_j),
-                            "cursor_log_id": stats.last_id,
-                            "licenses_modifydate_iso": lic_md_iso,
-                            **_progress_payload_total_rows(total_exchangelog),
-                        }
-                    )
-                    _ingest_exchangelog_rows_chunk(
-                        cfg,
-                        pg,
-                        rows=rows_j,
-                        page=journal_page,
-                        enrichment=enrichment,
-                        msg_by_msgid=msg_by_msgid,
-                        total_exchangelog=total_exchangelog,
-                        parser=parser,
-                        staging_buffer=staging_buffer,
-                        fact_buffer=fact_buffer,
-                        stats=stats,
-                        pipeline=pipeline,
-                        progress_detail_cb=progress_detail_cb,
-                        detail=detail,
-                        log=log,
-                        licenses_modifydate_iso=lic_md_iso,
-                    )
-
-    if pg is not None and fact_buffer:
-        _upsert_facts_from_buffer(pg, fact_buffer, cfg)
-        pg.commit()
-    if pg is not None and staging_buffer:
-        insert_staging_errors(pg, staging_buffer)
-        pg.commit()
-
-    log(
-        f"Очередь сообщений+журнал завершена: EGISZ_MESSAGES накоплено {msg_total_loaded} строк, "
-        f"уникальных MSGID {len(msg_by_msgid)}; EXCHANGELOG обработано строк {stats.fetched}, фактов {stats.facts}, LOGID={stats.last_id}."
-    )
-    return stats, egmid_cursor
-
-
 def _read_cursor(cfg: CorpAppConfig, pg: Any, *, dry_run: bool) -> int:
     """Прочитать `etl_state.last_log_id` (для dry-run открыть отдельное соединение к PG)."""
     pipeline = cfg.etl.pipeline_name
@@ -1232,7 +1095,7 @@ def _read_cursor(cfg: CorpAppConfig, pg: Any, *, dry_run: bool) -> int:
 
 
 def _read_egmid_cursor(cfg: CorpAppConfig, pg: Any, *, dry_run: bool) -> int:
-    """Прочитать `etl_state.last_egmid` (курсор EGISZ_MESSAGES)."""
+    """Прочитать `etl_state.last_egmid` — ватермарк по max(EGMID) из обработанного журнала (EGMID = ключ строки EGISZ_MESSAGES)."""
     pipeline = cfg.etl.pipeline_name
     if dry_run:
         pg_r = connect_pg(cfg.postgres)
@@ -1254,8 +1117,7 @@ def run_sync(
     progress_detail_cb: Callable[[EtlProgressPayload], None] | None = None,
     cancel_check: CancelCheck = None,
 ) -> EtlRunStats:
-    """Оркестрация Firebird → Postgres: полная выгрузка лицензий (очистка в PostgreSQL); журнал EXCHANGELOG по LOGID;
-    EGISZ_MESSAGES по EGMID; парсинг/UPSERT с сопоставлением MSGID в памяти."""
+    """Оркестрация Firebird → Postgres: справочники первыми; чередование снимка EGISZ_MESSAGES и EXCHANGELOG; исходящие."""
     cfg = cfg or load_corp_config()
 
     def log(msg: str) -> None:
@@ -1282,12 +1144,12 @@ def run_sync(
         _detail_last_mono = now
         progress_detail_cb(payload)
 
-    base_sql = exchangelog_inner_sql_for_etl(sync_window_days=cfg.etl.sync_window_days)
+    base_sql = exchangelog_inner_sql_for_etl(sync_window_days=_etl_sync_window_days(cfg))
     pipeline = cfg.etl.pipeline_name
 
     pg = None if dry_run else connect_pg(cfg.postgres)
     lock_acquired = False
-    bootstrap_total = 6 if pg is not None else 3
+    bootstrap_total = 3 if pg is not None else 1
 
     def boot_detail(n: int, phase: str, **extra: Any) -> None:
         pl: dict[str, Any] = {"phase": phase}
@@ -1299,8 +1161,11 @@ def run_sync(
 
     try:
         log(
-            "ETL: четыре источника Firebird — JPERSONS и EGISZ_LICENSES (полная выгрузка в staging), "
-            "EGISZ_MESSAGES по курсору EGMID и EXCHANGELOG по LOGID (инкремент); далее витрина и исходящие."
+            "ETL: первый шаг данных — JPERSONS и EGISZ_LICENSES → PostgreSQL (staging, merge dim_clinics)."
+        )
+        log(
+            "ETL: EGISZ_MESSAGES и EXCHANGELOG — чередование страниц с ранних записей; "
+            "недостающие MSGID для пакета журнала подгружаются из Firebird; затем исходящие в staging."
         )
         boot_detail(0, "pipeline_bootstrap")
         if pg is not None:
@@ -1309,68 +1174,46 @@ def run_sync(
             apply_reports_schema(pg)
             log("PostgreSQL: DDL применён; запрос advisory lock для пайплайна…")
             boot_detail(2, "pg_advisory_lock")
-            # Single-flight на уровне БД: блокирует параллельный запуск из CronJob и UI.
-            # Lock освобождается при close() соединения, поэтому крэш не оставит «навечно занято».
             lock_acquired = try_acquire_pipeline_lock(pg, pipeline)
             if not lock_acquired:
                 raise PipelineLockBusyError(
                     f"Sync пайплайна '{pipeline}' уже выполняется (advisory lock занят). "
                     "Дождитесь завершения текущего запуска или проверьте `pg_locks`."
                 )
-            log("PostgreSQL: lock получен; полная выгрузка JPERSONS и EGISZ_LICENSES из Firebird…")
+            log("PostgreSQL: lock получен.")
 
         _raise_if_cancel(cancel_check)
-        if pg is not None:
-            enrichment = _export_egisz_licenses_full(
-                cfg,
-                log,
-                pg=pg,
-                before_jpersons=lambda: boot_detail(3, "firebird_jpersons_fetch"),
-                before_licenses=lambda: boot_detail(4, "firebird_licenses_fetch"),
-                before_pg_staging=lambda: boot_detail(5, "pg_license_staging"),
-                cancel_check=cancel_check,
-            )
-        else:
-            enrichment = _export_egisz_licenses_full(
-                cfg,
-                log,
-                pg=None,
-                before_jpersons=lambda: boot_detail(1, "firebird_jpersons_fetch"),
-                before_licenses=lambda: boot_detail(2, "firebird_licenses_fetch"),
-                cancel_check=cancel_check,
-            )
-        lic_iso = (
-            enrichment.max_licenses_modifydate.isoformat()
-            if enrichment.max_licenses_modifydate
-            else None
-        )
-        boot_detail(
-            bootstrap_total,
-            "enrichment_firebird",
-            licenses_modifydate_iso=lic_iso,
-        )
 
-        if pg is not None and not dry_run and enrichment.max_licenses_modifydate is not None:
-            set_etl_source_peaks(pg, pipeline, None, enrichment.max_licenses_modifydate)
-            pg.commit()
+        reference_max_license_modifydate: Any = None
+        license_sorted: list[dict[str, Any]] = []
+        mo_uid_to_jid: dict[str, int] = {}
+        best_lic_by_jid: dict[int, dict[str, Any]] = {}
+        if pg is not None and not dry_run:
+            _, lic_fb_rows = _load_reference_tables(
+                cfg,
+                pg,
+                pipeline=pipeline,
+                log=log,
+                detail=detail,
+                cancel_check=cancel_check,
+            )
+            reference_max_license_modifydate = _max_license_modifydate(lic_fb_rows)
+            license_sorted = fetch_license_rows_for_enrichment(pg)
+            mo_uid_to_jid = _build_mo_uid_to_jid(license_sorted)
+            best_lic_by_jid = _best_license_row_by_jid(license_sorted)
 
         last_id = _read_cursor(cfg, pg, dry_run=dry_run)
         last_egmid = _read_egmid_cursor(cfg, pg, dry_run=dry_run)
-        outbound_egmid_floor = last_egmid
         log(f"ETL: last_log_id={last_id} last_egmid={last_egmid} pipeline={pipeline}")
 
         detail(
             {
                 "phase": "counting",
                 "cursor_log_id": last_id,
-                "messages_cursor_egmid": last_egmid,
-                "licenses_modifydate_iso": lic_iso,
+                "etl_last_egmid": last_egmid,
             }
         )
-        log(
-            "Инкремент: пакеты EGISZ_MESSAGES (EGMID) и EXCHANGELOG (LOGID); "
-            "COUNT журнала в Firebird для прогресса не выполняется."
-        )
+        log("Инкремент журнала EXCHANGELOG; COUNT в Firebird для прогресса не выполняется.")
         _raise_if_cancel(cancel_check)
         total_exchangelog = _count_exchangelog_total()
 
@@ -1382,24 +1225,23 @@ def run_sync(
                 "journal_facts": 0,
                 "staging_errors": 0,
                 "cursor_log_id": last_id,
-                "messages_cursor_egmid": last_egmid,
-                "licenses_modifydate_iso": lic_iso,
+                "etl_last_egmid": last_egmid,
                 **_progress_payload_total_rows(total_exchangelog),
             }
         )
 
-        page_stats, egmid_after_export = _run_interleaved_messages_and_journal(
+        page_stats = _sync_journal_snapshot_interleaved(
             cfg,
             pg,
             base_sql=base_sql,
-            enrichment=enrichment,
-            last_egmid=last_egmid,
-            last_log_id=last_id,
+            last_id=last_id,
             total_exchangelog=total_exchangelog,
             progress_detail_cb=progress_detail_cb,
             log=log,
             detail=detail,
             cancel_check=cancel_check,
+            best_lic_by_jid=best_lic_by_jid or None,
+            mo_uid_to_jid=mo_uid_to_jid or None,
         )
 
         _raise_if_cancel(cancel_check)
@@ -1411,7 +1253,6 @@ def run_sync(
                 "journal_facts": page_stats.facts,
                 "staging_errors": page_stats.staging_n,
                 "cursor_log_id": page_stats.last_id,
-                "licenses_modifydate_iso": lic_iso,
                 **_progress_payload_total_rows(total_exchangelog),
             }
         )
@@ -1420,28 +1261,24 @@ def run_sync(
             _refresh_outbound_documents(
                 cfg,
                 pg,
-                enrichment=enrichment,
                 progress_state={
                     "total_exchangelog": total_exchangelog,
                     "fetched": page_stats.fetched,
                     "facts": page_stats.facts,
                     "staging_n": page_stats.staging_n,
                 },
-                outbound_min_egmid=outbound_egmid_floor,
                 progress_detail_cb=progress_detail_cb,
                 log=log,
                 detail=detail,
                 cancel_check=cancel_check,
             )
-            eg_peak = egmid_after_export if egmid_after_export > 0 else None
-            set_etl_source_peaks(
-                pg,
-                pipeline,
-                eg_peak,
-                enrichment.max_licenses_modifydate,
+            eg_peak = page_stats.max_egmid_seen if page_stats.max_egmid_seen > 0 else None
+            set_etl_source_peaks(pg, pipeline, eg_peak, reference_max_license_modifydate)
+            if page_stats.max_egmid_seen > last_egmid:
+                set_last_egmid(pg, pipeline, page_stats.max_egmid_seen)
+            set_messages_snapshot_high_egmid(
+                pg, pipeline, int(page_stats.messages_snapshot_scan_high_egmid)
             )
-            if egmid_after_export > last_egmid:
-                set_last_egmid(pg, pipeline, egmid_after_export)
             pg.commit()
 
         cursor_after = (

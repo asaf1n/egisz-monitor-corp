@@ -172,12 +172,51 @@ def set_last_egmid(con, pipeline: str, last_egmid: int) -> None:  # type: ignore
         )
 
 
+def get_messages_snapshot_high_egmid(con, pipeline: str) -> int:  # type: ignore[no-untyped-def]
+    with con.cursor() as cur:
+        cur.execute(
+            "SELECT COALESCE(messages_snapshot_high_egmid, 0) FROM etl_state WHERE pipeline = %s",
+            (pipeline,),
+        )
+        row = cur.fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+
+
+def set_messages_snapshot_high_egmid(con, pipeline: str, high_egmid: int) -> None:  # type: ignore[no-untyped-def]
+    with con.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE etl_state
+            SET messages_snapshot_high_egmid = %s, updated_at = NOW()
+            WHERE pipeline = %s
+            """,
+            (int(high_egmid), pipeline),
+        )
+
+
+def prune_stg_egisz_messages_journal_by_sync_window(con, sync_window_days: int | None) -> None:  # type: ignore[no-untyped-def]
+    """Удалить из staging сообщения старше окна CREATEDATE (как sync_window_days у журнала)."""
+    d = int(sync_window_days) if sync_window_days is not None else 0
+    if d <= 0:
+        return
+    with con.cursor() as cur:
+        cur.execute(
+            """
+            DELETE FROM stg_egisz_messages_journal
+            WHERE msg_created_at IS NOT NULL
+              AND msg_created_at < (NOW() - (%s * INTERVAL '1 day'))
+            """,
+            (d,),
+        )
+
+
 def fetch_etl_watermark_row(con, pipeline: str) -> dict[str, int] | None:  # type: ignore[no-untyped-def]
     """Сырые водяные знаки etl_state для диагностики (без MAX по витрине). Нет строки — None."""
     with con.cursor() as cur:
         cur.execute(
             """
-            SELECT last_log_id, COALESCE(last_egmid, 0), COALESCE(source_max_egmid, 0)
+            SELECT last_log_id, COALESCE(last_egmid, 0), COALESCE(source_max_egmid, 0),
+                   COALESCE(messages_snapshot_high_egmid, 0)
             FROM etl_state
             WHERE pipeline = %s
             LIMIT 1
@@ -187,11 +226,12 @@ def fetch_etl_watermark_row(con, pipeline: str) -> dict[str, int] | None:  # typ
         row = cur.fetchone()
     if not row:
         return None
-    lid_raw, eg_raw, src_raw = row
+    lid_raw, eg_raw, src_raw, msg_snap_raw = row
     return {
         "last_log_id": int(lid_raw) if lid_raw is not None else 0,
         "last_egmid": int(eg_raw) if eg_raw is not None else 0,
         "source_max_egmid": int(src_raw) if src_raw is not None else 0,
+        "messages_snapshot_high_egmid": int(msg_snap_raw) if msg_snap_raw is not None else 0,
     }
 
 
@@ -223,7 +263,7 @@ def set_etl_source_peaks(
     max_egmid: Any,
     max_licenses_modifydate: Any,
 ) -> None:  # type: ignore[no-untyped-def]
-    """Записать в etl_state «пики» источника (MAX EGMID / MAX MODIFYDATE лицензий), см. ETL sync."""
+    """Записать в etl_state source_max_egmid (пик EGMID по прошлому проходу журнала) и пик MODIFYDATE лицензий."""
     sets: list[str] = []
     params: list[Any] = []
     if max_egmid is not None:
@@ -371,6 +411,142 @@ def refresh_license_staging_from_firebird_exports(
             WHERE s.jid IS NOT NULL AND j.jid = s.jid
             """
         )
+
+
+def _egmid_rank_sql(v: Any) -> int:
+    """Целое сравнение EGMID для дедупликации снимка (-1 если не число)."""
+    if v is None:
+        return -1
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return -1
+
+
+def _dedupe_journal_snapshot_rows_by_msgid(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Один MSGID в одном INSERT — одна строка (PostgreSQL: ON CONFLICT не может обновить дважды за команду).
+
+    В источнике возможны дубликаты MSGID при полном окне (sync_window_days = 0); для конфликта оставляем строку
+    с **максимальным EGMID** (актуальная запись сообщения).
+    """
+    order: list[str] = []
+    best: dict[str, dict[str, Any]] = {}
+    best_eg: dict[str, int] = {}
+    for r in rows:
+        raw = r.get("msgid")
+        if raw is None:
+            continue
+        mid = str(raw).strip()[:512]
+        if not mid:
+            continue
+        eg = _egmid_rank_sql(r.get("egmid"))
+        if mid not in best:
+            order.append(mid)
+            best[mid] = r
+            best_eg[mid] = eg
+            continue
+        if eg > best_eg[mid]:
+            best[mid] = r
+            best_eg[mid] = eg
+    return [best[m] for m in order]
+
+
+def truncate_journal_messages_staging(con) -> None:  # type: ignore[no-untyped-def]
+    with con.cursor() as cur:
+        cur.execute("TRUNCATE stg_egisz_messages_journal")
+
+
+def insert_journal_messages_staging_rows(con, rows: list[dict[str, Any]]) -> None:  # type: ignore[no-untyped-def]
+    """Вставка строк снимка EGISZ_MESSAGES: ключ msgid (= MSGID), egmid (= суррогатный ключ записи)."""
+    if not rows:
+        return
+    rows = _dedupe_journal_snapshot_rows_by_msgid(rows)
+    if not rows:
+        return
+    tuples: list[tuple[Any, ...]] = []
+    for r in rows:
+        msgid_raw = r.get("msgid")
+        if msgid_raw is None:
+            continue
+        mid = str(msgid_raw).strip()
+        if not mid:
+            continue
+        tuples.append(
+            (
+                mid[:512],
+                r.get("egmid"),
+                r.get("replyto"),
+                r.get("documentid"),
+                r.get("msg_created_at"),
+            )
+        )
+    if not tuples:
+        return
+    with con.cursor() as cur:
+        execute_values(
+            cur,
+            """
+            INSERT INTO stg_egisz_messages_journal (msgid, egmid, replyto, documentid, msg_created_at)
+            VALUES %s
+            ON CONFLICT (msgid) DO UPDATE SET
+                egmid = EXCLUDED.egmid,
+                replyto = EXCLUDED.replyto,
+                documentid = EXCLUDED.documentid,
+                msg_created_at = EXCLUDED.msg_created_at,
+                loaded_at = NOW()
+            """,
+            tuples,
+        )
+
+
+def journal_msgids_present_in_staging(con, msgids: list[str]) -> set[str]:  # type: ignore[no-untyped-def]
+    """Множество MSGID из ``msgids``, которые уже есть в ``stg_egisz_messages_journal``."""
+    if not msgids:
+        return set()
+    uniq: list[str] = []
+    seen: set[str] = set()
+    for x in msgids:
+        s = str(x).strip() if x is not None else ""
+        if s and s not in seen:
+            seen.add(s)
+            uniq.append(s[:512])
+    if not uniq:
+        return set()
+    with con.cursor() as cur:
+        cur.execute(
+            "SELECT msgid FROM stg_egisz_messages_journal WHERE msgid = ANY(%s)",
+            (uniq,),
+        )
+        return {str(row[0]).strip() for row in cur.fetchall() if row and row[0] is not None}
+
+
+def fetch_journal_messages_by_msgids(con, msgids: list[str]) -> list[dict[str, Any]]:  # type: ignore[no-untyped-def]
+    """Строки из stg_egisz_messages_journal по списку MSGID (EXCHANGELOG.MSGID = EGISZ_MESSAGES.MSGID)."""
+    if not msgids:
+        return []
+    uniq: list[str] = []
+    seen: set[str] = set()
+    for x in msgids:
+        s = str(x).strip() if x is not None else ""
+        if s and s not in seen:
+            seen.add(s)
+            uniq.append(s)
+    if not uniq:
+        return []
+    with con.cursor() as cur:
+        cur.execute(
+            """
+            SELECT msgid, egmid, replyto, documentid, msg_created_at
+            FROM stg_egisz_messages_journal
+            WHERE msgid = ANY(%s)
+            """,
+            (uniq,),
+        )
+        cols = [d[0] for d in cur.description]
+        out: list[dict[str, Any]] = []
+        for row in cur.fetchall():
+            out.append(dict(zip(cols, row)))
+    return out
 
 
 def refresh_licenses_import_staging(con, rows: list[dict[str, Any]]) -> None:  # type: ignore[no-untyped-def]
@@ -616,7 +792,7 @@ def fetch_healthcheck_snapshot(con, *, top_clinics: int = 5) -> dict[str, Any]: 
                     stg_outbound_total, stg_without_egmid, stg_without_jid,
                     staging_max_egmid, staging_max_sent_at,
                     pending_total, pending_1h, pending_1_24h, pending_older_24h,
-                    etl_last_update, etl_last_log_id
+                    etl_last_update, etl_last_log_id, etl_cursor_egmid
                 FROM v_health_proxy_db
                 """
             )
@@ -634,6 +810,7 @@ def fetch_healthcheck_snapshot(con, *, top_clinics: int = 5) -> dict[str, Any]: 
                     pending_older_24h,
                     etl_last_update,
                     etl_last_log_id,
+                    etl_cursor_egmid,
                 ) = row
                 out["proxy_db"] = {
                     "stg_outbound_total": int(stg_total or 0),
@@ -647,6 +824,7 @@ def fetch_healthcheck_snapshot(con, *, top_clinics: int = 5) -> dict[str, Any]: 
                     "pending_older_24h": int(pending_older_24h or 0),
                     "etl_last_update": etl_last_update.isoformat() if etl_last_update else None,
                     "etl_last_log_id": int(etl_last_log_id) if etl_last_log_id is not None else None,
+                    "etl_cursor_egmid": int(etl_cursor_egmid) if etl_cursor_egmid is not None else None,
                 }
                 # Исходящий staging может быть пуст (прогон без outbound / старая витрина), при этом
                 # fact_egisz_transactions уже заполнена — те же сущности, что в Metabase.
@@ -689,6 +867,7 @@ def fetch_pg_sync_snapshot(con, pipeline: str) -> dict[str, Any]:  # type: ignor
                 last_log_id,
                 COALESCE(last_egmid, 0),
                 COALESCE(source_max_egmid, 0),
+                COALESCE(messages_snapshot_high_egmid, 0),
                 source_max_licenses_modifydate
             FROM etl_state
             WHERE pipeline = %s
@@ -717,12 +896,14 @@ def fetch_pg_sync_snapshot(con, pipeline: str) -> dict[str, Any]:  # type: ignor
         return {
             "log_id": None,
             "egmid": facts_only if facts_only > 0 else None,
+            "messages_snapshot_high_egmid": None,
             "licenses_modifydate": None,
         }
-    lid_raw, last_egmid_raw, src_eg_raw, lic_raw = row
+    lid_raw, last_egmid_raw, src_eg_raw, msg_snap_raw, lic_raw = row
     log_id = int(lid_raw) if lid_raw is not None else None
     last_eg = int(last_egmid_raw) if last_egmid_raw is not None else 0
     src_eg = int(src_eg_raw) if src_eg_raw is not None else 0
+    msg_snap = int(msg_snap_raw) if msg_snap_raw is not None else 0
     eg_display = max(last_eg, src_eg)
     facts_max_eg = 0
     try:
@@ -746,6 +927,7 @@ def fetch_pg_sync_snapshot(con, pipeline: str) -> dict[str, Any]:  # type: ignor
     return {
         "log_id": log_id,
         "egmid": eg_display,
+        "messages_snapshot_high_egmid": msg_snap,
         "licenses_modifydate": lic_iso,
     }
 

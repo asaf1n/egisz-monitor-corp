@@ -145,6 +145,8 @@ def _norm_kind_code(raw: str | None) -> str | None:
 
 @dataclass
 class StagingParseError:
+    """Ошибка разбора без факта; поля трассировки: LOGID журнала, MSGID сообщения, EGMID записи EGISZ_MESSAGES."""
+
     relates_to_id: str | None
     error_code: str
     message: str
@@ -186,7 +188,11 @@ class StagingParseError:
 
 @dataclass
 class NormalizedRecord:
-    """Row-shaped payload for fact_egisz_transactions (before UPSERT)."""
+    """Row-shaped payload for fact_egisz_transactions (before UPSERT).
+
+    ``egisz_messages_egmid`` — EGMID строки ``EGISZ_MESSAGES`` (суррогатный ключ записи сообщения при отправке в РЭМД).
+    Связь журнала с этой строкой: ``EXCHANGELOG.MSGID`` = ``EGISZ_MESSAGES.MSGID``; тело колбэка — ``EXCHANGELOG.MSGTEXT``.
+    """
 
     relates_to_id: str
     local_uid_semd: str | None
@@ -428,7 +434,7 @@ class EgiszMonitorParser:
         jid_by_mo_uid_from_egisz_licenses: Mapping[str, int] | None = None,
     ) -> tuple[int | None, str | None]:
         """
-        Resolve internal JID: gost (числовой) из **LOGTEXT**/**REPLYTO** → EGISZ_LICENSES.JID из строки выборки → OID→EGISZ_LICENSES.MO_UID→JID.
+        Resolve internal JID: gost (числовой) из **LOGTEXT**/**REPLYTO**; без таблицы лицензий — только URL/XML.
         """
         if jid_from_url is not None and jid_from_url > 0:
             return jid_from_url, None
@@ -465,7 +471,7 @@ class EgiszMonitorParser:
     ) -> NormalizedRecord | None:
         """
         SOAP только из MSGTEXT; **gost-** для JID только из **LOGTEXT** и **REPLYTO** (не из MSGTEXT).
-        KIND из XML (MSGTEXT) либо из колонки EGISZ_LICENSES.KIND строки журнала. UPSERT key: relates_to_id.
+        KIND из XML (MSGTEXT). UPSERT key: relates_to_id.
         local_uid_semd: тег localUid в SOAP либо EGISZ_MESSAGES.DOCUMENTID.
         """
         combined = "\n".join(

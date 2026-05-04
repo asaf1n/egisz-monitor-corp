@@ -71,6 +71,7 @@ def test_etl_firebird_query_timeout_defaults_and_clamp() -> None:
     assert cfg.etl.firebird_query_timeout_sec == 900
     assert cfg.etl.skip_firebird_progress_count is False
     assert cfg.etl.facts_upsert_chunk_size == 500
+    assert cfg.etl.batch_size == 8000
     assert cfg.etl.pg_upsert_statement_timeout_sec == 120
     hi = parse_corp_config_dict(
         {
@@ -109,30 +110,43 @@ def test_etl_max_msgtext_bytes_zero_means_disabled() -> None:
     assert cfg.etl.max_msgtext_bytes is None
 
 
-def test_auto_sync_and_interleave_defaults_from_minimal_yaml(tmp_path: Path) -> None:
+def test_etl_sync_window_days_zero_from_yaml(tmp_path: Path) -> None:
+    cfg = parse_corp_config_dict(
+        {
+            "firebird": {"host": "h", "port": 3050, "database": "d", "user": "u", "password": "p"},
+            "postgres": {"host": "h", "port": 5432, "database": "d", "user": "u", "password": "p"},
+            "etl": {"sync_window_days": 0},
+            "metabase": {},
+            "auto_sync": {},
+        }
+    )
+    assert cfg.etl.sync_window_days == 0
+
+
+def test_auto_sync_and_etl_batch_from_minimal_yaml(tmp_path: Path) -> None:
     p = tmp_path / "cfg.yaml"
     p.write_text(
-        _minimal_yaml_text(None).replace("etl: {}", "etl:\n  interleave_page_rows: 4000\n"),
+        _minimal_yaml_text(None).replace("etl: {}", "etl:\n  batch_size: 400\n"),
         encoding="utf-8",
     )
     cfg = load_corp_config(p)
     assert cfg.auto_sync.enabled is False
     assert cfg.auto_sync.schedule_cron == "*/15 * * * *"
     assert cfg.auto_sync.timezone == "Etc/UTC"
-    assert cfg.etl.interleave_page_rows == 4000
+    assert cfg.etl.batch_size == 400
 
 
-def test_auto_sync_from_yaml_and_interleave_clamp() -> None:
+def test_auto_sync_from_yaml_and_batch_clamp() -> None:
     cfg = parse_corp_config_dict(
         {
             "firebird": {"host": "h", "port": 1, "database": "d", "user": "u", "password": "p"},
             "postgres": {"host": "h", "port": 2, "database": "d", "user": "u", "password": "p"},
-            "etl": {"interleave_page_rows": 999999},
+            "etl": {"batch_size": 20},
             "auto_sync": {"enabled": True, "schedule_cron": "0 * * * *", "timezone": "Europe/Moscow"},
         },
         use_yaml_postgres_only=True,
     )
-    assert cfg.etl.interleave_page_rows == 65_000
+    assert cfg.etl.batch_size == 20
     assert cfg.auto_sync.enabled is True
     assert cfg.auto_sync.schedule_cron == "0 * * * *"
     assert cfg.auto_sync.timezone == "Europe/Moscow"

@@ -1,0 +1,150 @@
+name: Docker Build, Cache & Scan
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'metabase/**'
+      - 'docker/web/**'
+      - '.dockerignore'
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: docker.io
+  METABASE_IMAGE_NAME: egisz-metabase
+  WEB_IMAGE_NAME: egisz-conf-ui
+
+jobs:
+  build-metabase:
+    name: Build Metabase Image
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      - name: Build Metabase image (cached)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./metabase/Dockerfile
+          push: false
+          load: true
+          tags: ${{ env.REGISTRY }}/${{ env.METABASE_IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy vulnerability scan on Metabase
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.METABASE_IMAGE_NAME }}:${{ github.sha }}
+          format: sarif
+          output: trivy-metabase.sarif
+          severity: CRITICAL,HIGH
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: trivy-metabase.sarif
+          category: trivy-metabase
+
+  build-web:
+    name: Build Config UI Image
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      - name: Build Config UI image (cached)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/web/Dockerfile
+          push: false
+          load: true
+          tags: ${{ env.REGISTRY }}/${{ env.WEB_IMAGE_NAME }}:${{ github.sha }}
+          build-args: |
+            PYTHON_BASE=python:3.11-slim-bookworm
+            PIP_INDEX_URL=https://pypi.org/simple
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy vulnerability scan on Config UI
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.WEB_IMAGE_NAME }}:${{ github.sha }}
+          format: sarif
+          output: trivy-web.sarif
+          severity: CRITICAL,HIGH
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: trivy-web.sarif
+          category: trivy-web
+
+  validate-manifests:
+    name: Validate K8s Manifests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate K8s YAML (kubeval)
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install kubeval
+        run: |
+          mkdir -p ~/.local/bin
+          wget -q https://github.com/instrumenta/kubeval/releases/latest/download/kubeval-linux-amd64.tar.gz -O - | tar xz -C ~/.local/bin
+          echo ~/.local/bin >> $GITHUB_PATH
+
+      - name: Validate Metabase manifest
+        run: kubeval k8s/metabase.yaml --strict
+
+      - name: Validate Conf-UI manifest
+        run: kubeval k8s/conf-ui.yaml --strict
+
+  lint-dockerfile:
+    name: Lint Dockerfiles
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Hadolint on metabase/Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: metabase/Dockerfile
+          ignore: DL3008,DL3009
+
+      - name: Run Hadolint on docker/web/Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: docker/web/Dockerfile
+          ignore: DL3008,DL3009

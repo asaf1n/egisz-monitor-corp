@@ -3,6 +3,10 @@
 # главная страница UI, БД DWH. Запуск из пода Metabase (MB_URL=http://localhost:3000) или с хоста после port-forward.
 set -euo pipefail
 
+_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=include/mb_list.sh
+. "${_script_dir}/include/mb_list.sh"
+
 MB_URL="${MB_URL:-http://127.0.0.1:3000}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@egisz.local}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-egisz}"
@@ -14,10 +18,6 @@ step() {
 die() {
   echo "[smoke-ui] FAIL: $*" >&2
   exit 1
-}
-
-mb_json_list() {
-  jq -c 'if type == "array" then . elif (.data | type == "array") then .data else [] end'
 }
 
 step 1 "GET /api/health"
@@ -40,32 +40,44 @@ step 4 "GET /api/collection + /api/dashboard (дашборды в personal/names
 # provision.sh кладёт дашборды в namespaced collection «ЕГИСЗ Мониторинг сервиса интеграции»
 # с is_personal=true; ROOT_ID = личная коллекция админа (отдельная). Smoke считает дашборды в обеих.
 PERSONAL_IDS_JSON="$(curl -sS "${MB_URL}/api/collection" "${HDR[@]}" \
-  | mb_json_list \
-  | jq -c --arg rid "${ROOT_ID}" '[.[] | select((.is_personal == true) or ((.id | tostring) == ($rid | tostring))) | (.id | tostring)] | unique')"
+  | mb_list \
+  | jq -c --arg rid "${ROOT_ID}" '
+      (
+        [.[] | select((.is_personal == true) or ((.id | tostring) == ($rid | tostring))) | (.id | tostring)]
+        + [($rid | tostring)]
+      ) | unique
+    ')"
 PERSONAL_IDS_JSON="${PERSONAL_IDS_JSON:-[]}"
 
-DASHBOARDS="$(curl -sS "${MB_URL}/api/dashboard" "${HDR[@]}" | mb_json_list \
+DASHBOARDS="$(mb_all_dashboards_json "${MB_URL}" "${TOKEN}" \
   | jq -c --argjson pids "${PERSONAL_IDS_JSON}" '
-      [.[] | select(.collection_id != null and ((.collection_id | tostring) | IN($pids[])))]
+      [.[]
+        | select((.archived == false) or (.archived == null))
+        | select(.collection_id != null and ((.collection_id | tostring) | IN($pids[])))
+      ]
     ')"
 ND="$(echo "${DASHBOARDS}" | jq 'length')"
 [[ "${ND:-0}" -ge 1 ]] || die "no dashboards in any personal collection"
 
-EXEC_ID="$(echo "${DASHBOARDS}" | jq -r '.[] | select(.name=="09 Управленческий дашборд") | .id' | head -n1)"
-OP_ID="$(echo "${DASHBOARDS}" | jq -r '.[] | select(.name=="01 Оперативный мониторинг") | .id' | head -n1)"
-[[ -n "${EXEC_ID}" && "${EXEC_ID}" != "null" ]] || die "dashboard 09 not found"
+EXEC_ID="$(echo "${DASHBOARDS}" | jq -r '.[] | select(.name=="05 Управление СЭМД") | .id' | head -n1)"
+[[ -z "${EXEC_ID}" || "${EXEC_ID}" == "null" ]] && EXEC_ID="$(echo "${DASHBOARDS}" | jq -r '.[] | select(.name=="05 Управление и архив СЭМД") | .id' | head -n1)"
+ARCHIVE_ID="$(echo "${DASHBOARDS}" | jq -r '.[] | select(.name=="06 Архив СЭМД") | .id' | head -n1)"
+OP_ID="$(echo "${DASHBOARDS}" | jq -r '.[] | select(.name=="01 Оперативный мониторинг и динамика") | .id' | head -n1)"
+[[ -z "${OP_ID}" || "${OP_ID}" == "null" ]] && OP_ID="$(echo "${DASHBOARDS}" | jq -r '.[] | select(.name=="01 Оперативный мониторинг") | .id' | head -n1)"
+[[ -n "${EXEC_ID}" && "${EXEC_ID}" != "null" ]] || die "dashboard 05 not found"
+[[ -n "${ARCHIVE_ID}" && "${ARCHIVE_ID}" != "null" ]] || die "dashboard 06 not found"
 [[ -n "${OP_ID}" && "${OP_ID}" != "null" ]] || die "dashboard 01 not found"
 
-step 5 "GET /api/dashboard/:id — Управленческий (parameters, auto_apply, mappings)"
+step 5 "GET /api/dashboard/:id — Управление (parameters, auto_apply, mappings)"
 DEX="$(curl -sS "${MB_URL}/api/dashboard/${EXEC_ID}" "${HDR[@]}")"
-echo "${DEX}" | jq -e '.auto_apply_filters == true' >/dev/null || die "09: auto_apply_filters is not true"
+echo "${DEX}" | jq -e '.auto_apply_filters == true' >/dev/null || die "05: auto_apply_filters is not true"
 NP="$(echo "${DEX}" | jq '.parameters | length')"
-[[ "${NP}" -ge 1 ]] || die "09: expected dashboard parameters, got ${NP}"
+[[ "${NP}" -ge 1 ]] || die "05: expected dashboard parameters, got ${NP}"
 DC09="$(echo "${DEX}" | jq '.dashcards // .ordered_cards // []')"
 MAPS="$(echo "${DC09}" | jq '[.[] | select(.card != null or .card_id != null) | (.parameter_mappings // []) | length] | add // 0')"
-[[ "${MAPS}" -gt 0 ]] || die "09: no parameter_mappings on any dashcard (filters will not work)"
+[[ "${MAPS}" -gt 0 ]] || die "05: no parameter_mappings on any dashcard (filters will not work)"
 
-step 6 "GET /api/dashboard/:id — Оперативный (filters wired)"
+step 6 "GET /api/dashboard/:id — Оперативный и динамика (filters wired)"
 DOP="$(curl -sS "${MB_URL}/api/dashboard/${OP_ID}" "${HDR[@]}")"
 echo "${DOP}" | jq -e '.auto_apply_filters == true' >/dev/null || die "01: auto_apply_filters is not true"
 echo "${DOP}" | jq -e '(.parameters // []) | map(.slug) | index("top_semd_filter") != null and index("top_clinic_filter") != null' >/dev/null \
@@ -76,7 +88,7 @@ MAPS2="$(echo "${DC01}" | jq '[.[] | select(.card != null or .card_id != null) |
 
 step 7 "GET /api/database (витрина EGISZ Corp DWH)"
 DBS="$(curl -sS "${MB_URL}/api/database" "${HDR[@]}")"
-echo "${DBS}" | mb_json_list | jq -e '.[] | select(.name == "EGISZ Corp DWH" or .name == "egisz_reports")' >/dev/null || die "DWH database not registered"
+echo "${DBS}" | mb_list | jq -e '.[] | select(.name == "EGISZ Corp DWH" or .name == "egisz_reports")' >/dev/null || die "DWH database not registered"
 
 step 8 "GET / (HTML главная Metabase — как открытие в браузере)"
 code="$(curl -sS -o /dev/null -w '%{http_code}' "${MB_URL}/")"
@@ -89,8 +101,8 @@ jq -e '."has-user-setup"' /tmp/smoke_props.json >/dev/null || die "unexpected se
 
 step 10 "POST /api/card/:id/query — выполнение SQL карточки (результат как в UI)"
 CARD_ID="$(echo "${DEX}" | jq -r '(.dashcards // .ordered_cards // [])[0].card_id // empty')"
-[[ -n "${CARD_ID}" && "${CARD_ID}" != "null" ]] || die "no card_id on first dashcard Управленческого дашборда"
-# Карточки 09 используют {{dwh_date}} и др.; без значения по умолчанию у фильтра передаём пустой список — запрос как в UI до выбора даты.
+[[ -n "${CARD_ID}" && "${CARD_ID}" != "null" ]] || die "no card_id on first dashcard дашборда 05"
+# Карточки 05 используют {{dwh_date}} и др.; без значения по умолчанию у фильтра передаём пустой список — запрос как в UI до выбора даты.
 QBODY="$(echo "${DEX}" | jq -c --argjson did "${EXEC_ID}" '{ignore_cache: false, dashboard_id: $did, parameters: []}')"
 HTTP_Q="$(curl -sS -o /tmp/smoke_card_query.json -w '%{http_code}' -X POST "${MB_URL}/api/card/${CARD_ID}/query" \
   "${HDR[@]}" -d "${QBODY}")"
@@ -99,5 +111,10 @@ if jq -e '.status == "failed"' /tmp/smoke_card_query.json >/dev/null 2>&1; then
   cat /tmp/smoke_card_query.json >&2
   die "card query status failed"
 fi
+
+ARCH_JSON="$(curl -sS "${MB_URL}/api/dashboard/${ARCHIVE_ID}" "${HDR[@]}")"
+echo "${ARCH_JSON}" | jq -e '.auto_apply_filters == true' >/dev/null || die "06: auto_apply_filters is not true"
+NPA="$(echo "${ARCH_JSON}" | jq '.parameters | length')"
+[[ "${NPA}" -ge 3 ]] || die "06: expected >=3 dashboard parameters (date + СЭМД + JID), got ${NPA}"
 
 echo "[smoke-ui] OK — 10 шагов, фильтры привязаны (parameter_mappings>0), auto_apply включён, карточка выполнила запрос."

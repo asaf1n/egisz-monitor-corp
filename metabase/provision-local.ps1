@@ -1,4 +1,4 @@
-#!/usr/bin/env powershell
+﻿#!/usr/bin/env powershell
 # Локальный прототип: пересобрать образ Metabase (JSON из репозитория) и заново провижинить дашборды
 # в уже запущенный Metabase на localhost (например port-forward из K8s или отдельный контейнер).
 #
@@ -54,6 +54,8 @@ $scriptPath = "/app/setup-dashboards.sh"
 Write-Host "[provision-local] METABASE_URL (inside container)=$mbInContainer" -ForegroundColor Cyan
 Write-Host "[provision-local] ADMIN_EMAIL=$email" -ForegroundColor DarkGray
 
+$incMount = "/app/include/mb_list.sh"
+
 docker run --rm `
     --entrypoint /bin/bash `
     --add-host=host.docker.internal:host-gateway `
@@ -62,13 +64,15 @@ docker run --rm `
     -e ADMIN_PASSWORD="$pass" `
     -e METABASE_DASHBOARDS_DIR="$dash" `
     -v "${RepoRoot}/metabase_dashboards:${dash}:ro" `
+    -v "${RepoRoot}/metabase/include/mb_list.sh:${incMount}:ro" `
     -v "${RepoRoot}/metabase/setup-dashboards.sh:${scriptPath}:ro" `
     $image `
     $scriptPath
 
 if ($LASTEXITCODE -ne 0) { exit 1 }
-Write-Host "[provision-local] Done. Откройте персональную коллекцию в Metabase и проверьте дашборды." -ForegroundColor Green
+Write-Host '[provision-local] Готово: откройте персональную коллекцию в Metabase и проверьте дашборды.' -ForegroundColor Green
 
-Write-Host ""
-Write-Host "Полный сброс Metabase app DB в стеке (K8s) и повторная заливка дашбордов из JSON — из корня репозитория:" -ForegroundColor DarkGray
-Write-Host ".\start.ps1 -Action deploy   # или reset-deploy; либо METABASE_FORCE_PROVISION в k8s/metabase.yaml" -ForegroundColor White
+Write-Host ''
+Write-Host 'Полный сброс БД приложения Metabase в K8s и повторная заливка дашбордов из корня репозитория:' -ForegroundColor DarkGray
+Write-Host '  .\start.ps1 -Action deploy' -ForegroundColor White
+Write-Host '  (альтернатива: reset-deploy; либо METABASE_FORCE_PROVISION в k8s/metabase.yaml)' -ForegroundColor DarkGray

@@ -1,5 +1,10 @@
 #!/bin/bash
 set -euo pipefail
+
+_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=include/mb_list.sh
+. "${_script_dir}/include/mb_list.sh"
+
 # Администратор Metabase: из k8s Secret metabase-admin → METABASE_ADMIN_EMAIL / METABASE_ADMIN_PASSWORD (репозиторий: admin@egisz.local / egisz).
 
 MB_URL="${MB_URL:-http://metabase:3000}"
@@ -18,15 +23,37 @@ log_info() {
   echo "[provision] $1"
 }
 
-# Совпадает с verify-corp-stack.sh / smoke-metabase-ui: Metabase 0.49+ отдаёт списки в обёртке.
-mb_list() {
-  jq -c '
-    if type == "array" then .
-    elif (.data | type == "array") then .data
-    elif (.items | type == "array") then .items
-    elif (.data | type == "object") and (.data.items | type == "array") then .data.items
-    else [] end
-  '
+# METABASE_FORCE_PROVISION=auto раньше пропускал setup-dashboards при совпадении *числа* дашбордов с JSON в образе.
+# Тогда Metabase application DB сохраняла старые native SQL — исправления в metabase_dashboards/*.json не подхватывались
+# до METABASE_FORCE_PROVISION=true или DROP БД metabase. Сверяем якорный фрагмент эталона из образа с карточкой по API.
+# Якорь — карточка «Последние операции» на дашборде 01 (оперативный мониторинг), а не «управленческая» сводка на 05.
+corp_mb_native_sql_anchor_matches_image() {
+  local token="$1"
+  local ref_json="/app/metabase_dashboards/01_operational.json"
+  local anchor='v_egisz_transactions_enriched_ui.* FROM public.v_egisz_transactions_enriched_ui'
+  local card_name="Последние операции"
+  local cards_json cid q
+
+  if [ ! -f "${ref_json}" ]; then
+    return 1
+  fi
+  if ! jq -e --arg a "${anchor}" --arg n "${card_name}" '.cards[] | select(.name == $n) | .dataset_query.native.query | contains($a)' "${ref_json}" >/dev/null 2>&1; then
+    return 1
+  fi
+
+  cards_json="$(curl -sS "${MB_URL}/api/card" -H "X-Metabase-Session: ${token}" 2>/dev/null || echo '{}')"
+  cid="$(echo "${cards_json}" | mb_list | jq -r --arg n "${card_name}" '[.[] | select(.name == $n) | select((.archived == false) or (.archived == null)) | .id] | max // empty')"
+  if [ -z "${cid}" ] || [ "${cid}" = "null" ]; then
+    return 1
+  fi
+  q="$(curl -sS "${MB_URL}/api/card/${cid}" -H "X-Metabase-Session: ${token}" | jq -r '.dataset_query.native.query // empty')"
+  if [ -z "${q}" ]; then
+    return 1
+  fi
+  case "${q}" in
+    *"${anchor}"*) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 if [ -z "${ADMIN_EMAIL}" ] || [ -z "${ADMIN_PASSWORD}" ]; then
@@ -118,7 +145,7 @@ fi
 # Идемпотентный provisioning: setup-dashboards.sh делает wipe личной коллекции и полный
 # реимпорт — после переименования дашбордов в UI старый детект по префиксу «01 » в имени
 # давал 0 и запускал провижининг заново (restart-metabase / rollout). Считаем дашборды
-# в personal / is_personal коллекциях (как verify-corp-stack), с пагинацией GET /api/dashboard.
+# в personal / is_personal коллекциях, с пагинацией GET /api/dashboard.
 # Принудительная перезаливка: METABASE_FORCE_PROVISION=true или deploy/reset-deploy (DROP/CREATE БД).
 EXPECTED_DASHBOARDS=0
 if [ -d /app/metabase_dashboards ]; then
@@ -194,8 +221,13 @@ case "${FORCE_FLAG}" in
     ;;
   auto|*)
     if [ "${EXPECTED_DASHBOARDS}" -gt 0 ] && [ "${EXISTING_DASHBOARDS}" -ge "${EXPECTED_DASHBOARDS}" ]; then
-      log_info "Skipping provisioning: ${EXISTING_DASHBOARDS} non-archived dashboard(s) in admin personal scope vs ${EXPECTED_DASHBOARDS} JSON in image (rename-safe). Set METABASE_FORCE_PROVISION=true (or deploy/reset-deploy for DROP/CREATE app DB) to re-import from image."
-      PROVISION_DASHBOARDS=0
+      if corp_mb_native_sql_anchor_matches_image "${SESSION_TOKEN}"; then
+        log_info "Skipping provisioning: ${EXISTING_DASHBOARDS} dashboard(s) in personal scope vs ${EXPECTED_DASHBOARDS} JSON; карточка «Последние операции» (01) native SQL совпадает с якорем из образа."
+        PROVISION_DASHBOARDS=0
+      else
+        log_info "Re-provisioning (auto): count OK but «Последние операции» в Metabase не совпадает с эталоном из образа (stale native SQL). Importing from /app/metabase_dashboards."
+        PROVISION_DASHBOARDS=1
+      fi
     else
       log_info "Provisioning dashboards: have ${EXISTING_DASHBOARDS} of ${EXPECTED_DASHBOARDS} expected EGISZ dashboards in Metabase."
       PROVISION_DASHBOARDS=1
@@ -205,20 +237,22 @@ esac
 
 if [ -x /app/setup-dashboards.sh ] && [ "${PROVISION_DASHBOARDS}" = "1" ]; then
   log_info "Waiting for DWH schema in Postgres (needed for dashboard provisioning)..."
-  SCHEMA_SQL="SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('fact_egisz_transactions', 'v_egisz_transactions_enriched', 'v_egisz_transactions_enriched_ui', 'etl_state');"
+  SCHEMA_SQL="SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('fact_egisz_transactions', 'v_egisz_transactions_enriched', 'v_egisz_transactions_enriched_ui', 'v_rpt_semd_archive_ui', 'etl_state');"
   SCHEMA_CHECK="0"
   # -At: одна строка без пробелов/переносов — иначе сравнение в bash может не сработать
   for _attempt in $(seq 1 120); do
     SCHEMA_CHECK="$(PGPASSWORD="${APP_DB_PASSWORD}" psql -h "${PGHOST}" -U "${APP_DB_USER}" -d "${APP_DB_NAME}" -Atc "${SCHEMA_SQL}" 2>/dev/null || true)"
     SCHEMA_CHECK="$(echo "${SCHEMA_CHECK}" | tr -d '[:space:]')"
     SCHEMA_CHECK="${SCHEMA_CHECK:-0}"
-    if [ "${SCHEMA_CHECK}" -ge 4 ] 2>/dev/null; then
+    if [ "${SCHEMA_CHECK}" -ge 5 ] 2>/dev/null; then
       break
     fi
     sleep 5
   done
 
-  if [ "${SCHEMA_CHECK}" -ge 4 ]; then
+  # Только при полном наборе витрин (включая v_rpt_semd_archive_ui для дашборда «06 Архив СЭМД»).
+  # Раньше здесь было -ge 4: при COUNT=4 setup-dashboards.sh стартовал без архива, провижининг дашбордов мог обрываться на неполном наборе JSON.
+  if [ "${SCHEMA_CHECK}" -ge 5 ]; then
     log_info "Application schema validated. Running dashboard provisioning..."
     ADMIN_EMAIL="${ADMIN_EMAIL}" \
     ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
@@ -231,21 +265,21 @@ if [ -x /app/setup-dashboards.sh ] && [ "${PROVISION_DASHBOARDS}" = "1" ]; then
     PGPORT="5432" \
     /app/setup-dashboards.sh
   else
-    echo "[provision] Warning: Application database schema not fully initialized after wait (need fact + v_egisz_transactions_enriched + v_egisz_transactions_enriched_ui + etl_state). Skipping dashboard provisioning. Run egisz-monitor apply-schema and restart Metabase."
+    echo "[provision] Warning: Application database schema not fully initialized after wait (need fact + v_egisz_transactions_enriched + v_egisz_transactions_enriched_ui + v_rpt_semd_archive_ui + etl_state). Skipping dashboard provisioning. Run egisz-monitor apply-schema and restart Metabase."
   fi
 elif [ "${PROVISION_DASHBOARDS}" = "1" ]; then
   log_info "Note: /app/setup-dashboards.sh is missing; provisioning skipped."
-else
-  # Используется ниже verify-corp-stack.sh для гейтинга проверки.
-  SCHEMA_CHECK="${EXISTING_DASHBOARDS}"
 fi
 
 DASHBOARD_ID="$(curl -s "${MB_URL}/api/dashboard" \
   -H "X-Metabase-Session: ${SESSION_TOKEN}" | jq -r '
     (if type == "array" then . elif (.data | type == "array") then .data else [] end)
-    | ([.[] | select(.name == "01 Оперативный мониторинг")] | sort_by(.id) | last | .id)
-      // ([.[] | select(.name == "02 Сервис интеграции")] | sort_by(.id) | last | .id)
-      // ([.[] | select(.name == "03 Ошибки и разбор")] | sort_by(.id) | last | .id)
+    | ([.[] | select(.name == "01 Оперативный мониторинг и динамика")] | sort_by(.id) | last | .id)
+      // ([.[] | select(.name == "01 Оперативный мониторинг")] | sort_by(.id) | last | .id)
+      // ([.[] | select(.name == "02 Сервис, healthcheck и парсинг журнала")] | sort_by(.id) | last | .id)
+      // ([.[] | select(.name | test("^02 Сервис"))] | sort_by(.id) | last | .id)
+      // ([.[] | select(.name == "05 Управление СЭМД")] | sort_by(.id) | last | .id)
+      // ([.[] | select(.name == "05 Управление и архив СЭМД")] | sort_by(.id) | last | .id)
       // empty
   ')"
 
@@ -268,19 +302,6 @@ if [ -n "${DASHBOARD_ID}" ]; then
 else
   rm -f "${PUBLIC_UUID_FILE}"
   log_info "No primary dashboard found for publishing; stale public UUID removed."
-fi
-
-# Проверку не гоняем, если схему так и не дождались — иначе ложный FAIL при первом старте до Job схемы.
-if [ -x /app/verify-corp-stack.sh ]; then
-  if [ "${SCHEMA_CHECK:-0}" -ge 4 ]; then
-    log_info "Running full stack verify (Postgres + Metabase EGISZ dashboards)..."
-    if ! /app/verify-corp-stack.sh; then
-      echo "[provision] ERROR: verify-corp-stack.sh failed (см. вывод выше)"
-      exit 1
-    fi
-  else
-    log_info "Skipping verify: DWH schema not ready (dashboard provisioning was skipped)."
-  fi
 fi
 
 log_info "Metabase provisioning finished successfully"

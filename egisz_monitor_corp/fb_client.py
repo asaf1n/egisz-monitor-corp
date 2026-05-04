@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from typing import Any
 
@@ -15,7 +15,7 @@ def firebird_dsn(cfg: FirebirdConfig) -> str:
 
 
 def connect_firebird(cfg: FirebirdConfig):  # type: ignore[no-untyped-def]
-    """charset в конфиге должен совпадать с фактической кодировкой строк в БД (JPERSONS.JNAME и т.д.).
+    """charset в конфиге должен совпадать с фактической кодировкой строк в БД.
 
     Таймаут установления TCP/чтения для `firebird.driver.connect` в публичном API не задаётся
     (см. сигнатуру connect: только database, user, password, charset, …). Ограничение долгих
@@ -42,30 +42,20 @@ def _fmt_fb_timestamp(v: Any) -> str:
     return str(v)
 
 
-def fetch_firebird_source_peaks(cfg: FirebirdConfig) -> dict[str, Any]:
-    """
-    Снимок «верхушек» справочника в Firebird: последний EGMID в EGISZ_MESSAGES,
-    последний MODIFYDATE в EGISZ_LICENSES (для конфиг-UI и диагностики).
+def fetch_firebird_max_license_modifydate(cfg: FirebirdConfig) -> dict[str, Any]:
+    """MAX(MODIFYDATE) по EGISZ_LICENSES в Firebird — для сравнения с кешем в etl_state (healthcheck).
 
-    Один SELECT и одно соединение — меньше задержка, чем два последовательных MAX().
+    Значения last_egmid / source_max_egmid для UI — из PostgreSQL (etl_state и healthcheck), без MAX(EGMID) по сообщениям в Firebird.
     """
-    out: dict[str, Any] = {"max_egmid": None, "max_licenses_modifydate": None, "error": None}
+    out: dict[str, Any] = {"max_licenses_modifydate": None, "error": None}
     sql = """
-SELECT
-    (SELECT MAX(m.EGMID) FROM EGISZ_MESSAGES m) AS max_egmid,
-    (SELECT MAX(l.MODIFYDATE) FROM EGISZ_LICENSES l) AS max_licenses_modifydate
-FROM RDB$DATABASE
+SELECT MAX(l.MODIFYDATE) AS max_licenses_modifydate
+FROM EGISZ_LICENSES l
 """.strip()
     try:
-        rows = fetch_all(cfg, sql, timeout_sec=60)  # 60s for peaks check
+        rows = fetch_all(cfg, sql, timeout_sec=60)
         if rows:
             row = rows[0]
-            v = row.get("max_egmid")
-            if v is not None:
-                try:
-                    out["max_egmid"] = int(v)
-                except (TypeError, ValueError):
-                    out["max_egmid"] = v
             v2 = row.get("max_licenses_modifydate")
             if v2 is not None:
                 out["max_licenses_modifydate"] = _fmt_fb_timestamp(v2)
@@ -93,21 +83,50 @@ def fetch_all(
     sql: str,
     params: Sequence[Any] | Mapping[str, Any] | None = None,
     timeout_sec: int = 300,
+    *,
+    wait_tick_sec: int | None = None,
+    on_wait_tick: Callable[[int], None] | None = None,
 ) -> list[dict[str, Any]]:
     """Run SELECT with timeout protection. Default 5 min (300s) for ad-hoc callers; ETL uses etl.firebird_query_timeout_sec via _etl_fb_fetch.
 
     Таймаут оборачивает весь запрос (connect + execute + fetchall) в ThreadPoolExecutor и прерывается
     если Firebird зависает. Исключение TimeoutError переводится в RuntimeError для совместимости.
+
+    Если заданы оба ``wait_tick_sec`` и ``on_wait_tick``, ожидание ``future.result`` режется на тики:
+    UI/ETL получает секунды накопленного ожидания без завершения запроса (долгий первый SELECT).
     """
+    err_tail = (
+        f"Firebird query timeout after {timeout_sec}s (SQL length {len(sql)} chars). "
+        "For ETL: raise etl.firebird_query_timeout_sec in YAML; check indexes and EGMID/LOGID cursors."
+    )
+
+    def _raise_timeout(from_exc: BaseException | None = None) -> None:
+        raise RuntimeError(err_tail) from from_exc
+
+    use_ticks = wait_tick_sec is not None and on_wait_tick is not None
+    if not use_ticks:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            try:
+                future = executor.submit(_fetch_all_impl, cfg, sql, params)
+                return future.result(timeout=timeout_sec)
+            except FutureTimeoutError as e:
+                _raise_timeout(e)
+
+    tick = max(1, min(int(wait_tick_sec or 1), max(1, int(timeout_sec))))
+    elapsed = 0
     with ThreadPoolExecutor(max_workers=1) as executor:
-        try:
-            future = executor.submit(_fetch_all_impl, cfg, sql, params)
-            return future.result(timeout=timeout_sec)
-        except FutureTimeoutError as e:
-            raise RuntimeError(
-                f"Firebird query timeout after {timeout_sec}s (SQL length {len(sql)} chars). "
-                "For ETL: raise etl.firebird_query_timeout_sec in YAML; check indexes and EGMID/LOGID cursors."
-            ) from e
+        future = executor.submit(_fetch_all_impl, cfg, sql, params)
+        while True:
+            slice_sec = min(tick, max(0, timeout_sec - elapsed))
+            if slice_sec <= 0:
+                _raise_timeout()
+            try:
+                return future.result(timeout=slice_sec)
+            except FutureTimeoutError:
+                elapsed += slice_sec
+                if elapsed >= timeout_sec:
+                    _raise_timeout()
+                on_wait_tick(elapsed)
 
 
 def iter_batches(
