@@ -125,8 +125,8 @@ spec:
                   name: postgres-credentials
                   key: POSTGRES_PASSWORD
             # Идемпотентный provisioning: METABASE_FORCE_PROVISION=auto пропускает setup-dashboards, если
-            # число дашбордов в Metabase ≥ JSON в образе *и* native SQL «Последние операции» (01) содержит якорь из образа
-            # (иначе после правок JSON без DROP БД metabase оставался бы старый SQL). true — всегда пересоздавать; false — никогда.
+            # число дашбордов в Metabase ≥ числу *.json *и* SHA всего набора JSON совпадает со штампом в /shared
+            # (corp-metabase-dashboards-manifest.sha256 после последнего успешного импорта). true — всегда; false — никогда.
             - name: METABASE_FORCE_PROVISION
               value: "auto"
             # JVM-тюнинг для контейнера: heap = 75% memory limit (G1GC; кратно snappier чем дефолтный

@@ -37,8 +37,8 @@ RUN chmod +x /app/provision.sh /app/setup-dashboards.sh /app/verify-corp-stack.s
 
 # Дашборды копируются ОТДЕЛЬНЫМ слоем — изменение JSON не пересобирает слой со скриптами.
 COPY --chown=metabase:metabase metabase_dashboards/ /app/metabase_dashboards/
-# Checksum манифеста дешбордов: Docker кэширует по checksum слоя, предотвращает подстановку старых JSON при совпадении счётчика файлов.
-RUN find /app/metabase_dashboards -maxdepth 1 -name '*.json' -type f -exec sha256sum {} \; \
+# Checksum манифеста дешбордов (порядок файлов — sort; как corp_mb_compute_dashboards_bundle_sha в provision.sh).
+RUN find /app/metabase_dashboards -maxdepth 1 -name '*.json' -type f | LC_ALL=C sort | xargs sha256sum \
       | sha256sum > /app/metabase_dashboards/.manifest.sha256 \
     && chmod -R a+r /app/metabase_dashboards/
 

@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 def test_provision_anchor_last_operations_query_contains_bundle_fragment() -> None:
-    """Синхронно с metabase/provision.sh corp_mb_native_sql_anchor_matches_image()."""
+    """Карточка «Последние операции» (01): стабильный фрагмент native SQL для регрессий."""
     root = Path(__file__).resolve().parents[1]
     path = root / "metabase_dashboards" / "01_operational.json"
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -38,3 +38,13 @@ def test_executive_snapshot_queue_subquery_uses_local_uid_not_relates_to() -> No
         "COUNT(DISTINCT \"Связанное сообщение\")::bigint FROM public.v_rpt_documents_no_response_ui"
         not in q
     )
+
+
+def test_executive_dashboard_json_excludes_semd_archive_view() -> None:
+    """Архив — дашборд 06; карточки 05_executive.json не должны ссылаться на v_rpt_semd_archive_ui."""
+    root = Path(__file__).resolve().parents[1]
+    path = root / "metabase_dashboards" / "05_executive.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    for c in data["cards"]:
+        q = c.get("dataset_query", {}).get("native", {}).get("query", "")
+        assert "v_rpt_semd_archive" not in q, c.get("name")

@@ -445,6 +445,7 @@ PAGE = """
       outbound_postgres: 'Исходящие документы: запись в PostgreSQL',
       outbound_done: 'Исходящие документы: готово',
       sync_failed: 'Синхронизация: ошибка или прерывание (снимок курсоров etl_state)',
+      stopped_by_user: 'Синхронизация остановлена по запросу (снимок курсоров etl_state)',
     };
     return m[phase] || (phase ? 'Фаза: ' + phase : '');
   }
@@ -471,14 +472,18 @@ PAGE = """
     const srcEg = p.source_max_egmid;
     const wnote = p.watermark_note != null ? String(p.watermark_note).trim() : '';
     const diag = p.diag_error != null ? String(p.diag_error).trim() : '';
-    if (ph === 'sync_failed') {
+    if (ph === 'sync_failed' || ph === 'stopped_by_user') {
       const parts = [];
       if (logid != null && logid !== '') parts.push('last_log_id ' + String(logid));
       if (egm != null && egm !== '') parts.push('last_egmid ' + String(egm));
       if (srcEg != null && srcEg !== '') parts.push('source_max_egmid ' + String(srcEg));
       if (wnote) parts.push(wnote);
       if (diag) parts.push(diag);
-      return { title: 'Синхронизация: ошибка / прерывание', detail: parts.join(' · ') };
+      const title =
+        ph === 'stopped_by_user'
+          ? 'Синхронизация остановлена (курсоры по последнему коммиту)'
+          : 'Синхронизация: ошибка / прерывание';
+      return { title: title, detail: parts.join(' · ') };
     }
     if (ph === 'references_jpersons_export' || ph === 'references_licenses_export') {
       const parts = [];
@@ -561,7 +566,7 @@ PAGE = """
       return { indeterminate: true, pct: null, label: '…' };
     }
     const ph = String(p.phase || '');
-    if (ph === 'sync_failed') {
+    if (ph === 'sync_failed' || ph === 'stopped_by_user') {
       return { indeterminate: true, pct: null, label: '…' };
     }
     if (ph === 'pipeline_bootstrap' || ph === 'counting') {
@@ -765,7 +770,14 @@ PAGE = """
         if (!msg || msg.indexOf(errStr) < 0) lines.push('Ошибка: ' + errStr);
       } else if (j.last_stats) {
         if (msg) lines.push(msg);
-        else lines.push('Синхронизация завершена успешно: полный проход конвейера Firebird → PostgreSQL.');
+        else if (!j.last_stats.stopped_by_user) {
+          lines.push('Синхронизация завершена успешно: полный проход конвейера Firebird → PostgreSQL.');
+        }
+        if (j.last_stats.stopped_by_user) {
+          lines.push(
+            'Итог остановки зафиксирован: последний коммит в PostgreSQL сохранён; ниже — снимок etl_state и прогресс на момент остановки.'
+          );
+        }
         lines.push(JSON.stringify(j.last_stats, null, 2));
       } else if (j.sync_attempted) {
         if (msg) lines.push(msg);

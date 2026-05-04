@@ -17,43 +17,34 @@ APP_DB_PASSWORD="${APP_DATABASE_PASSWORD:-egisz}"
 PGHOST="${PGHOST:-postgres}"
 SITE_NAME="${METABASE_SITE_NAME:-EGISZ Monitor Corp}"
 PUBLIC_UUID_FILE="${METABASE_PUBLIC_UUID_FILE:-/shared/main-dashboard-public-uuid}"
+# Каталог JSON дашбордов (как в setup-dashboards.sh); после успешного импорта пишем SHA всего набора в MANIFEST_STAMP_FILE.
+DASHBOARDS_DIR="${METABASE_DASHBOARDS_DIR:-/app/metabase_dashboards}"
+MANIFEST_STAMP_FILE="${METABASE_DASHBOARDS_MANIFEST_STAMP:-/shared/corp-metabase-dashboards-manifest.sha256}"
 SCHEMA_CHECK=0
 
 log_info() {
   echo "[provision] $1"
 }
 
-# METABASE_FORCE_PROVISION=auto раньше пропускал setup-dashboards при совпадении *числа* дашбордов с JSON в образе.
-# Тогда Metabase application DB сохраняла старые native SQL — исправления в metabase_dashboards/*.json не подхватывались
-# до METABASE_FORCE_PROVISION=true или DROP БД metabase. Сверяем якорный фрагмент эталона из образа с карточкой по API.
-# Якорь — карточка «Последние операции» на дашборде 01 (оперативный мониторинг), а не «управленческая» сводка на 05.
-corp_mb_native_sql_anchor_matches_image() {
-  local token="$1"
-  local ref_json="/app/metabase_dashboards/01_operational.json"
-  local anchor='v_egisz_transactions_enriched_ui.* FROM public.v_egisz_transactions_enriched_ui'
-  local card_name="Последние операции"
-  local cards_json cid q
-
-  if [ ! -f "${ref_json}" ]; then
+# Контрольная сумма всего набора metabase_dashboards/*.json (порядок файлов фиксирован сортировкой).
+# Идентично алгоритму в metabase/Dockerfile (.manifest.sha256 в образе для кэша слоя).
+corp_mb_compute_dashboards_bundle_sha() {
+  local dir="${DASHBOARDS_DIR}"
+  local n
+  if [ ! -d "${dir}" ]; then
     return 1
   fi
-  if ! jq -e --arg a "${anchor}" --arg n "${card_name}" '.cards[] | select(.name == $n) | .dataset_query.native.query | contains($a)' "${ref_json}" >/dev/null 2>&1; then
+  n="$(find "${dir}" -maxdepth 1 -name '*.json' -type f 2>/dev/null | wc -l | tr -d ' ')"
+  if [ "${n:-0}" -lt 1 ]; then
     return 1
   fi
-
-  cards_json="$(curl -sS "${MB_URL}/api/card" -H "X-Metabase-Session: ${token}" 2>/dev/null || echo '{}')"
-  cid="$(echo "${cards_json}" | mb_list | jq -r --arg n "${card_name}" '[.[] | select(.name == $n) | select((.archived == false) or (.archived == null)) | .id] | max // empty')"
-  if [ -z "${cid}" ] || [ "${cid}" = "null" ]; then
-    return 1
-  fi
-  q="$(curl -sS "${MB_URL}/api/card/${cid}" -H "X-Metabase-Session: ${token}" | jq -r '.dataset_query.native.query // empty')"
-  if [ -z "${q}" ]; then
-    return 1
-  fi
-  case "${q}" in
-    *"${anchor}"*) return 0 ;;
-    *) return 1 ;;
-  esac
+  find "${dir}" -maxdepth 1 -name '*.json' -type f 2>/dev/null \
+    | LC_ALL=C sort \
+    | while IFS= read -r f; do
+        [ -z "${f}" ] && continue
+        sha256sum "${f}"
+      done \
+    | sha256sum | awk '{print $1}'
 }
 
 if [ -z "${ADMIN_EMAIL}" ] || [ -z "${ADMIN_PASSWORD}" ]; then
@@ -147,9 +138,10 @@ fi
 # давал 0 и запускал провижининг заново (restart-metabase / rollout). Считаем дашборды
 # в personal / is_personal коллекциях, с пагинацией GET /api/dashboard.
 # Принудительная перезаливка: METABASE_FORCE_PROVISION=true или deploy/reset-deploy (DROP/CREATE БД).
+# Ожидаемое число дашбордов = числу файлов *.json в DASHBOARDS_DIR (в репозитории по умолчанию шесть: 01–06).
 EXPECTED_DASHBOARDS=0
-if [ -d /app/metabase_dashboards ]; then
-  for _f in /app/metabase_dashboards/*.json; do
+if [ -d "${DASHBOARDS_DIR}" ]; then
+  for _f in "${DASHBOARDS_DIR}"/*.json; do
     [ -f "${_f}" ] && EXPECTED_DASHBOARDS=$((EXPECTED_DASHBOARDS + 1)) || true
   done
 fi
@@ -220,16 +212,24 @@ case "${FORCE_FLAG}" in
     PROVISION_DASHBOARDS=0
     ;;
   auto|*)
-    if [ "${EXPECTED_DASHBOARDS}" -gt 0 ] && [ "${EXISTING_DASHBOARDS}" -ge "${EXPECTED_DASHBOARDS}" ]; then
-      if corp_mb_native_sql_anchor_matches_image "${SESSION_TOKEN}"; then
-        log_info "Skipping provisioning: ${EXISTING_DASHBOARDS} dashboard(s) in personal scope vs ${EXPECTED_DASHBOARDS} JSON; карточка «Последние операции» (01) native SQL совпадает с якорем из образа."
-        PROVISION_DASHBOARDS=0
-      else
-        log_info "Re-provisioning (auto): count OK but «Последние операции» в Metabase не совпадает с эталоном из образа (stale native SQL). Importing from /app/metabase_dashboards."
-        PROVISION_DASHBOARDS=1
-      fi
+    _bundle_sha=""
+    if ! _bundle_sha="$(corp_mb_compute_dashboards_bundle_sha)"; then
+      log_info "Provisioning dashboards: cannot compute bundle SHA from ${DASHBOARDS_DIR}."
+      PROVISION_DASHBOARDS=1
+    elif [ "${EXPECTED_DASHBOARDS}" -gt 0 ] \
+      && [ "${EXISTING_DASHBOARDS}" -ge "${EXPECTED_DASHBOARDS}" ] \
+      && [ -f "${MANIFEST_STAMP_FILE}" ] \
+      && [ "$(cat "${MANIFEST_STAMP_FILE}" | tr -d '[:space:]')" = "${_bundle_sha}" ]; then
+      log_info "Skipping provisioning: bundle SHA matches stamp (${_bundle_sha}); ${EXISTING_DASHBOARDS} dashboard(s) in personal scope vs ${EXPECTED_DASHBOARDS} JSON files."
+      PROVISION_DASHBOARDS=0
     else
-      log_info "Provisioning dashboards: have ${EXISTING_DASHBOARDS} of ${EXPECTED_DASHBOARDS} expected EGISZ dashboards in Metabase."
+      if [ ! -f "${MANIFEST_STAMP_FILE}" ]; then
+        log_info "Provisioning dashboards: no manifest stamp (${MANIFEST_STAMP_FILE}); first run or new volume."
+      elif [ "${EXPECTED_DASHBOARDS}" -le 0 ] || [ "${EXISTING_DASHBOARDS}" -lt "${EXPECTED_DASHBOARDS}" ]; then
+        log_info "Provisioning dashboards: have ${EXISTING_DASHBOARDS} of ${EXPECTED_DASHBOARDS} expected dashboards in Metabase."
+      else
+        log_info "Re-provisioning (auto): JSON under ${DASHBOARDS_DIR} changed vs last import (bundle SHA mismatch)."
+      fi
       PROVISION_DASHBOARDS=1
     fi
     ;;
@@ -261,9 +261,19 @@ if [ -x /app/setup-dashboards.sh ] && [ "${PROVISION_DASHBOARDS}" = "1" ]; then
     DB_USER="${APP_DB_USER}" \
     DB_PASSWORD="${APP_DB_PASSWORD}" \
     METABASE_URL="${MB_URL}" \
+    METABASE_DASHBOARDS_DIR="${DASHBOARDS_DIR}" \
     PGHOST="${PGHOST}" \
     PGPORT="5432" \
     /app/setup-dashboards.sh
+    _record_sha=""
+    _record_sha="$(corp_mb_compute_dashboards_bundle_sha)" || true
+    if [ -n "${_record_sha}" ]; then
+      mkdir -p "$(dirname "${MANIFEST_STAMP_FILE}")"
+      printf '%s\n' "${_record_sha}" > "${MANIFEST_STAMP_FILE}"
+      log_info "Recorded dashboards bundle SHA to ${MANIFEST_STAMP_FILE}"
+    else
+      log_info "WARN: could not record manifest stamp (bundle SHA empty)."
+    fi
   else
     echo "[provision] Warning: Application database schema not fully initialized after wait (need fact + v_egisz_transactions_enriched + v_egisz_transactions_enriched_ui + v_rpt_semd_archive_ui + etl_state). Skipping dashboard provisioning. Run egisz-monitor apply-schema and restart Metabase."
   fi

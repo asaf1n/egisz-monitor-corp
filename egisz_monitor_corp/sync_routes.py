@@ -28,6 +28,56 @@ _SYNC_FAILED_WATERMARK_NOTE_RU = (
 )
 
 
+def _compose_stop_summary_stats(
+    cfg: Any | None,
+    last_detail: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Итог кооперативной остановки для UI: не пустой last_stats — без сообщения «нет счётчиков»."""
+    out: dict[str, Any] = {
+        "stopped_by_user": True,
+        "note_ru": (
+            "Остановка после завершения текущего шага ETL (между запросами к Firebird); "
+            "в PostgreSQL зафиксирован последний успешный коммит, курсоры — по etl_state."
+        ),
+    }
+    keys = (
+        "phase",
+        "cursor_log_id",
+        "etl_last_egmid",
+        "loaded_rows",
+        "parsed_facts",
+        "journal_facts",
+        "staging_errors",
+        "page",
+        "pipeline_step",
+        "pipeline_steps",
+        "messages_batch_rows",
+        "journal_batch_rows",
+    )
+    if last_detail:
+        for k in keys:
+            if k in last_detail and last_detail[k] is not None:
+                out[f"progress_{k}"] = last_detail[k]
+    if cfg is None:
+        return out
+    try:
+        from egisz_monitor_corp.pg_warehouse import connect_pg, fetch_etl_watermark_row
+
+        pg = connect_pg(cfg.postgres)
+        try:
+            row = fetch_etl_watermark_row(pg, cfg.etl.pipeline_name)
+            if row:
+                out["pg_etl_last_log_id"] = row["last_log_id"]
+                out["pg_etl_last_egmid"] = row["last_egmid"]
+                out["pg_source_max_egmid"] = row["source_max_egmid"]
+                out["pg_messages_snapshot_high_egmid"] = row["messages_snapshot_high_egmid"]
+        finally:
+            pg.close()
+    except Exception:  # pragma: no cover - PG при диагностике
+        pass
+    return out
+
+
 def _build_sync_failed_progress(
     cfg: Any | None,
     *,
@@ -78,6 +128,7 @@ def _run_sync_job(config_path: str, merged_dict: dict[str, Any] | None = None) -
     log("Синхронизация: фоновый поток стартовал; загрузка модулей и конфигурации…")
     boot_progress("pipeline_bootstrap")
     cfg: Any = None
+    last_detail_snapshot: dict[str, Any] | None = None
     try:
         import os
 
@@ -97,6 +148,8 @@ def _run_sync_job(config_path: str, merged_dict: dict[str, Any] | None = None) -
         boot_progress("etl_config_ready")
 
         def on_progress_detail(payload: dict[str, Any]) -> None:
+            nonlocal last_detail_snapshot
+            last_detail_snapshot = dict(payload)
             with _state_lock:
                 _state["progress"] = payload
 
@@ -131,14 +184,18 @@ def _run_sync_job(config_path: str, merged_dict: dict[str, Any] | None = None) -
             )
             _state["progress"] = _build_sync_failed_progress(cfg)
     except EtlCancelledError:
+        summary = _compose_stop_summary_stats(cfg, last_detail_snapshot)
+        stop_progress = _build_sync_failed_progress(cfg, extra_diag=None)
+        stop_progress["phase"] = "stopped_by_user"
+        stop_progress.pop("diag_error", None)
         with _state_lock:
             _state["error"] = None
-            _state["last_stats"] = None
+            _state["last_stats"] = summary
             _state["message"] = (
-                "Синхронизация остановлена по запросу. Прогресс мог сохраниться частично; "
-                "курсоры в PostgreSQL — по последнему успешному коммиту."
+                "Синхронизация остановлена по запросу. Текущий шаг ETL завершён; "
+                "итог зафиксирован (курсоры PostgreSQL — по последнему коммиту, см. счётчики ниже)."
             )
-            _state["progress"] = _build_sync_failed_progress(cfg, extra_diag="остановка оператором")
+            _state["progress"] = stop_progress
     except Exception as e:  # pragma: no cover
         with _state_lock:
             _state["error"] = str(e)

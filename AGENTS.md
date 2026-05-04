@@ -73,7 +73,7 @@
 | Путь | Назначение |
 |------|------------|
 | `metabase/Dockerfile` | Образ **`egisz-monitor-metabase`** (теги `:k8s-v23`, `:local` — `docker build` в `start.ps1` deploy/reset-deploy/restart-metabase и в `metabase/provision-local.ps1`; non-root UID 1500, **python3** + `PYTHONPATH=/app` для `python3 -m egisz_monitor_corp.metabase_export`, HEALTHCHECK; bump при смене JSON/скриптов) |
-| `metabase/provision.sh` | Старт пода: провижининг из `/app/metabase_dashboards/`; при `METABASE_FORCE_PROVISION=auto` и достаточном числе дашбордов пропуск импорта возможен только если native SQL карточки **«Последние операции»** (дашборд 01) содержит тот же якорь, что в образе (фрагмент запроса к `v_egisz_transactions_enriched_ui`, см. `corp_mb_native_sql_anchor_matches_image` в скрипте) — иначе после правок JSON без DROP БД Metabase остался бы старый SQL |
+| `metabase/provision.sh` | Старт пода: провижининг из `METABASE_DASHBOARDS_DIR` (по умолчанию `/app/metabase_dashboards/`); при `METABASE_FORCE_PROVISION=auto` пропуск повторного импорта только если число дашбордов в персональной коллекции не меньше числа JSON и **SHA набора всех `*.json`** совпадает с сохранённым после последнего успешного `setup-dashboards.sh` файлам `/shared/corp-metabase-dashboards-manifest.sha256` (переменная `METABASE_DASHBOARDS_MANIFEST_STAMP`) |
 | `metabase/setup-dashboards.sh` | Импорт JSON в коллекцию администратора |
 | `metabase/export_dashboards_from_api.py` | CLI-обёртка над **`egisz_monitor_corp.metabase_export`** (выгрузка в каталог) |
 | `metabase/provision-local.ps1` | Локальный провижининг к Metabase на `localhost:3000` |
