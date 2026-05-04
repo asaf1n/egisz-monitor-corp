@@ -202,12 +202,11 @@ def test_fetch_etl_watermark_row_returns_ints() -> None:
     cur = MagicMock()
     cur.__enter__.return_value = cur
     cur.__exit__.return_value = None
-    cur.fetchone.return_value = (29_614_055, 89_339_643, 88_000_000)
+    cur.fetchone.return_value = (29_614_055, 89_339_643)
     con = MagicMock()
     con.cursor.return_value = cur
     out = fetch_etl_watermark_row(con, "firebird_exchangelog")
     assert out == {
         "last_log_id": 29_614_055,
         "last_egmid": 89_339_643,
-        "messages_snapshot_high_egmid": 88_000_000,
     }

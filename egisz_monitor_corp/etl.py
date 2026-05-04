@@ -8,8 +8,8 @@
 Источники Firebird в `run_sync`:
   • **JPERSONS** и **EGISZ_LICENSES** — первый шаг после lock: staging, merge **dim_clinics**, кэш для **build_record**.
   • **EGISZ_MESSAGES** и **EXCHANGELOG** — чередование пакетов журнала (``LOGID``) и страниц снимка сообщений
-    (**keyset** ``EGMID > after_egmid``, стартовый ``after`` из ``etl_state.messages_snapshot_high_egmid``;
-    в конце успешного run тот же максимум пишется в ``last_egmid``); prune/окно по **CREATEDATE** при
+    (**keyset** ``EGMID > after_egmid``, стартовый ``after`` из ``etl_state.last_egmid``; после каждой страницы
+    снимка курсор фиксируется в ``last_egmid``); prune/окно по **CREATEDATE** при
     ``sync_window_days > 0``. Перед разбором пакета журнала — **догрузка** ``EGISZ_MESSAGES`` по **MSGID**,
     если строки ещё нет в staging. Сопоставление журнала с сообщениями в PostgreSQL — по **MSGID**.
   • Исходящие: `_refresh_outbound_documents` (окно **CREATEDATE** при ``sync_window_days`` > 0).
@@ -39,7 +39,6 @@ from egisz_monitor_corp.pg_warehouse import (
     journal_msgids_present_in_staging,
     get_last_egmid,
     get_last_log_id,
-    get_messages_snapshot_high_egmid,
     insert_journal_messages_staging_rows,
     insert_staging_errors,
     merge_dim_clinics_from_license_staging,
@@ -50,7 +49,6 @@ from egisz_monitor_corp.pg_warehouse import (
     prune_stg_egisz_messages_journal_by_sync_window,
     set_last_egmid,
     set_last_log_id,
-    set_messages_snapshot_high_egmid,
     try_acquire_pipeline_lock,
     truncate_journal_messages_staging,
     upsert_dim_clinic,
@@ -91,7 +89,7 @@ def _full_sync_from_start(cfg: CorpAppConfig) -> bool:
 
     При включении:
     - EXCHANGELOG идёт с LOGID > 0 (игнорируем last_log_id)
-    - EGISZ_MESSAGES snapshot идёт с EGMID > 0 (игнорируем messages_snapshot_high_egmid)
+    - EGISZ_MESSAGES snapshot идёт с EGMID > 0 (курсор снимка — last_egmid)
     - окно по датам отключено (sync_window_days <= 0 => None в _etl_sync_window_days)
     """
     return int(cfg.etl.sync_window_days) < 0
@@ -356,9 +354,11 @@ def _journal_messages_staging_fetch_keyset_page(
         return after_egmid, 0, True
     detail({"phase": "journal_messages_export_postgres", **base_pl})  # type: ignore[arg-type]
     insert_journal_messages_staging_rows(pg, rows)
-    pg.commit()
     mx = _max_egmid_in_fb_message_rows(rows)
     new_after = int(mx) if mx is not None else after_egmid
+    pipeline = cfg.etl.pipeline_name
+    set_last_egmid(pg, pipeline, new_after)
+    pg.commit()
     n = len(rows)
     detail(
         {
@@ -409,18 +409,17 @@ def _sync_journal_snapshot_interleaved(
 
     if _messages_journal_full_rescan(cfg):
         truncate_journal_messages_staging(pg)
-        set_messages_snapshot_high_egmid(pg, pipeline, 0)
         pg.commit()
         msg_scan = 0
     else:
         prune_stg_egisz_messages_journal_by_sync_window(pg, _etl_sync_window_days(cfg))
-        msg_scan = get_messages_snapshot_high_egmid(pg, pipeline)
+        msg_scan = get_last_egmid(pg, pipeline)
         pg.commit()
 
     parser = EgiszMonitorParser()
     staging_buffer: list[tuple] = []
     fact_buffer: list[dict[str, Any]] = []
-    stats = _PageStats(last_id=last_id, messages_snapshot_scan_high_egmid=msg_scan)
+    stats = _PageStats(last_id=last_id, egmid_keyset_high=msg_scan)
 
     msg_page = 0
     msg_total = 0
@@ -489,7 +488,7 @@ def _sync_journal_snapshot_interleaved(
                 cancel_check=cancel_check,
             )
             msg_total += inc
-            stats.messages_snapshot_scan_high_egmid = msg_scan
+            stats.egmid_keyset_high = msg_scan
             if partial:
                 msgs_done = True
 
@@ -507,13 +506,13 @@ def _sync_journal_snapshot_interleaved(
             cancel_check=cancel_check,
         )
         msg_total += inc
-        stats.messages_snapshot_scan_high_egmid = msg_scan
+        stats.egmid_keyset_high = msg_scan
         if partial:
             msgs_done = True
 
     log(
         f"EGISZ_MESSAGES: выгрузка из Firebird в PostgreSQL — {msg_total} строк в stg_egisz_messages_journal "
-        f"(инкремент по EGMID, high={stats.messages_snapshot_scan_high_egmid})."
+        f"(инкремент по EGMID, high={stats.egmid_keyset_high})."
     )
 
     if fact_buffer:
@@ -714,7 +713,7 @@ class _PageStats:
     max_log_id: int = 0
     last_id: int = 0
     max_egmid_seen: int = 0
-    messages_snapshot_scan_high_egmid: int = 0
+    egmid_keyset_high: int = 0
     # Уникальные "документы" по идентификаторам (не по строкам журнала).
     _doc_keys: set[str] = field(default_factory=set, repr=False)
     _doc_localuid: set[str] = field(default_factory=set, repr=False)
@@ -1163,7 +1162,7 @@ def _read_cursor(cfg: CorpAppConfig, pg: Any, *, dry_run: bool) -> int:
 
 
 def _read_egmid_cursor(cfg: CorpAppConfig, pg: Any, *, dry_run: bool) -> int:
-    """Прочитать `etl_state.last_egmid` для лога старта (водяной знак EGMID снимка; в цикле keyset используется `messages_snapshot_high_egmid`, после sync оба поля совпадают)."""
+    """Прочитать `etl_state.last_egmid` для лога старта (курсор keyset снимка EGISZ_MESSAGES)."""
     pipeline = cfg.etl.pipeline_name
     if dry_run:
         pg_r = connect_pg(cfg.postgres)
@@ -1280,7 +1279,6 @@ def run_sync(
             boot_detail(0, "pipeline_bootstrap")
             set_last_log_id(pg, pipeline, 0)
             set_last_egmid(pg, pipeline, 0)
-            set_messages_snapshot_high_egmid(pg, pipeline, 0)
             truncate_journal_messages_staging(pg)
             pg.commit()
             last_id = 0
@@ -1353,12 +1351,10 @@ def run_sync(
                 detail=detail,
                 cancel_check=cancel_check,
             )
-            # last_egmid — курсор выгрузки снимка EGISZ_MESSAGES (аналог last_log_id для журнала).
-            # messages_snapshot_high_egmid дублирует тот же курсор для совместимости со схемой/диагностикой.
+            # last_egmid уже обновляется по страницам снимка; финальный commit выравнивает витрину с исходящими.
             set_etl_source_peaks(pg, pipeline, reference_max_license_modifydate)
-            snap_hi = int(page_stats.messages_snapshot_scan_high_egmid)
+            snap_hi = int(page_stats.egmid_keyset_high)
             set_last_egmid(pg, pipeline, snap_hi)
-            set_messages_snapshot_high_egmid(pg, pipeline, snap_hi)
             pg.commit()
 
         cursor_after = (

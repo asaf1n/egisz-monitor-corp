@@ -34,17 +34,17 @@ Firebird: EXCHANGELOG, EGISZ_MESSAGES, EGISZ_LICENSES (+ JPERSONS)
 
 В дашбордах важно считать **документы**, а не строки журнала:
 
-- **Документ в витрине колбэков**: один `relates_to_id` (из `relatesToMessage` в SOAP).
+- **Документ в витрине колбэков**: один `relates_to_id` (из `relatesToMessage` в SOAP). Строка в `fact_egisz_transactions` создаётся только если можно сопоставить документ: есть **`localUid`** в XML или непустой **`DOCUMENTID`** в `EGISZ_MESSAGES`, либо есть **`emdrId`** в ответе; иначе событие уходит в **`stg_parse_errors`** (код `MISSING_DOCUMENT_IDENTIFIERS`), без факта.
 - **Документ в очереди “без ответа”**: один `local_uid_semd` (приоритет `<localUid>`, иначе `EGISZ_MESSAGES.DOCUMENTID`).
 - **Регистрационный номер РЭМД**: `emdr_id` (из `emdrId` в SOAP).
 
 ## Дашборды Metabase
 
-Описания отчётов задаются JSON в [`metabase_dashboards/`](metabase_dashboards/); при старте пода Metabase [`metabase/provision.sh`](metabase/provision.sh) вызывает `setup-dashboards.sh` и создаёт дашборды в **корне личной коллекции** администратора (см. [`docs/BI_EGISZ_INFOKLINIKA_AUDIT.md`](docs/BI_EGISZ_INFOKLINIKA_AUDIT.md) §4). По витрине колбэков агрегаты считают **документ**, а не строку журнала: **`COUNT(DISTINCT "Связанное сообщение")`** соответствует одному `relates_to_id` на колбэк. Для **очереди без ответа** в отчётах используется **`COUNT(DISTINCT "localUid СЭМД")`** (один исходящий документ). На дашборде **04** топы по тексту отказа РЭМД строятся по **первому значимому** элементу JSON «Ошибки JSON» **на документ**, чтобы один отказ не размножал строки в рейтинге; на **05** та же логика для управленческих карточек по ошибкам.
+Описания отчётов задаются JSON в [`metabase_dashboards/`](metabase_dashboards/); при старте пода Metabase [`metabase/provision.sh`](metabase/provision.sh) вызывает [`metabase/setup-dashboards.sh`](metabase/setup-dashboards.sh): **сначала очищается целевая коллекция** администратора (дашборды, сохранённые вопросы, вложенные коллекции), **затем импортируются** все `*.json` из каталога дашбордов. Итог — в **корне личной коллекции** (см. [`docs/BI_EGISZ_INFOKLINIKA_AUDIT.md`](docs/BI_EGISZ_INFOKLINIKA_AUDIT.md) §4). По витрине колбэков агрегаты считают **документ**, а не строку журнала: **`COUNT(DISTINCT "Связанное сообщение")`** соответствует одному `relates_to_id` на колбэк. Для **очереди без ответа** в отчётах используется **`COUNT(DISTINCT "localUid СЭМД")`** (один исходящий документ). На дашборде **04** топы по тексту отказа РЭМД строятся по **первому значимому** элементу JSON «Ошибки JSON» **на документ**, чтобы один отказ не размножал строки в рейтинге; на **05** та же логика для управленческих карточек по ошибкам.
 
 На дашборде **02** блок **healthcheck** (сигналы, топ 24ч, очередь, прокси-БД) читает **`v_health_*_ui`** из [`sql/005_healthcheck.sql`](sql/005_healthcheck.sql); **heatmap** по клиникам строится по витрине (**Обработано IPS**), как архив СЭМД. В Config UI те же данные healthcheck — **`GET /api/healthcheck`**. Ошибки **разбора канала** (битый XML, нет `relatesToMessage`) — внизу **02** (`v_stg_parse_errors_by_document`, **`parse_created_filter`**) и в сигнале **parse_errors_burst**.
 
-### Каталог дашбордов (пять JSON)
+### Каталог дашбордов (шесть JSON, 01–06)
 
 **`01_operational.json` — «01 Оперативный мониторинг и динамика».** Срез для смены и L2: последние операции, статусы, ошибки по СЭМД и клиникам, топы, «% ошибок»; плюс **тренды** (календарь по «День (тренд)», объём по часам за 72 ч). Фильтры URL: `dwh_date_filter`, `top_semd_filter`, `top_clinic_filter`.
 
@@ -62,5 +62,5 @@ Firebird: EXCHANGELOG, EGISZ_MESSAGES, EGISZ_LICENSES (+ JPERSONS)
 
 ### Примечания
 
-- **Технические детали** (ETL, курсоры, схема, инфраструктура, как править/выкатывать) находятся в [`AGENTS.md`](AGENTS.md) и [`.cursorrules`](.cursorrules). В Config UI **System Log** при синхронизации отображаются в т.ч. **уникальные документы** (по разобранным `localUid`/`emdrId` и по `DOCUMENTID` в исходящих), а не только сырые строки.
+- **Технические детали** (ETL, курсоры, схема, инфраструктура, как править/выкатывать) находятся в [`AGENTS.md`](AGENTS.md) и [`.cursorrules`](.cursorrules). Курсоры **`last_log_id`** и **`last_egmid`** в PostgreSQL обновляются **по пакетам** журнала и страницам снимка; блок «Последние значения» в Config UI берёт их из **`/api/pg/sync-snapshot`**. В **System Log** при синхронизации отображаются в т.ч. **уникальные документы** (по разобранным `localUid`/`emdrId` и по `DOCUMENTID` в исходящих), а не только сырые строки. Кодировка Firebird в конфиге часто **`WIN1251`** (`firebird.charset`).
 - Полный аудит (включая healthcheck/кластеры/роли) — в [`docs/BI_EGISZ_INFOKLINIKA_AUDIT.md`](docs/BI_EGISZ_INFOKLINIKA_AUDIT.md).

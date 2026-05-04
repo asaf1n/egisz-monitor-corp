@@ -355,7 +355,7 @@ CREATE TABLE IF NOT EXISTS stg_egisz_messages_journal (
     loaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-COMMENT ON TABLE stg_egisz_messages_journal IS 'Зеркало EGISZ_MESSAGES (непустой DOCUMENTID, окно CREATEDATE как у журнала при sync_window_days > 0): инкрементальная выгрузка по EGMID с водяным знаком etl_state.messages_snapshot_high_egmid; при sync_window_days <= 0 — TRUNCATE и полный пересъём без окна по дате; догрузка по MSGID из пакетов журнала. Сопоставление EXCHANGELOG.MSGID = MSGID — в PostgreSQL.';
+COMMENT ON TABLE stg_egisz_messages_journal IS 'Зеркало EGISZ_MESSAGES (непустой DOCUMENTID, окно CREATEDATE как у журнала при sync_window_days > 0): инкрементальная выгрузка по EGMID с водяным знаком etl_state.last_egmid; при sync_window_days <= 0 — TRUNCATE и полный пересъём без окна по дате; догрузка по MSGID из пакетов журнала. Сопоставление EXCHANGELOG.MSGID = MSGID — в PostgreSQL.';
 
 CREATE INDEX IF NOT EXISTS idx_stg_em_journal_msgid ON stg_egisz_messages_journal (msgid);
 

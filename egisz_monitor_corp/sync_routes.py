@@ -27,8 +27,8 @@ _state: dict[str, Any] = {
 _cancel_evt = threading.Event()
 
 _SYNC_FAILED_WATERMARK_NOTE_RU = (
-    "last_log_id двигается по пакетам журнала; last_egmid — ватермарк журнала после полного успешного sync. "
-    "При обрыве last_log_id часто впереди last_egmid."
+    "last_log_id фиксируется после пакетов журнала; last_egmid — после страниц снимка EGISZ_MESSAGES. "
+    "При обрыве значения в etl_state — последний успешный COMMIT по соответствующему шагу."
 )
 
 
@@ -73,9 +73,6 @@ def _compose_stop_summary_stats(
             if row:
                 out["pg_etl_last_log_id"] = row["last_log_id"]
                 out["pg_etl_last_egmid"] = row["last_egmid"]
-                out["pg_messages_snapshot_high_egmid"] = row.get(
-                    "messages_snapshot_high_egmid"
-                )
         finally:
             pg.close()
     except Exception:  # pragma: no cover - PG при диагностике

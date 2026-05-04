@@ -583,6 +583,28 @@ class EgiszMonitorParser:
                 )
             return None
 
+        lu_eff = _norm_ws(local_uid_semd)
+        em_eff = _norm_ws(emdr_id)
+        if not lu_eff and not em_eff:
+            _stage(
+                StagingParseError(
+                    relates_to_id=relates_to_id,
+                    error_code="MISSING_DOCUMENT_IDENTIFIERS",
+                    message=(
+                        "В колбэке есть relatesToMessage, но нет идентификатора документа: "
+                        "пусты localUid, DOCUMENTID (EGISZ_MESSAGES) и emdrId — строку в fact_egisz_transactions не создаём"
+                    ),
+                    log_excerpt=excerpt or None,
+                    exchangelog_log_id=exchangelog_log_id,
+                    egisz_messages_egmid=egisz_messages_egmid,
+                    journal_msgid=journal_msgid,
+                    relates_to_hint=hint_relates,
+                    local_uid_hint=hint_local,
+                    emdr_id_hint=hint_emdr,
+                )
+            )
+            return None
+
         return NormalizedRecord(
             relates_to_id=relates_to_id,
             local_uid_semd=local_uid_semd,

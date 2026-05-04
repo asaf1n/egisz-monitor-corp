@@ -172,31 +172,6 @@ def set_last_egmid(con, pipeline: str, last_egmid: int) -> None:  # type: ignore
         )
 
 
-def get_messages_snapshot_high_egmid(con, pipeline: str) -> int:  # type: ignore[no-untyped-def]
-    """Cursor for keyset paging of Firebird EGISZ_MESSAGES snapshot (messages_snapshot_high_egmid)."""
-    with con.cursor() as cur:
-        cur.execute(
-            "SELECT COALESCE(messages_snapshot_high_egmid, 0) FROM etl_state WHERE pipeline = %s",
-            (pipeline,),
-        )
-        row = cur.fetchone()
-        return int(row[0]) if row else 0
-
-
-def set_messages_snapshot_high_egmid(con, pipeline: str, high_egmid: int) -> None:  # type: ignore[no-untyped-def]
-    """Persist snapshot paging cursor after successful sync (or reset for full rescan)."""
-    with con.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO etl_state (pipeline, last_log_id, messages_snapshot_high_egmid, updated_at)
-            VALUES (%s, 0, %s, NOW())
-            ON CONFLICT (pipeline) DO UPDATE
-            SET messages_snapshot_high_egmid = EXCLUDED.messages_snapshot_high_egmid, updated_at = NOW();
-            """,
-            (pipeline, int(high_egmid)),
-        )
-
-
 def prune_stg_egisz_messages_journal_by_sync_window(con, sync_window_days: int | None) -> None:  # type: ignore[no-untyped-def]
     """Удалить из staging сообщения старше окна CREATEDATE (как sync_window_days у журнала)."""
     d = int(sync_window_days) if sync_window_days is not None else 0
@@ -220,8 +195,7 @@ def fetch_etl_watermark_row(con, pipeline: str) -> dict[str, int] | None:  # typ
             """
             SELECT
               last_log_id,
-              COALESCE(last_egmid, 0),
-              COALESCE(messages_snapshot_high_egmid, 0)
+              COALESCE(last_egmid, 0)
             FROM etl_state
             WHERE pipeline = %s
             LIMIT 1
@@ -231,11 +205,10 @@ def fetch_etl_watermark_row(con, pipeline: str) -> dict[str, int] | None:  # typ
         row = cur.fetchone()
     if not row:
         return None
-    lid_raw, eg_raw, snap_raw = row
+    lid_raw, eg_raw = row
     return {
         "last_log_id": int(lid_raw) if lid_raw is not None else 0,
         "last_egmid": int(eg_raw) if eg_raw is not None else 0,
-        "messages_snapshot_high_egmid": int(snap_raw) if snap_raw is not None else 0,
     }
 
 
@@ -890,9 +863,11 @@ def fetch_pg_sync_snapshot(con, pipeline: str) -> dict[str, Any]:  # type: ignor
                     facts_only = int(mx0[0])
         except Exception:
             facts_only = 0
+        eg0 = facts_only if facts_only > 0 else None
         return {
             "log_id": None,
-            "egmid": facts_only if facts_only > 0 else None,
+            "egmid": eg0,
+            "etl_last_egmid": eg0,
             "licenses_modifydate": None,
         }
     lid_raw, last_egmid_raw, lic_raw = row
@@ -922,6 +897,7 @@ def fetch_pg_sync_snapshot(con, pipeline: str) -> dict[str, Any]:  # type: ignor
     return {
         "log_id": log_id,
         "egmid": eg_display,
+        "etl_last_egmid": eg_display,
         "licenses_modifydate": lic_iso,
     }
 

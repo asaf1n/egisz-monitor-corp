@@ -99,7 +99,7 @@ def test_soap_not_parsed_from_logtext_xml_must_be_msgtext() -> None:
     log = "http://gost-3.infoclinica.lan/"
     rec = p.build_record(log, msg_text=None, document_id="x")
     assert rec is None
-    rec2 = p.build_record(log, msg_text=xml)
+    rec2 = p.build_record(log, msg_text=xml, document_id="DOC-FALLBACK")
     assert rec2 is not None
     assert rec2.relates_to_id == "MSG-ONLY-MSG"
 
@@ -123,7 +123,13 @@ def test_build_record_gost_from_logtext_only_msgtext_extra_ignored() -> None:
     extra = "http://gost-77.infoclinica.lan/mentioned-in-body"
     msg = f"{extra}\n{xml}"
     log = "http://gost-12.infoclinica.lan/callback"
-    rec = p.build_record(log, msg_text=msg, reply_to="http://gost-5.infoclinica.lan/", kind_from_egisz_licenses="62")
+    rec = p.build_record(
+        log,
+        msg_text=msg,
+        reply_to="http://gost-5.infoclinica.lan/",
+        document_id="DOC-GOST-BODY",
+        kind_from_egisz_licenses="62",
+    )
     assert rec is not None
     assert rec.relates_to_id == "MSG-GOST"
     assert rec.jid == 12
@@ -139,6 +145,7 @@ def test_build_record_jid_mismatch_license_vs_gost_log() -> None:
     rec = p.build_record(
         "http://gost-10.infoclinica.lan/",
         msg_text=xml,
+        document_id="DOC-LIC-MISMATCH",
         jid_from_egisz_licenses_row=99,
         kind_from_egisz_licenses="62",
     )
@@ -267,7 +274,7 @@ def test_kind_fallback_from_egisz_licenses_kind_only() -> None:
     p = EgiszMonitorParser()
     xml = _soap("MSG-003", "success", kind=None, org=None, success_block="")
     log = "http://gost-7.infoclinica.lan/callback"
-    rec = p.build_record(log, msg_text=xml, kind_from_egisz_licenses="43")
+    rec = p.build_record(log, msg_text=xml, document_id="DOC-KIND-FB", kind_from_egisz_licenses="43")
     assert rec is not None
     assert rec.kind_code == "43"
     assert "Направление" in (rec.kind_name or "")
@@ -277,7 +284,12 @@ def test_resolve_jid_via_oid_map() -> None:
     p = EgiszMonitorParser()
     xml = _soap("MSG-004", "success", kind=None, org="<ns2:organization>OID-X</ns2:organization>")
     mo_uid_to_jid = {"OID-X": 999}
-    rec = p.build_record("", msg_text=xml, jid_by_mo_uid_from_egisz_licenses=mo_uid_to_jid)
+    rec = p.build_record(
+        "",
+        msg_text=xml,
+        document_id="DOC-OID-MAP",
+        jid_by_mo_uid_from_egisz_licenses=mo_uid_to_jid,
+    )
     assert rec is not None
     assert rec.jid == 999
     assert rec.org_oid == "OID-X"
@@ -341,12 +353,35 @@ def test_staging_error_missing_relates() -> None:
     assert errors[0].error_code == "MISSING_RELATES_TO"
 
 
+def test_staging_error_when_relates_but_no_localuid_or_emdr() -> None:
+    """relatesToMessage без localUid, без DOCUMENTID и без emdrId — только stg_parse_errors, не факт."""
+    p = EgiszMonitorParser()
+    errors: list = []
+
+    def on_err(e) -> None:
+        errors.append(e)
+
+    xml = _soap("MSG-NO-DOC-KEYS", "success", kind="<ns2:kind>62</ns2:kind>")
+    rec = p.build_record(
+        "http://gost-1.infoclinica.lan/",
+        msg_text=xml,
+        document_id=None,
+        on_staging_error=on_err,
+        exchangelog_log_id=12_345,
+    )
+    assert rec is None
+    assert len(errors) == 1
+    assert errors[0].error_code == "MISSING_DOCUMENT_IDENTIFIERS"
+    assert errors[0].relates_to_id == "MSG-NO-DOC-KEYS"
+    assert errors[0].exchangelog_log_id == 12_345
+
+
 def test_as_fact_row_errors_list() -> None:
     p = EgiszMonitorParser()
     xml = _soap("ID-5", "error", kind="<ns2:kind>001</ns2:kind>", errors_block="""
       <ns2:errors><ns2:item><ns2:code>C</ns2:code><ns2:message>M</ns2:message></ns2:item></ns2:errors>
     """)
-    rec = p.build_record("", msg_text=xml)
+    rec = p.build_record("", msg_text=xml, document_id="DOC-ERR-LIST")
     assert rec is not None
     row = rec.as_fact_row()
     assert row["errors_json"][0]["code"] == "C"

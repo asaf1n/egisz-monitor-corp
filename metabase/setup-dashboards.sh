@@ -1,8 +1,7 @@
 #!/bin/bash
 # Единственный путь поставки отчётов EGISZ в Metabase: все дашборды и native-карточки из
 # DASHBOARDS_DIR/*.json (см. README «Metabase и дашборды», AGENTS «Metabase»). Пустой инстанс после первой настройки
-# админа + готовой схемы Postgres — этот скрипт создаёт весь набор. Повторы: удаление одноимённых
-# сущностей в персональной коллекции, затем повторный импорт.
+# админа + готовой схемы Postgres — этот скрипт создаёт весь набор. Повторный запуск: очистка целевой коллекции и импорт заново.
 set -euo pipefail
 
 _script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -251,31 +250,6 @@ delete_demo_content() {
   sample_ids="$(echo "${databases_json}" | jq -r '.data[]? | select(.is_sample == true or .name == "Sample Database") | .id')"
   for sample_id in ${sample_ids}; do
     api_request DELETE "/api/database/${sample_id}" >/dev/null
-  done
-}
-
-# Сохранённые вопросы вне коллекции EGISZ (старые SQL к snake_case-витрине) не обновляются при деплое.
-delete_legacy_corp_cards() {
-  local cards_raw ids
-  if ! cards_raw="$(api_request GET "/api/card")"; then
-    log_info "GET /api/card failed; skip legacy card cleanup"
-    return 0
-  fi
-  ids="$(echo "${cards_raw}" | mb_list | jq -r '
-    .[]
-    | select(
-        (.name == "Факты со статусом error")
-        or (
-          ((.dataset_query.native.query // "") | test("v_egisz_transactions_enriched"))
-          and ((.dataset_query.native.query // "") | (test("v_egisz_transactions_enriched_ui") | not))
-        )
-      )
-    | .id
-  ')"
-  for card_id in ${ids}; do
-    [ -z "${card_id}" ] || [ "${card_id}" = "null" ] && continue
-    log_info "Deleting legacy saved question card id=${card_id}"
-    api_request DELETE "/api/card/${card_id}" >/dev/null || true
   done
 }
 
@@ -745,9 +719,6 @@ for collection_id in $(echo "${collections_for_delete}" | jq -r '.[] | select(.n
 done
 
 authenticate
-delete_legacy_corp_cards
-
-authenticate
 APP_DB_ID="$(ensure_app_database)"
 
 # После смены DDL в Postgres Metabase не подхватывает поля до sync (раньше sync вызывался только при POST /api/database).
@@ -804,8 +775,7 @@ else
   ROOT_COLLECTION_ID="$(create_collection "${ROOT_COLLECTION_NAME}" "EGISZ dashboards collection" "#509EE3")"
 fi
 
-# Очистка личной коллекции от всех дашбордов и карточек: при смене «имя в JSON» выборочное
-# удаление по старым названиям оставляло дубликаты; тут полный сброс перед импортом.
+# Перед импортом JSON — пустая целевая коллекция (дашборды, карточки, вложенные коллекции).
 wipe_corp_root_collection() {
   local coll="${1:-}"
   if [ -z "${coll}" ] || [ "${coll}" = "null" ]; then
@@ -815,7 +785,7 @@ wipe_corp_root_collection() {
   for _pass in 1 2 3; do
     items="$(api_request GET "/api/collection/${coll}/items")"
     list="$(echo "${items}" | mb_list)"
-    # Вложенные коллекции (старые папки EGISZ и т.п.): иначе остаются «осиротевшие» карточки и дубликаты в UI.
+    # Вложенные коллекции удаляем целиком (дерево), иначе в UI остаются лишние сущности.
     while IFS= read -r subcoll; do
       [ -z "${subcoll}" ] && continue
       log_info "Removing nested collection id=${subcoll} (full tree)"

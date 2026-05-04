@@ -105,7 +105,7 @@ egisz-monitor-corp\start.ps1
 
   apply | start (default)   kind при необходимости + docker build только Config UI + kubectl apply; витрина и БД Metabase не сбрасываются; rollout Metabase+conf-ui + smoke + port-forward 8080/3000 (+ Postgres: -IncludePostgresPortForward). Имя start = то же, что apply.
   deploy            docker build (conf-ui + Metabase, с кэшем слоёв) + apply + apply-schema в conf-ui (DDL из образа) + DROP/CREATE БД Metabase + port-forward; данные egisz_reports не очищаются.
-  reset-deploy      Полный сброс namespace egisz-monitor (все поды/SVC/Deployment/StatefulSet/PVC внутри него исчезают) + удаление legacy-тома Compose Postgres при наличии + docker build --no-cache обоих образов + kind load + kubectl apply с нуля + DROP/CREATE БД Metabase. Не выполняет: docker system prune / глобальную очистку buildkit (только --no-cache у этих двух build).
+  reset-deploy      Полный сброс namespace egisz-monitor (все поды/SVC/Deployment/StatefulSet/PVC внутри него исчезают) + docker build --no-cache обоих образов + kind load + kubectl apply с нуля + DROP/CREATE БД Metabase. Не выполняет: docker system prune / глобальную очистку buildkit (только --no-cache у этих двух build).
   restart-metabase  docker build образа Metabase (--no-cache) + kind load + rollout restart deployment/metabase + ожидание Ready. JSON попадает в образ, но импорт в БД приложения Metabase при METABASE_FORCE_PROVISION=auto часто пропускается, если число дашбордов и якорь «01» уже совпали с образом — тогда смена имён/состава дашбордов не видна; нужен METABASE_FORCE_PROVISION=true (k8s/metabase.yaml) или deploy/reset-deploy.
   restart-web       docker build Config UI (--no-cache): синхронизация (CLI) и веб-конфиг в одном образе + kind load + rollout conf-ui + ожидание Ready (манифесты не apply).
   metabase-provision-local  Metabase + setup-dashboards к localhost:3000 (metabase/provision-local.ps1)
@@ -652,20 +652,6 @@ function Invoke-ReconcileEtlCronjobFromLocalYaml {
     }
 }
 
-function Invoke-RemoveLegacyComposePostgresVolume {
-    # Раньше проект поднимался через docker-compose с томом egisz_monitor_corp_postgres_data — удаляем, если остался.
-    $vol = "egisz_monitor_corp_postgres_data"
-    cmd /c "docker volume inspect $vol 1>nul 2>nul"
-    if ($LASTEXITCODE -ne 0) { return }
-    Write-Host "`[docker] Removing legacy Compose volume $vol (standalone Postgres removed from project)..." -ForegroundColor Yellow
-    cmd /c "docker volume rm $vol 2>nul"
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "WARN: could not remove volume $vol (stop containers using it: docker volume ls)." -ForegroundColor Yellow
-    } else {
-        Write-Host "`[docker] Volume $vol removed." -ForegroundColor Green
-    }
-}
-
 function Invoke-ResetK8sNamespace {
     Write-Host "`[kubectl] Full reset: deleting namespace egisz-monitor..." -ForegroundColor Cyan
     kubectl delete namespace egisz-monitor --ignore-not-found
@@ -1177,7 +1163,6 @@ switch ($Action) {
     "reset-deploy" {
         Write-NestedSiblingMonitorWarning
         Write-Banner 'egisz-monitor-corp K8s reset-deploy (delete namespace + no-cache builds + fresh apply)'
-        Invoke-RemoveLegacyComposePostgresVolume
         Initialize-LocalKubernetesCluster
         Invoke-DockerBuild -DockerNoCache
         Invoke-KindLoadImagesIfNeeded

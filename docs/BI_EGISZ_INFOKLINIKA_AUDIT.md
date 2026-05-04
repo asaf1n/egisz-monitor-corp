@@ -71,9 +71,9 @@ flowchart LR
 | :--- | :--- | :--- |
 | **Журнал обмена** | Каждая строка — событие контура (в т.ч. тело SOAP-колбэка РЭМД в `MSGTEXT`). Инкремент загрузки — `LOGID`. | Сырые связи при разборе; `exchangelog_log_id` на факте; ошибки парсинга с привязкой к строке журнала. |
 | **Сообщения исходящие** | Отправка в РЭМД: `MSGID` (контур обмена), `EGMID` (ключ строки сообщения), `DOCUMENTID` / `REPLYTO`, время создания сообщения. | `stg_egisz_messages_journal`, факт `egisz_messages_egmid`, очередь «без ответа», карточка «прокси-БД» (лаг `EGMID`). |
-| **Факт регистрации** | Нормализованный результат колбэка: статус, ошибки JSON, связь с исходящим (`relates_to_id`), клиника, тип СЭМД, даты. | `fact_egisz_transactions` → витрины `v_egisz_transactions_enriched(_ui)` — **основа оперативных и управленческих дашбордов**. |
+| **Факт регистрации** | Нормализованный результат колбэка: статус, ошибки JSON, связь с исходящим (`relates_to_id`), клиника, тип СЭМД, даты. Строка факта создаётся только если документ идентифицируем: **`localUid`** в XML или непустой **`DOCUMENTID`** в сопоставленной строке **`EGISZ_MESSAGES`**, либо **`emdrId`** в ответе; иначе — только **`stg_parse_errors`** (`MISSING_DOCUMENT_IDENTIFIERS`). | `fact_egisz_transactions` → витрины `v_egisz_transactions_enriched(_ui)` — **основа оперативных и управленческих дашбордов**. |
 | **Очередь без callback** | Исходящие с `DOCUMENTID`, по которым ещё нет успешного факта с тем же «локальным uid СЭМД». | `v_rpt_documents_no_response(_ui)` — дашборд **03**, блоки на **02**, **05**. |
-| **Ошибки парсинга / канала** | Строка журнала не дала валидный факт (XML, нет `relatesToMessage`, слишком большой `MSGTEXT` и т.д.). | `stg_parse_errors`, `v_stg_parse_errors_by_document` — дашборд **03**, сигнал `parse_errors_burst`. |
+| **Ошибки парсинга / канала** | Строка журнала не дала валидный факт (XML, нет `relatesToMessage`, нет идентификатора документа при наличии связи, слишком большой `MSGTEXT` и т.д.). | `stg_parse_errors`, `v_stg_parse_errors_by_document` — дашборд **02**, сигнал `parse_errors_burst`. |
 | **Отказы контента РЭМД** | Ответ шлюза со статусом ошибки и массивом сообщений проверки. | `errors_json`, функции `egisz_friendly_*` — дашборды **04**, **01**, **05**. |
 | **Справочники** | Клиника (JID, название, ИНН, OID), тип СЭМД. | `dim_clinics`, `dim_semd_types`; срезы «по клинике», «по типу документа». |
 | **Снимок здоровья пайплайна** | Курсоры ETL (`LOGID`, **EGMID** снимка сообщений), пики лицензий, агрегаты по клиникам и сигналы порогов. | `etl_state`, представления `v_health_*` — API `/api/healthcheck`, дашборд **02**. |
@@ -120,7 +120,7 @@ flowchart TB
 | `v_stg_parse_errors_by_document` | Ошибки парсинга **на документ** (`document_group_key`). |
 | `v_health_*_ui` | Показатели для **02** и `/api/healthcheck`. |
 | `egisz_friendly_error_item`, `egisz_friendly_errors_row` | Человекочитаемые подсказки по отказам без искажения сырого ответа. |
-| `etl_state` | **`last_log_id`** — водяной знак **EXCHANGELOG.LOGID**. **`last_egmid`** и **`messages_snapshot_high_egmid`** — один смысл: максимальный **EGMID**, пройденный keyset-выгрузкой снимка **`EGISZ_MESSAGES`** в staging (плюс догрузка по **MSGID** из пакетов журнала). После успешного sync оба поля выравниваются. **Не** бизнес-время, но критично для «двинулся ли синк». |
+| `etl_state` | **`last_log_id`** — водяной знак **EXCHANGELOG.LOGID**. **`last_egmid`** — курсор keyset-выгрузки снимка **`EGISZ_MESSAGES`** в staging (обновляется по страницам и в конце синка; плюс догрузка по **MSGID** из пакетов журнала). **`source_max_licenses_modifydate`**, **`source_peaks_updated_at`** — кэш агрегатов по лицензиям для healthcheck и Config UI. **Не** бизнес-время, но критично для «двинулся ли синк». |
 
 Агрегаты по умолчанию: документы — **`COUNT(DISTINCT "Связанное сообщение")`** (`relates_to_id`); очередь — **`COUNT(DISTINCT "localUid СЭМД")`**.
 
@@ -214,7 +214,7 @@ flowchart TB
 | **Расписание** | Kubernetes `CronJob` (`k8s/etl-cron.yaml`), опционально Airflow DAG `airflow/dags/egisz_monitor_etl_dag.py`. |
 | **BI** | Metabase OSS; дашборды из `metabase_dashboards/*.json`, провижининг в образе `metabase/Dockerfile` + `setup-dashboards.sh`. |
 
-**Курсоры ETL (для отладки):** `etl_state.last_log_id` — журнал `EXCHANGELOG.LOGID` (водяной знак после пакетов). Снимок **`EGISZ_MESSAGES` → `stg_egisz_messages_journal`:** keyset **`EGMID > after_egmid`** (старт с **`messages_snapshot_high_egmid`**); после успешного run **`last_egmid`** и **`messages_snapshot_high_egmid`** записываются в одно и то же значение. Отбор в Firebird: непустой **`DOCUMENTID`**, опционально окно **`CREATEDATE`** при `sync_window_days > 0`; при `sync_window_days ≤ 0` — без фильтра по дате, только за курсором. Дополнительно из пакетов журнала догружаются строки по **`MSGID`**, если их ещё нет в staging. Outbound — полная перезапись staging теми же предикатами **`DOCUMENTID`/дата** ([`sql_util`](../egisz_monitor_corp/sql_util.py)). В healthcheck **`etl_cursor_egmid`** = **`etl_state.last_egmid`** для сравнения со staging.
+**Курсоры ETL (для отладки):** `etl_state.last_log_id` — журнал `EXCHANGELOG.LOGID` (водяной знак после пакетов). Снимок **`EGISZ_MESSAGES` → `stg_egisz_messages_journal`:** keyset **`EGMID > after_egmid`** (курсор **`last_egmid`**, фиксируется после страниц). Отбор в Firebird: непустой **`DOCUMENTID`**, опционально окно **`CREATEDATE`** при `sync_window_days > 0`; при `sync_window_days ≤ 0` — без фильтра по дате, только за курсором. Дополнительно из пакетов журнала догружаются строки по **`MSGID`**, если их ещё нет в staging. Outbound — полная перезапись staging теми же предикатами **`DOCUMENTID`/дата** ([`sql_util`](../egisz_monitor_corp/sql_util.py)). В healthcheck **`etl_cursor_egmid`** = **`etl_state.last_egmid`** для сравнения со staging.
 
 ---
 
@@ -231,10 +231,12 @@ flowchart TB
 | Смена JSON дашбордов / образа Metabase | `.\start.ps1 -Action restart-metabase` (и bump тега образа, напр. `k8s-v23` в `k8s/metabase.yaml`) |
 | Проверка витрины и карточек в поде | `.\start.ps1 -Action verify` |
 
-**Metabase:** Service `metabase`, порт **3000**; при Pending LoadBalancer — `kubectl -n egisz-monitor port-forward svc/metabase 3000:3000`. После `apply` — rollout Metabase + conf-ui, ожидание readiness **2–6+ мин** нормально. Кириллица: `firebird.charset` в YAML (часто WIN1251), контейнер Metabase — `C.UTF-8`. Главная `/` Metabase и Site URL — см. [README](../README.md) и документацию Metabase; типичная ошибка — разные origin `127.0.0.1` и `localhost`.
+**Metabase:** Service `metabase`, порт **3000**; при Pending LoadBalancer — `kubectl -n egisz-monitor port-forward svc/metabase 3000:3000`. При старте пода [`metabase/setup-dashboards.sh`](../metabase/setup-dashboards.sh) **очищает целевую коллекцию** администратора (дашборды, сохранённые вопросы, вложенные коллекции), затем **импортирует** все JSON из каталога дашбордов — без отдельного «глобального» удаления карточек вне этой коллекции. После `apply` — rollout Metabase + conf-ui, ожидание readiness **2–6+ мин** нормально. Кириллица: `firebird.charset` в YAML (часто WIN1251), контейнер Metabase — `C.UTF-8`. Главная `/` Metabase и Site URL — см. [README](../README.md) и документацию Metabase; типичная ошибка — разные origin `127.0.0.1` и `localhost`.
+
+**`reset-deploy`:** полный сброс namespace и данных витрины по сценарию [README](../README.md); скрипт **не** удаляет отдельно том Docker Compose Postgres — только то, что описано в `start.ps1` для выбранного `-Action`.
 
 **Namespace:** `egisz-monitor`. Детали манифестов, Postgres (ClusterIP), CronJob, Secret админа Metabase — в прежних материалах репозитория (`k8s/conf-ui.yaml`, `k8s/metabase.yaml`, `k8s/etl-cron.yaml`) при необходимости глубокого аудита инфраструктуры.
 
 ---
 
-*(Исторические номера **07–09** и отдельные «03 парсинг / 05 тренды» сведены к шести дашбордам **01–06**; архив СЭМД снова вынесен в **06**; см. каталог в §4.2.)*
+*(Ранее встречались другие номера дашбордов; актуальный каталог — шесть JSON **01–06**, §4.2.)*

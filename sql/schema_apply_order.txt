@@ -1,5 +1,5 @@
 # Порядок применения DDL к БД egisz_reports (k8s Job egisz-reports-schema-init, start.ps1, ETL, CLI apply-schema).
-# В каталоге sql/ только эти три файла — миграции витрины; прочие одноразовые SQL не хранить.
+# В каталоге sql/ только эти три файла — идемпотентный DDL витрины; прочие одноразовые SQL не хранить.
 001_schema.sql
 002_etl_state.sql
 005_healthcheck.sql

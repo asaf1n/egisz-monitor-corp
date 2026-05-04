@@ -140,7 +140,7 @@ def outbound_documents_staging_select(*, sync_window_days: int | None) -> str:
     """Исходящие с DOCUMENTID: полное окно по CREATEDATE (как sync_window_days у журнала); при 0/null — без даты.
 
     После каждого успешного sync staging перезаписывается целиком (DELETE + INSERT). Предикат по дате,
-    а не по messages_snapshot_high_egmid (курсор снимка журнала в stg_egisz_messages_journal), сохраняет корректный
+    а не по last_egmid (курсор keyset снимка в etl_state), сохраняет корректный
     снимок при удалении строк в Firebird.
     """
     doc = egisz_messages_documentid_filled_predicate()

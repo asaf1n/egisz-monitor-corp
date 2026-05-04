@@ -1,6 +1,6 @@
 # AGENTS.md — ориентир для ИИ-агентов по разработке
 
-Репозиторий: **EGISZ Monitor Corp** — ETL и витрина для мониторинга обмена МИС ↔ ЕГИЗС/РЭМД. Доменная логика парсинга, статусов, отчётов и поиска аномалий для аналитиков описана в **`.cursorrules`** (бизнес-контекст интеграции). Здесь — структура кода и инфраструктуры для правок функционала.
+Репозиторий: **EGISZ Monitor Corp** — ETL и витрина для мониторинга обмена МИС ↔ ЕГИСЗ/РЭМД. Доменная логика парсинга, статусов, отчётов и поиска аномалий для аналитиков описана в **`.cursorrules`** (бизнес-контекст интеграции). Здесь — структура кода и инфраструктуры для правок функционала.
 
 **После существенных изменений** (парсер, `sql/`, дашборды, K8s, `start.ps1`, Airflow DAG) **обновляй этот файл и `.cursorrules`**. `README.md` — витрина прототипа и навигация по дашбордам для сотрудников; технический контекст (ETL, курсоры, схема, инварианты, выкат) — здесь и в `.cursorrules`. **Тон и ограничения формулировок** — в разделе [«Стиль документации»](#стиль-документации) ниже; для агента в Cursor — `.cursor/rules/documentation-style.mdc`.
 
@@ -11,7 +11,7 @@
 | Путь | Назначение |
 |------|------------|
 | `pyproject.toml` | Пакет `egisz-monitor-corp`, зависимости; CLI: **`egisz-corp`** и **`egisz-monitor`** (оба → `egisz_monitor_corp.cli`) |
-| `start.ps1` | Локальный стек в K8s (**namespace `egisz-monitor`**): по умолчанию **`apply`** / **`start`**; **`deploy`** — оба образа + DROP/CREATE БД приложения Metabase; **`reset-deploy`**, **`restart-metabase`** / **`restart-web`**, **`verify`** (port-forward + self-test Firebird, без `verify-corp-stack`), **`metabase-provision-local`**, **`test`** — см. **`docs/BI_EGISZ_INFOKLINIKA_AUDIT.md`** [§8](docs/BI_EGISZ_INFOKLINIKA_AUDIT.md#k8s-local) и **`README.md`** (локальная инфраструктура). `apply`/`deploy`/`reset-deploy`: после in-cluster smoke **нет** вызова `verify-corp-stack.sh`. Пересборка conf-ui без кэша + apply: **`.\start.ps1 -Action apply -DockerNoCache`** или **`.\scripts\apply-local-rebuild.ps1`**. Сброс только app DB Metabase без удаления namespace: **`deploy`** / **`reset-deploy`** или env **`METABASE_FORCE_PROVISION`**. Скрипт в **UTF-8 с BOM**. |
+| `start.ps1` | Локальный стек в K8s (**namespace `egisz-monitor`**): по умолчанию **`apply`** / **`start`**; **`deploy`** — оба образа + DROP/CREATE БД приложения Metabase; **`reset-deploy`**, **`restart-metabase`** / **`restart-web`**, **`verify`** (port-forward + self-test Firebird, без `verify-corp-stack`), **`metabase-provision-local`**, **`test`** — см. **`docs/BI_EGISZ_INFOKLINIKA_AUDIT.md`** ([прил. B](docs/BI_EGISZ_INFOKLINIKA_AUDIT.md#приложение-b-развёртывание-и-эксплуатация)) и **`README.md`** (локальная инфраструктура). `apply`/`deploy`/`reset-deploy`: после in-cluster smoke **нет** вызова `verify-corp-stack.sh`. Пересборка conf-ui без кэша + apply: **`.\start.ps1 -Action apply -DockerNoCache`** или **`.\scripts\apply-local-rebuild.ps1`**. Сброс только app DB Metabase без удаления namespace: **`deploy`** / **`reset-deploy`** или env **`METABASE_FORCE_PROVISION`**. Скрипт в **UTF-8 с BOM**. |
 | `README.md` | Витрина прототипа: что это за проект и какие дашборды доступны разным ролям |
 | `.cursor/rules/documentation-style.mdc` | Стиль текстов для ИИ-агента Cursor (`alwaysApply`) — отсылает к **AGENTS.md** § «Стиль документации» |
 | `.cursorrules` | Парсинг SOAP/XML, витрина, отчёты, критичные статусы и сигналы для мониторинга интеграции |
@@ -22,8 +22,8 @@
 | Модуль | Роль |
 |--------|------|
 | `cli.py` | CLI: `sync`, `apply-schema`, проверки БД |
-| `etl.py` | **`run_sync`**: справочники первыми; **чередование** пакетов **EXCHANGELOG** (`LOGID > last_log_id`, без JOIN к FB `EGISZ_MESSAGES`) и страниц снимка **EGISZ_MESSAGES** в **`stg_egisz_messages_journal`** (keyset **`EGMID > after_egmid`**, стартовый `after` из **`etl_state.messages_snapshot_high_egmid`**, после успешного sync выставляется в тот же максимум, что и **`last_egmid`**); перед разбором пакета журнала — **догрузка** строк **`EGISZ_MESSAGES` по `MSGID`**, отсутствующих в staging (`egisz_messages_by_msgids_sql`); окно **`LOGDATE`/`CREATEDATE`** в Firebird только при **`sync_window_days` > 0**; при **0** — полный охват **за курсором** без дат; при **< 0** — «с нуля»: сброс **`last_log_id`/`last_egmid`/`messages_snapshot_high_egmid`**, `TRUNCATE` staging снимка; сопоставление журнала с сообщениями в PG по **`MSGID`**; UPSERT фактов; **исходящие** — полная перезапись **`stg_egisz_outbound_documents`** в том же окне **`CREATEDATE`**; прогресс UI: **`documents_*`** (uniq `localUid`/`emdrId`) и **`outbound_*_docs`** (uniq **`DOCUMENTID`**); без COUNT журнала в Firebird; `pg_try_advisory_lock` |
-| `parser.py` | **`EgiszMonitorParser`**: разбор MSGTEXT (SOAP/XML), `relates_to_id`, `status`, `errors_json`, `localUid`, `emdr_id`, `resolve_clinic` |
+| `etl.py` | **`run_sync`**: справочники первыми; **чередование** пакетов **EXCHANGELOG** (`LOGID > last_log_id`, без JOIN к FB `EGISZ_MESSAGES`) и страниц снимка **EGISZ_MESSAGES** в **`stg_egisz_messages_journal`** (keyset **`EGMID > after_egmid`**, стартовый `after` и фиксация после пакетов — **`etl_state.last_egmid`**); перед разбором пакета журнала — **догрузка** строк **`EGISZ_MESSAGES` по `MSGID`**, отсутствующих в staging (`egisz_messages_by_msgids_sql`); окно **`LOGDATE`/`CREATEDATE`** в Firebird только при **`sync_window_days` > 0**; при **0** — полный охват **за курсором** без дат; при **< 0** — «с нуля»: сброс **`last_log_id`/`last_egmid`**, `TRUNCATE` staging снимка; сопоставление журнала с сообщениями в PG по **`MSGID`**; UPSERT фактов; **исходящие** — полная перезапись **`stg_egisz_outbound_documents`** в том же окне **`CREATEDATE`**; прогресс UI: **`documents_*`** (uniq `localUid`/`emdrId`) и **`outbound_*_docs`** (uniq **`DOCUMENTID`**); без COUNT журнала в Firebird; `pg_try_advisory_lock` |
+| `parser.py` | **`EgiszMonitorParser`**: разбор MSGTEXT (SOAP/XML), `relates_to_id`, `status`, `errors_json`, `localUid`, `emdr_id`, `resolve_clinic`; без **localUid**/DOCUMENTID и без **emdrId** — запись в **`stg_parse_errors`** (`MISSING_DOCUMENT_IDENTIFIERS`), не факт |
 | `sql_util.py` | SQL к Firebird: **EXCHANGELOG** без JOIN (пагинация по **`LOGID`**); **EGISZ_MESSAGES**: keyset по **`EGMID`** для снимка, выборка по списку **`MSGID`** для догрузки; окно **`CREATEDATE`** и непустой **`DOCUMENTID`** — как у снимка, так и у исходящих |
 | `pg_warehouse.py` | Подключение PG, применение `sql/*.sql`, `etl_state`, staging исходящих, UPSERT факта чанками / измерений |
 | `fb_client.py` | Клиент Firebird |
@@ -38,7 +38,7 @@
 | Файл | Содержимое |
 |------|------------|
 | `001_schema.sql` | Таблицы факта/измерений, `stg_jpersons_import`, `stg_egisz_licenses_import`, **`stg_egisz_messages_journal`**, `stg_egisz_outbound_documents`, представления `v_*`, **`v_stg_parse_errors_by_document`** (ключ документа для ошибок парсинга), функции `egisz_friendly_*`, `dim_column_display_labels` |
-| `002_etl_state.sql` | Таблица `etl_state`: `last_log_id` (водяной знак **LOGID** журнала); `last_egmid` и **`messages_snapshot_high_egmid`** — один и тот же смысл (максимум **EGMID**, пройденный keyset-выгрузкой снимка): при старте ETL читается **`messages_snapshot_high_egmid`** для **`EGMID > …`**, в конце успешного run оба поля записываются в одно значение; `source_max_licenses_modifydate`; `source_max_egmid` — устарело (не используется) |
+| `002_etl_state.sql` | Таблица `etl_state`: `last_log_id`, **`last_egmid`**, кэш **`source_max_licenses_modifydate`** / **`source_peaks_updated_at`** после успешного ETL |
 | `005_healthcheck.sql` | Healthcheck-витрина: `v_health_by_clinic` (агрегаты за 24ч по **уникальным** `relates_to_id`, очередь по **уникальным** `local_uid_semd`), `v_health_signals` (5 сигналов), `v_health_proxy_db` (сводка staging исходящих + курсор ETL) + UI-обёртки `*_ui` для блока healthcheck в `02_service.json` |
 
 В каталоге `sql/` хранятся **только** DDL/витрина для Job `egisz-reports-schema-init` и ETL; **не** добавлять сюда одноразовые диагностические запросы. Предикаты выгрузки и курсоры — в **`egisz_monitor_corp/sql_util.py`** и в этом файле (**раздел ETL**).
@@ -74,13 +74,13 @@
 |------|------------|
 | `metabase/Dockerfile` | Образ **`egisz-monitor-metabase`** (теги `:k8s-v23`, `:local` — `docker build` в `start.ps1` deploy/reset-deploy/restart-metabase и в `metabase/provision-local.ps1`; non-root UID 1500, **python3** + `PYTHONPATH=/app` для `python3 -m egisz_monitor_corp.metabase_export`, HEALTHCHECK; bump при смене JSON/скриптов) |
 | `metabase/provision.sh` | Старт пода: провижининг из `METABASE_DASHBOARDS_DIR` (по умолчанию `/app/metabase_dashboards/`); при `METABASE_FORCE_PROVISION=auto` пропуск повторного импорта только если число дашбордов в персональной коллекции не меньше числа JSON и **SHA набора всех `*.json`** совпадает с сохранённым после последнего успешного `setup-dashboards.sh` файлам `/shared/corp-metabase-dashboards-manifest.sha256` (переменная `METABASE_DASHBOARDS_MANIFEST_STAMP`) |
-| `metabase/setup-dashboards.sh` | Импорт JSON в коллекцию администратора |
+| `metabase/setup-dashboards.sh` | Очистка целевой коллекции администратора (дашборды, карточки, вложенные коллекции), затем импорт всех `*.json` из `DASHBOARDS_DIR` |
 | `metabase/export_dashboards_from_api.py` | CLI-обёртка над **`egisz_monitor_corp.metabase_export`** (выгрузка в каталог) |
 | `metabase/provision-local.ps1` | Локальный провижининг к Metabase на `localhost:3000` |
 | `metabase/verify-corp-stack.sh` | Заглушка `exit 0` (в образе для совместимости); **не** вызывается из `provision.sh` / `start.ps1`. Диагностика вручную: `curl` `/api/health`, `smoke-metabase-ui.sh` |
 | `metabase/force-k8s-mb-image.ps1` | Принудительное обновление образа Metabase в кластере при рассинхроне |
 
-Подробности: **`docs/BI_EGISZ_INFOKLINIKA_AUDIT.md`** (§4 Metabase, §8 Kubernetes), **`README.md`**.
+Подробности: **`docs/BI_EGISZ_INFOKLINIKA_AUDIT.md`** (§4 Metabase, прил. B), **`README.md`**.
 
 ## Kubernetes и окружение
 
@@ -88,7 +88,7 @@
 
 | Путь | Назначение |
 |------|------------|
-| `k8s/` | Манифесты Postgres, Metabase, conf-ui, CronJob, примеры секретов — см. **`README.md`** (локальная инфраструктура) и BI-аудит §8.6 |
+| `k8s/` | Манифесты Postgres, Metabase, conf-ui, CronJob, примеры секретов — см. **`README.md`** (локальная инфраструктура) и **`docs/BI_EGISZ_INFOKLINIKA_AUDIT.md`** (прил. B) |
 | `k8s/postgres/` | StatefulSet, сервисы, Job **`egisz-reports-schema-init`** (DDL по `sql/schema_apply_order.txt`), Job’ы Metabase app DB и (при необходимости) Airflow metadata |
 | `k8s/metabase.yaml` | Deployment Metabase (образ `egisz-monitor-metabase:k8s-v23`); `JAVA_TOOL_OPTIONS` (G1GC, MaxRAMPercentage, `ExitOnOutOfMemoryError`), длинный `startupProbe` до `/api/health`, `METABASE_FORCE_PROVISION=auto` — см. `metabase/provision.sh` |
 | `k8s/conf-ui.yaml` | Config UI (gunicorn 1×16t + `sync_routes`); non-root UID 10001, `/healthz`, RollingUpdate `maxUnavailable=0` |
@@ -122,7 +122,7 @@
 | `sql/005_healthcheck.sql` | Витрины `v_health_by_clinic` / `v_health_signals` / `v_health_proxy_db` + UI-обёртки `*_ui` (русские подписи через `dim_column_display_labels`). Входит в `schema_apply_order.txt`; применяется ETL `run_sync` и Job `egisz-reports-schema-init`. |
 | `egisz_monitor_corp/pg_warehouse.py` → `fetch_healthcheck_snapshot(con)` | Чтение трёх view + агрегаты для UI/JSON; `statement_timeout = 10s` на каждый блок. |
 | `GET /api/healthcheck` (`egisz_monitor_corp/config_app.py`) | JSON-снимок `{signals, by_clinic_top, proxy_db, level_summary}`. При недоступной PG — `ok: false` и `errors[]` (graceful). |
-| Config UI: вкладки **Snapshot / Healthcheck** | Snapshot — текущие `EGMID/LOGID/MODIFYDATE` (как раньше). Healthcheck — сигналы, top-3 клиники, прокси-БД (опрос `/api/healthcheck` каждые 30 c). **Сохранить в YAML** также патчит CronJob `egisz-monitor-sync` по `auto_sync` (RBAC SA `conf-ui`). |
+| Config UI: вкладки **Snapshot / Healthcheck** | Snapshot — `GET /api/pg/sync-snapshot`: `last_log_id`, `last_egmid` (`etl_state`), кэш `MAX(MODIFYDATE)` лицензий; поле EGMID в UI заполняется тем же `last_egmid`. Healthcheck — сигналы, top-3 клиники, прокси-БД (`GET /api/healthcheck`, опрос ~30 c). **Сохранить в YAML** также патчит CronJob `egisz-monitor-sync` по `auto_sync` (RBAC SA `conf-ui`). |
 | Дашборд `metabase_dashboards/02_service.json` | «02 Сервис, healthcheck и парсинг журнала»: поток по витрине (heatmap по **Обработано IPS** с тем же `dwh_date`, что топы и **06** архив); сигналы healthcheck, очередь, тренд парсинга с `parse_created_filter`; детальные карточки staging; сводка прокси-БД. |
 | Полный аудит BI и интеграции | `docs/BI_EGISZ_INFOKLINIKA_AUDIT.md` (техника, витрина, Metabase, healthcheck, роли, k8s) |
 | Операторам Config UI (дашборды vs веб, смысл метрик в отчётах) | `README.md`; технический лог синка и курсоры — **`AGENTS.md`** (раздел ETL), healthcheck — **`GET /api/healthcheck`** |
