@@ -173,24 +173,27 @@ def set_last_egmid(con, pipeline: str, last_egmid: int) -> None:  # type: ignore
 
 
 def get_messages_snapshot_high_egmid(con, pipeline: str) -> int:  # type: ignore[no-untyped-def]
+    """Cursor for keyset paging of Firebird EGISZ_MESSAGES snapshot (messages_snapshot_high_egmid)."""
     with con.cursor() as cur:
         cur.execute(
             "SELECT COALESCE(messages_snapshot_high_egmid, 0) FROM etl_state WHERE pipeline = %s",
             (pipeline,),
         )
         row = cur.fetchone()
-        return int(row[0]) if row and row[0] is not None else 0
+        return int(row[0]) if row else 0
 
 
 def set_messages_snapshot_high_egmid(con, pipeline: str, high_egmid: int) -> None:  # type: ignore[no-untyped-def]
+    """Persist snapshot paging cursor after successful sync (or reset for full rescan)."""
     with con.cursor() as cur:
         cur.execute(
             """
-            UPDATE etl_state
-            SET messages_snapshot_high_egmid = %s, updated_at = NOW()
-            WHERE pipeline = %s
+            INSERT INTO etl_state (pipeline, last_log_id, messages_snapshot_high_egmid, updated_at)
+            VALUES (%s, 0, %s, NOW())
+            ON CONFLICT (pipeline) DO UPDATE
+            SET messages_snapshot_high_egmid = EXCLUDED.messages_snapshot_high_egmid, updated_at = NOW();
             """,
-            (int(high_egmid), pipeline),
+            (pipeline, int(high_egmid)),
         )
 
 
@@ -215,8 +218,11 @@ def fetch_etl_watermark_row(con, pipeline: str) -> dict[str, int] | None:  # typ
     with con.cursor() as cur:
         cur.execute(
             """
-            SELECT last_log_id, COALESCE(last_egmid, 0), COALESCE(source_max_egmid, 0),
-                   COALESCE(messages_snapshot_high_egmid, 0)
+            SELECT
+              last_log_id,
+              COALESCE(last_egmid, 0),
+              COALESCE(source_max_egmid, 0),
+              COALESCE(messages_snapshot_high_egmid, 0)
             FROM etl_state
             WHERE pipeline = %s
             LIMIT 1
@@ -226,12 +232,12 @@ def fetch_etl_watermark_row(con, pipeline: str) -> dict[str, int] | None:  # typ
         row = cur.fetchone()
     if not row:
         return None
-    lid_raw, eg_raw, src_raw, msg_snap_raw = row
+    lid_raw, eg_raw, src_raw, snap_raw = row
     return {
         "last_log_id": int(lid_raw) if lid_raw is not None else 0,
         "last_egmid": int(eg_raw) if eg_raw is not None else 0,
         "source_max_egmid": int(src_raw) if src_raw is not None else 0,
-        "messages_snapshot_high_egmid": int(msg_snap_raw) if msg_snap_raw is not None else 0,
+        "messages_snapshot_high_egmid": int(snap_raw) if snap_raw is not None else 0,
     }
 
 
@@ -263,10 +269,15 @@ def set_etl_source_peaks(
     max_egmid: Any,
     max_licenses_modifydate: Any,
 ) -> None:  # type: ignore[no-untyped-def]
-    """Записать в etl_state source_max_egmid (пик EGMID по прошлому проходу журнала) и пик MODIFYDATE лицензий."""
+    """Записать в etl_state source_max_egmid и пик MODIFYDATE лицензий.
+
+    ``max_egmid=None`` — явно обнулить source_max_egmid (NULL), если нужно убрать устаревший пик.
+    """
     sets: list[str] = []
     params: list[Any] = []
-    if max_egmid is not None:
+    if max_egmid is None:
+        sets.append("source_max_egmid = NULL")
+    else:
         sets.append("source_max_egmid = %s")
         params.append(int(max_egmid))
     if max_licenses_modifydate is not None:
@@ -867,7 +878,6 @@ def fetch_pg_sync_snapshot(con, pipeline: str) -> dict[str, Any]:  # type: ignor
                 last_log_id,
                 COALESCE(last_egmid, 0),
                 COALESCE(source_max_egmid, 0),
-                COALESCE(messages_snapshot_high_egmid, 0),
                 source_max_licenses_modifydate
             FROM etl_state
             WHERE pipeline = %s
@@ -896,14 +906,12 @@ def fetch_pg_sync_snapshot(con, pipeline: str) -> dict[str, Any]:  # type: ignor
         return {
             "log_id": None,
             "egmid": facts_only if facts_only > 0 else None,
-            "messages_snapshot_high_egmid": None,
             "licenses_modifydate": None,
         }
-    lid_raw, last_egmid_raw, src_eg_raw, msg_snap_raw, lic_raw = row
+    lid_raw, last_egmid_raw, src_eg_raw, lic_raw = row
     log_id = int(lid_raw) if lid_raw is not None else None
     last_eg = int(last_egmid_raw) if last_egmid_raw is not None else 0
     src_eg = int(src_eg_raw) if src_eg_raw is not None else 0
-    msg_snap = int(msg_snap_raw) if msg_snap_raw is not None else 0
     eg_display = max(last_eg, src_eg)
     facts_max_eg = 0
     try:
@@ -927,7 +935,6 @@ def fetch_pg_sync_snapshot(con, pipeline: str) -> dict[str, Any]:  # type: ignor
     return {
         "log_id": log_id,
         "egmid": eg_display,
-        "messages_snapshot_high_egmid": msg_snap,
         "licenses_modifydate": lic_iso,
     }
 

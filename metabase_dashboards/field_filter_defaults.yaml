@@ -26,6 +26,40 @@ possible_identifier_filters:
       [[AND NULLIF(TRIM(v."LOGID журнала EXCHANGELOG"), '') = {{log_id}}]]
     primary_table: v_egisz_transactions_enriched_ui
   egmid:
+# Универсальные фильтры-идентификаторы: используются как text-переменные (string/=) в native SQL и
+# добавляются на дашборды (01–06) для “поиска” по ключевым реквизитам, когда Metabase UI не даёт
+# фильтрацию по произвольной колонке результата.
+universal_identifier_filters:
+  local_uid:
+    dashboard_slug: local_uid_filter
+    template_tag: local_uid
+    widget: string/=
+    notes: localUid СЭМД (DOCUMENTID / localUid из SOAP)
+  relates_to:
+    dashboard_slug: relates_to_filter
+    template_tag: relates_to
+    widget: string/=
+    notes: relatesToMessage / "Связанное сообщение"
+  emdr_id:
+    dashboard_slug: emdr_id_filter
+    template_tag: emdr_id
+    widget: string/=
+    notes: emdrId / "Рег. номер РЭМД"
+  status:
+    dashboard_slug: status_filter
+    template_tag: status
+    widget: string/=
+    notes: статус факта (success/error/unknown)
+  log_id:
+    dashboard_slug: log_id_filter
+    template_tag: log_id
+    widget: string/=
+    notes: EXCHANGELOG.LOGID (идентификатор строки журнала)
+  egmid:
+    dashboard_slug: egmid_filter
+    template_tag: egmid
+    widget: string/=
+    notes: EGISZ_MESSAGES.EGMID (ключ записи сообщения, РЭМД)
     dashboard_slug: egmid_filter
     template_tag: egmid
     widget: string/=

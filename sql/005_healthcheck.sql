@@ -158,7 +158,7 @@ FROM agg a CROSS JOIN params p;
 
 COMMENT ON VIEW v_health_signals IS 'Пять сигналов healthcheck (error_rate_high, unknown_high, parse_errors_burst, queue_red_24h, cursor_stale) с уровнями green/yellow/red.';
 
--- Healthcheck прокси-БД: сводка по staging исходящих; last_log_id и пик EGMID из etl_state (без MAX(EGMID) по сообщениям в Firebird).
+-- Healthcheck прокси-БД: сводка по staging исходящих; last_log_id и курсор EGMID снимка сообщений из etl_state (без MAX(EGMID) по сообщениям в Firebird).
 CREATE OR REPLACE VIEW v_health_proxy_db AS
 SELECT
     (SELECT COUNT(*)::bigint FROM stg_egisz_outbound_documents) AS stg_outbound_total,
@@ -172,10 +172,10 @@ SELECT
     (SELECT COUNT(DISTINCT local_uid_semd)::bigint FROM v_rpt_documents_no_response WHERE sent_at < NOW() - INTERVAL '24 hours') AS pending_older_24h,
     (SELECT MAX(updated_at) FROM etl_state) AS etl_last_update,
     (SELECT last_log_id FROM etl_state WHERE pipeline = 'firebird_exchangelog') AS etl_last_log_id,
-    (SELECT GREATEST(COALESCE(last_egmid, 0), COALESCE(source_max_egmid, 0))
+    (SELECT COALESCE(last_egmid, 0)
      FROM etl_state WHERE pipeline = 'firebird_exchangelog' LIMIT 1) AS etl_cursor_egmid;
 
-COMMENT ON VIEW v_health_proxy_db IS 'Сводка по staging исходящих: очередь, max EGMID в staging, etl_state.last_log_id и GREATEST(last_egmid, source_max_egmid) как пик EGMID ETL (не paging снимка stg_egisz_messages_journal).';
+COMMENT ON VIEW v_health_proxy_db IS 'Сводка по staging исходящих: очередь, max EGMID в staging, etl_state.last_log_id и etl_state.last_egmid как курсор выгрузки снимка EGISZ_MESSAGES.';
 
 -- UI-обёртки с русскими подписями для Metabase native-вопросов.
 CREATE OR REPLACE VIEW v_health_by_clinic_ui AS
@@ -223,7 +223,7 @@ SELECT
     pending_older_24h    AS "Очередь > 24ч",
     etl_last_update      AS "Последний апдейт курсора",
     etl_last_log_id::text      AS "etl_state.last_log_id",
-    etl_cursor_egmid::text     AS "etl_state max(last_egmid, source_max_egmid)"
+    etl_cursor_egmid::text     AS "etl_state.last_egmid (курсор EGISZ_MESSAGES)"
 FROM v_health_proxy_db;
 
 COMMENT ON VIEW v_health_proxy_db_ui IS 'UI-обёртка v_health_proxy_db для дашборда 11 (карточка «Прокси-БД»). Числовые идентификаторы — TEXT для Metabase.';
@@ -245,5 +245,5 @@ INSERT INTO dim_column_display_labels (source_object, source_column, display_lab
     ('v_health_proxy_db', 'stg_outbound_total', 'Staging: всего строк'),
     ('v_health_proxy_db', 'pending_older_24h', 'Очередь > 24ч'),
     ('v_health_proxy_db', 'etl_last_update', 'Последний апдейт курсора'),
-    ('v_health_proxy_db', 'etl_cursor_egmid', 'max(last_egmid, source_max_egmid) в etl_state')
+    ('v_health_proxy_db', 'etl_cursor_egmid', 'etl_state.last_egmid (курсор EGISZ_MESSAGES)')
 ON CONFLICT (source_object, source_column) DO UPDATE SET display_label_ru = EXCLUDED.display_label_ru;

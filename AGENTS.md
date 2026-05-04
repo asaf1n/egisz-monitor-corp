@@ -2,7 +2,7 @@
 
 Репозиторий: **EGISZ Monitor Corp** — ETL и витрина для мониторинга обмена МИС ↔ ЕГИЗС/РЭМД. Доменная логика парсинга, статусов, отчётов и поиска аномалий для аналитиков описана в **`.cursorrules`** (бизнес-контекст интеграции). Здесь — структура кода и инфраструктуры для правок функционала.
 
-**После существенных изменений** (парсер, `sql/`, дашборды, K8s, `start.ps1`, Airflow DAG) **обновляй этот файл и `.cursorrules`**; операторские сценарии и сверка данных — в **`README.md`**. Для README держи ту же глубину: правки в логике текущих разделов, плюс навигация «слой за слоем» и сквозной поток. **Тон и ограничения формулировок** — в разделе [«Стиль документации»](#стиль-документации) ниже; для агента в Cursor — `.cursor/rules/documentation-style.mdc`.
+**После существенных изменений** (парсер, `sql/`, дашборды, K8s, `start.ps1`, Airflow DAG) **обновляй этот файл и `.cursorrules`**. `README.md` — витрина прототипа и навигация по дашбордам для сотрудников; технический контекст (ETL, курсоры, схема, инварианты, выкат) — здесь и в `.cursorrules`. **Тон и ограничения формулировок** — в разделе [«Стиль документации»](#стиль-документации) ниже; для агента в Cursor — `.cursor/rules/documentation-style.mdc`.
 
 **Конец ответа в Cursor:** в **каждом** сообщении — отдельный **блок копирования** с **одной** конкретной командой **`.\start.ps1 -Action …`**, которую пользователь запускает, **чтобы применить внесённые в репозиторий правки к образам и подам** (это не описание последнего шага диалога и не замена выката). Без плейсхолдеров `<…>`. **`test`** в этот блок не ставить (pytest не обновляет образы). Детали — **`.cursorrules`** (раздел «Команда применения изменений»).
 
@@ -12,7 +12,7 @@
 |------|------------|
 | `pyproject.toml` | Пакет `egisz-monitor-corp`, зависимости; CLI: **`egisz-corp`** и **`egisz-monitor`** (оба → `egisz_monitor_corp.cli`) |
 | `start.ps1` | Локальный стек в K8s (**namespace `egisz-monitor`**): по умолчанию **`apply`** / **`start`**; **`deploy`** — оба образа + DROP/CREATE БД приложения Metabase; **`reset-deploy`**, **`restart-metabase`** / **`restart-web`**, **`verify`** (port-forward + self-test Firebird, без `verify-corp-stack`), **`metabase-provision-local`**, **`test`** — см. **`docs/BI_EGISZ_INFOKLINIKA_AUDIT.md`** [§8](docs/BI_EGISZ_INFOKLINIKA_AUDIT.md#k8s-local) и **`README.md`** (локальная инфраструктура). `apply`/`deploy`/`reset-deploy`: после in-cluster smoke **нет** вызова `verify-corp-stack.sh`. Пересборка conf-ui без кэша + apply: **`.\start.ps1 -Action apply -DockerNoCache`** или **`.\scripts\apply-local-rebuild.ps1`**. Сброс только app DB Metabase без удаления namespace: **`deploy`** / **`reset-deploy`** или env **`METABASE_FORCE_PROVISION`**. Скрипт в **UTF-8 с BOM**. |
-| `README.md` | Обзор продукта, ETL, маппинг полей, дашборды Metabase, ручная диагностика синка |
+| `README.md` | Витрина прототипа: что это за проект и какие дашборды доступны разным ролям |
 | `.cursor/rules/documentation-style.mdc` | Стиль текстов для ИИ-агента Cursor (`alwaysApply`) — отсылает к **AGENTS.md** § «Стиль документации» |
 | `.cursorrules` | Парсинг SOAP/XML, витрина, отчёты, критичные статусы и сигналы для мониторинга интеграции |
 | `AGENTS.md` | Этот файл |
@@ -22,7 +22,7 @@
 | Модуль | Роль |
 |--------|------|
 | `cli.py` | CLI: `sync`, `apply-schema`, проверки БД |
-| `etl.py` | **`run_sync`**: справочники первыми; чередование снимка **`EGISZ_MESSAGES`** → **`stg_egisz_messages_journal`** (FB→PG) и **EXCHANGELOG** по **`LOGID`**; при **`sync_window_days` <= 0** — без окна по **`LOGDATE`**/**`CREATEDATE`** в Firebird (все записи за курсорами) и полный пересъём staging снимка (**TRUNCATE** + сброс **`messages_snapshot_high_egmid`**); сопоставление **`MSGID`** в PostgreSQL; UPSERT фактов; outbound по **`DOCUMENTID`**/**`CREATEDATE`**; прогресс **`etl_last_egmid`**; без COUNT журнала в Firebird; `pg_try_advisory_lock` |
+| `etl.py` | **`run_sync`**: справочники первыми; чередование снимка **`EGISZ_MESSAGES`** → **`stg_egisz_messages_journal`** (FB→PG) и **EXCHANGELOG** по **`LOGID`**; курсоры: **`LOGID > etl_state.last_log_id`**, **`EGMID > etl_state.last_egmid`**; при **`sync_window_days` <= 0** — без окна по **`LOGDATE`**/**`CREATEDATE`** в Firebird и полный пересъём staging снимка (**TRUNCATE** + сброс **`last_egmid`** в 0); сопоставление **`MSGID`** в PostgreSQL; UPSERT фактов; outbound по **`DOCUMENTID`**/**`CREATEDATE`**; без COUNT журнала в Firebird; `pg_try_advisory_lock` |
 | `parser.py` | **`EgiszMonitorParser`**: разбор MSGTEXT (SOAP/XML), `relates_to_id`, `status`, `errors_json`, `localUid`, `resolve_clinic` |
 | `sql_util.py` | SQL к Firebird: **EXCHANGELOG** без JOIN (пагинация по **`LOGID`**); **EGISZ_MESSAGES** для снимка журнала (FIRST/SKIP, окно **`CREATEDATE`**, непустой **`DOCUMENTID`**); исходящие для staging; диагностический **`MSGID IN`** |
 | `pg_warehouse.py` | Подключение PG, применение `sql/*.sql`, `etl_state`, staging исходящих, UPSERT факта чанками / измерений |
@@ -38,7 +38,7 @@
 | Файл | Содержимое |
 |------|------------|
 | `001_schema.sql` | Таблицы факта/измерений, `stg_jpersons_import`, `stg_egisz_licenses_import`, **`stg_egisz_messages_journal`**, `stg_egisz_outbound_documents`, представления `v_*`, **`v_stg_parse_errors_by_document`** (ключ документа для ошибок парсинга), функции `egisz_friendly_*`, `dim_column_display_labels` |
-| `002_etl_state.sql` | Таблица `etl_state`: `last_log_id`; `last_egmid` (журнал); **`messages_snapshot_high_egmid`** (инкремент снимка **EGISZ_MESSAGES**); пики FB |
+| `002_etl_state.sql` | Таблица `etl_state`: `last_log_id` (курсор EXCHANGELOG); `last_egmid` (курсор снимка EGISZ_MESSAGES); пики FB (`source_max_*`) |
 | `005_healthcheck.sql` | Healthcheck-витрина: `v_health_by_clinic` (агрегаты за 24ч по **уникальным** `relates_to_id`, очередь по **уникальным** `local_uid_semd`), `v_health_signals` (5 сигналов), `v_health_proxy_db` (сводка staging исходящих + курсор ETL) + UI-обёртки `*_ui` для блока healthcheck в `02_service.json` |
 
 В каталоге `sql/` хранятся **только** DDL/витрина для Job `egisz-reports-schema-init` и ETL; **не** добавлять сюда одноразовые диагностические запросы для DBeaver — операторская сверка курсора и объёмов описана в **`README.md`** (раздел «Ручная диагностика синка»).

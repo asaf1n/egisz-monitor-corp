@@ -30,8 +30,8 @@ etl:
   batch_size: 500
   pipeline_name: "firebird_exchangelog"
   # Окно по датам в Firebird: EXCHANGELOG.LOGDATE и EGISZ_MESSAGES.CREATEDATE (DATEADD -N DAY TO CURRENT_TIMESTAMP).
-  # 0 или отрицательное — синхронизация по всем записям (без предиката по дате) для журнала, снимка сообщений и исходящих;
-  # для stg_egisz_messages_journal — TRUNCATE + сброс messages_snapshot_high_egmid, затем полный проход EGISZ_MESSAGES в FB.
+  # 0 — синхронизация по всем записям (без предиката по дате) по курсорам: EXCHANGELOG по LOGID, EGISZ_MESSAGES по EGMID.
+  # < 0 — полная синхронизация "с начала": сброс курсоров etl_state (LOGID/EGMID) и полный проход EXCHANGELOG + EGISZ_MESSAGES постранично, без окна по датам.
   sync_window_days: 30
   # Игнорируется пайплайном: журнал всегда строится из встроенного SELECT по EXCHANGELOG.LOGID.
   source_query: null

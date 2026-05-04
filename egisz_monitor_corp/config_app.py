@@ -274,8 +274,8 @@ PAGE = """
                   <input name="etl_batch" type="number" value="{{ etl.batch_size }}" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
                 </label>
                 <label class="block min-w-0 max-w-full">
-                  <span class="block truncate font-mono text-[10px] uppercase tracking-[0.12em] text-[#9CA3AF] lg:text-[10px] lg:tracking-[0.14em] lg:text-[#4B5563]" title="sync_window_days: EXCHANGELOG (LOGDATE), EGISZ_MESSAGES/исходящие (CREATEDATE); 0 = без фильтра по датам в Firebird для всех потоков + TRUNCATE stg_egisz_messages_journal и сброс messages_snapshot_high_egmid">sync days</span>
-                  <input name="etl_sync_days" type="number" value="{{ etl.sync_window_days }}" title="0: синхронизация по всем записям (без окна по дате) для журнала и сообщений; полный пересъём снимка EGISZ_MESSAGES в staging" class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
+                  <span class="block truncate font-mono text-[10px] uppercase tracking-[0.12em] text-[#9CA3AF] lg:text-[10px] lg:tracking-[0.14em] lg:text-[#4B5563]" title="sync_window_days: окно по датам в Firebird для EXCHANGELOG (LOGDATE) и EGISZ_MESSAGES/исходящих (CREATEDATE). 0 — без фильтра по датам (инкрементально по курсорам LOGID/EGMID). < 0 — полная синхронизация «с начала»: сброс курсоров и полный проход EXCHANGELOG + EGISZ_MESSAGES постранично, без окна по датам.">sync days</span>
+                  <input name="etl_sync_days" type="number" value="{{ etl.sync_window_days }}" title="0: без окна по дате (LOGID/EGMID курсоры). < 0: полная синхронизация «с начала» (сброс курсоров, полный проход EXCHANGELOG+EGISZ_MESSAGES)." class="cfg-in mt-1.5 w-full rounded-lg bg-[#121826] border border-[#1B2940] font-mono tabular-nums text-white outline-none transition focus:border-[#509EE3] focus:ring-1 focus:ring-[#509EE3]"/>
                 </label>
               </div>
               <div class="mt-3 flex min-h-[2.75rem] w-full shrink-0 flex-wrap items-center gap-3">
@@ -298,7 +298,7 @@ PAGE = """
                   </button>
                 </div>
                 <div class="flex min-w-0 items-baseline gap-2 py-0">
-                  <span class="shrink-0 max-w-[38%] truncate text-xs font-medium text-[#9CA3AF] sm:text-sm lg:text-xs" title="etl_state.messages_snapshot_high_egmid — курсор выгрузки снимка EGISZ_MESSAGES (последний EGMID, до которого дошла постраничная выгрузка)">EGMID:</span>
+                  <span class="shrink-0 max-w-[38%] truncate text-xs font-medium text-[#9CA3AF] sm:text-sm lg:text-xs" title="etl_state.last_egmid — курсор инкрементальной выгрузки EGISZ_MESSAGES: читаем записи с EGMID > last_egmid">EGMID:</span>
                   <code id="pgSnapEgmid" class="snap-val min-w-0 flex-1 truncate text-[#E5E7EB] font-mono text-sm sm:text-[15px]" data-raw="" title="">—</code>
                   <button type="button" class="pg-snap-copy inline-flex min-h-[2.5rem] min-w-[2.5rem] shrink-0 items-center justify-center rounded border border-[#2D3F5E] bg-[#0F1522] p-2 text-[#509EE3] hover:bg-[#1B2940] sm:min-h-0 sm:min-w-0 sm:p-1" data-copy="pgSnapEgmid" title="Копировать" aria-label="Копировать">
                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
@@ -419,24 +419,26 @@ PAGE = """
     'relative rounded-md border min-h-[2.75rem] overflow-hidden text-xs sm:text-sm font-mono transition-[background-color,border-color,color] duration-150';
   function etlPhaseLabelRu(phase) {
     const m = {
-      pipeline_bootstrap: 'Подготовка ETL (схема PostgreSQL, lock)',
-      references_jpersons_export: 'JPERSONS: выгрузка из Firebird',
-      references_licenses_export: 'EGISZ_LICENSES: выгрузка из Firebird',
-      references_pg_staging: 'Справочники: запись staging в PostgreSQL',
-      references_merge_dim: 'Справочники: merge dim_clinics из staging',
-      journal_messages_export: 'EGISZ_MESSAGES: выгрузка из Firebird в PostgreSQL (staging журнала)',
-      counting: 'Перед журналом: last_log_id и etl_state.last_egmid (COUNT журнала в Firebird не выполняется)',
-      exchangelog_ready: 'Журнал EXCHANGELOG: подготовка к инкременту по LOGID',
-      exchangelog_export: 'Чтение пакета EXCHANGELOG из Firebird',
-      exchangelog_parse: 'Парсинг пакета журнала',
-      parsing: 'Разбор строк журнала (пакет)',
-      page_done: 'Пакет журнала обработан',
-      exchangelog_done: 'Журнал — завершено',
-      outbound_firebird: 'Исходящие документы: запрос к Firebird',
-      outbound_fetch: 'Исходящие документы: выборка',
-      outbound_parse: 'Исходящие документы: разбор',
-      outbound_postgres: 'Исходящие документы: запись в PostgreSQL',
-      outbound_done: 'Исходящие документы: готово',
+      pipeline_bootstrap: 'Подготовка ETL',
+      references_jpersons_export: 'JPERSONS — этап 1/2: выгрузка из Firebird',
+      references_licenses_export: 'EGISZ_LICENSES — этап 1/2: выгрузка из Firebird',
+      references_pg_staging: 'Справочники — этап 1/2: запись staging в PostgreSQL',
+      references_merge_dim: 'Справочники — этап 2/2: merge dim_clinics',
+      journal_messages_export_firebird: 'EGISZ_MESSAGES — этап 1/3: чтение пакета (Firebird)',
+      journal_messages_export_postgres: 'EGISZ_MESSAGES — этап 2/3: запись в PostgreSQL (staging)',
+      journal_messages_export_done: 'EGISZ_MESSAGES — этап 3/3: пакет зафиксирован (commit/EGMID)',
+      counting: 'Журнал EXCHANGELOG — подготовка: курсоры etl_state',
+      exchangelog_ready: 'Журнал EXCHANGELOG — подготовка к инкременту',
+      exchangelog_export: 'Журнал EXCHANGELOG — этап 1/3: чтение пакета (Firebird)',
+      exchangelog_parse: 'Журнал EXCHANGELOG — этап 2/3: обработка пакета',
+      parsing: 'Журнал EXCHANGELOG — этап 2/3: обработка пакета (прогресс)',
+      page_done: 'Журнал EXCHANGELOG — этап 3/3: пакет зафиксирован (курсоры/commit)',
+      exchangelog_done: 'Журнал EXCHANGELOG — завершено',
+      outbound_firebird: 'Исходящие документы — этап 1/3: запрос к Firebird',
+      outbound_fetch: 'Исходящие документы — этап 1/3: выборка',
+      outbound_parse: 'Исходящие документы — этап 2/3: подготовка staging',
+      outbound_postgres: 'Исходящие документы — этап 3/3: запись в PostgreSQL',
+      outbound_done: 'Исходящие документы — завершено',
       sync_failed: 'Синхронизация: ошибка или прерывание (снимок курсоров etl_state)',
       stopped_by_user: 'Синхронизация остановлена по запросу (снимок курсоров etl_state)',
     };
@@ -457,11 +459,16 @@ PAGE = """
     const stag = Number(p.staging_errors);
     const logid = p.cursor_log_id;
     const egm = p.etl_last_egmid;
-    const br = p.messages_batch_rows;
+    const br = Number(p.messages_batch_rows);
     const jb = Number(p.journal_batch_rows);
     const cache = p.messages_msgid_cache_size;
+    const docs = Number(p.documents_unique);
+    const docsLu = Number(p.documents_localuid_unique);
+    const docsEmdr = Number(p.documents_emdrid_unique);
     const outL = Number(p.outbound_loaded);
     const outT = Number(p.outbound_total);
+    const outLD = Number(p.outbound_loaded_docs);
+    const outTD = Number(p.outbound_total_docs);
     const srcEg = p.source_max_egmid;
     const wnote = p.watermark_note != null ? String(p.watermark_note).trim() : '';
     const diag = p.diag_error != null ? String(p.diag_error).trim() : '';
@@ -483,20 +490,24 @@ PAGE = """
       if (Number.isFinite(lo) && lo >= 0) parts.push('строк ' + fmtIntRu(lo));
       const title =
         ph === 'references_jpersons_export'
-          ? 'JPERSONS: выгрузка из Firebird'
-          : 'EGISZ_LICENSES: выгрузка из Firebird';
+          ? 'JPERSONS — этап 1/2: выгрузка из Firebird'
+          : 'EGISZ_LICENSES — этап 1/2: выгрузка из Firebird';
       return { title: title, detail: parts.join(' · ') };
     }
-    if (ph === 'journal_messages_export') {
+    if (ph === 'journal_messages_export_firebird' || ph === 'journal_messages_export_postgres' || ph === 'journal_messages_export_done') {
       const parts = [];
-      if (Number.isFinite(lo) && lo > 0) parts.push('загружено строк ' + fmtIntRu(lo));
-      if (Number.isFinite(page) && page > 0) parts.push('страница ' + fmtIntRu(page));
-      const fbWait = Number(p.firebird_elapsed_sec);
-      if (Number.isFinite(fbWait) && fbWait > 0) parts.push(fmtIntRu(fbWait) + ' с');
-      return {
-        title: 'EGISZ_MESSAGES: выгрузка из Firebird в PostgreSQL',
-        detail: parts.join(' · '),
-      };
+      if (Number.isFinite(page) && page > 0) parts.push('пакет ' + fmtIntRu(page));
+      if (Number.isFinite(jb) && jb > 0) parts.push('лимит ' + fmtIntRu(jb));
+      if (Number.isFinite(lo) && lo >= 0) parts.push('строк в staging ' + fmtIntRu(lo));
+      if (egm != null && egm !== '') parts.push('last_egmid ' + String(egm));
+      if (logid != null && logid !== '') parts.push('last_log_id ' + String(logid));
+      if (ph === 'journal_messages_export_firebird') {
+        return { title: 'EGISZ_MESSAGES — этап 1/3: чтение пакета (Firebird)', detail: parts.join(' · ') };
+      }
+      if (ph === 'journal_messages_export_postgres') {
+        return { title: 'EGISZ_MESSAGES — этап 2/3: запись в PostgreSQL (staging)', detail: parts.join(' · ') };
+      }
+      return { title: 'EGISZ_MESSAGES — этап 3/3: пакет зафиксирован (commit/EGMID)', detail: parts.join(' · ') };
     }
     if (ph === 'parsing') {
       const parts = [];
@@ -504,8 +515,9 @@ PAGE = """
       if (Number.isFinite(jb) && jb > 0) parts.push('строк в пакете ' + fmtIntRu(jb));
       if (Number.isFinite(lo) && lo > 0) parts.push('строк журнала обработано ' + fmtIntRu(lo));
       if (Number.isFinite(facts) && facts >= 0) parts.push('фактов ' + fmtIntRu(facts));
+      if (Number.isFinite(docs) && docs > 0) parts.push('документов (uniq) ' + fmtIntRu(docs));
       if (logid != null && logid !== '') parts.push('LOGID ' + String(logid));
-      return { title: 'EXCHANGELOG: разбор строк пакета (прогресс)', detail: parts.join(' · ') };
+      return { title: 'Журнал EXCHANGELOG — этап 2/3: обработка пакета (прогресс)', detail: parts.join(' · ') };
     }
     if (ph === 'exchangelog_export' || ph === 'exchangelog_parse' || ph === 'page_done') {
       const segs = [];
@@ -515,10 +527,15 @@ PAGE = """
       if (Number.isFinite(lo) && lo > 0) segs.push('всего обработано журнала ' + fmtIntRu(lo));
       if (logid != null && logid !== '') segs.push('LOGID курсор ' + String(logid));
       if (Number.isFinite(facts) && facts >= 0) segs.push('фактов ' + fmtIntRu(facts));
+      if (Number.isFinite(docs) && docs > 0) segs.push('документов (uniq) ' + fmtIntRu(docs));
       if (Number.isFinite(stag) && stag > 0) segs.push('ошибок staging ' + fmtIntRu(stag));
-      const verb =
-        ph === 'exchangelog_export' ? 'чтение пакета' : ph === 'exchangelog_parse' ? 'разбор пакета' : 'пакет обработан';
-      return { title: 'EXCHANGELOG: ' + verb, detail: segs.join(', ') };
+      if (ph === 'exchangelog_export') {
+        return { title: 'Журнал EXCHANGELOG — этап 1/3: чтение пакета (Firebird)', detail: segs.join(', ') };
+      }
+      if (ph === 'exchangelog_parse') {
+        return { title: 'Журнал EXCHANGELOG — этап 2/3: обработка пакета', detail: segs.join(', ') };
+      }
+      return { title: 'Журнал EXCHANGELOG — этап 3/3: пакет зафиксирован (курсоры/commit)', detail: segs.join(', ') };
     }
     if (ph === 'exchangelog_ready') {
       const parts = [];
@@ -536,7 +553,13 @@ PAGE = """
     }
     if (ph.indexOf('outbound_') === 0) {
       const parts = [];
-      if (Number.isFinite(outT) && outT > 0 && Number.isFinite(outL)) parts.push('документов ' + fmtIntRu(outL) + ' / ' + fmtIntRu(outT));
+      if (Number.isFinite(outTD) && outTD > 0 && Number.isFinite(outLD)) {
+        parts.push('документов (uniq) ' + fmtIntRu(outLD) + ' / ' + fmtIntRu(outTD));
+      } else if (Number.isFinite(outT) && outT > 0 && Number.isFinite(outL)) {
+        parts.push('строк ' + fmtIntRu(outL) + ' / ' + fmtIntRu(outT));
+      }
+      if (Number.isFinite(docsLu) && docsLu > 0) parts.push('localUid uniq ' + fmtIntRu(docsLu));
+      if (Number.isFinite(docsEmdr) && docsEmdr > 0) parts.push('emdrId uniq ' + fmtIntRu(docsEmdr));
       if (Number.isFinite(facts) && facts >= 0 && ph !== 'outbound_fetch') parts.push('staging ' + fmtIntRu(facts));
       return { title: 'Исходящие документы', detail: parts.join(' · ') };
     }
@@ -545,7 +568,7 @@ PAGE = """
       parts.push('без COUNT по журналу в Firebird');
       if (egm != null && egm !== '') parts.push('last_egmid ' + String(egm));
       if (logid != null && logid !== '') parts.push('last_log_id ' + String(logid));
-      return { title: 'Перед инкрементом журнала', detail: parts.join(' · ') };
+      return { title: 'Журнал EXCHANGELOG — подготовка: курсоры etl_state', detail: parts.join(' · ') };
     }
     const short = etlPhaseLabelRu(ph);
     return { title: short || ph, detail: '' };
@@ -571,6 +594,11 @@ PAGE = """
     if (ph === 'exchangelog_done') {
       return { indeterminate: false, pct: 100, label: '100%' };
     }
+    if (ph === 'journal_messages_export_firebird' || ph === 'journal_messages_export_postgres' || ph === 'journal_messages_export_done') {
+      const lo = Number(p.loaded_rows) || 0;
+      const label = lo > 0 ? (fmtIntRu(lo) || '…') : '…';
+      return { indeterminate: true, pct: null, label: label + ' msg' };
+    }
     const tot = Number(p.total_rows);
     const lo = Number(p.loaded_rows) || 0;
     const journalPh =
@@ -583,13 +611,14 @@ PAGE = """
       return { indeterminate: false, pct, label: pct + '%' };
     }
     if (journalPh) {
-      return { indeterminate: true, pct: null, label: '…' };
+      const label = lo > 0 ? (fmtIntRu(lo) || '…') : '…';
+      return { indeterminate: true, pct: null, label: label };
     }
     if (ph === 'outbound_firebird') {
       return { indeterminate: true, pct: null, label: '…' };
     }
-    const ot = Number(p.outbound_total) || 0;
-    const ol = Number(p.outbound_loaded) || 0;
+    const ot = Number(p.outbound_total_docs != null ? p.outbound_total_docs : p.outbound_total) || 0;
+    const ol = Number(p.outbound_loaded_docs != null ? p.outbound_loaded_docs : p.outbound_loaded) || 0;
     if (ph.indexOf('outbound_') === 0 && ph !== 'outbound_firebird') {
       if (ph === 'outbound_done') {
         return { indeterminate: false, pct: 100, label: '100%' };
@@ -661,6 +690,27 @@ PAGE = """
       const c = etlProgressLogConcise(p);
       if (c.title) lines.push(c.title);
       if (c.detail) lines.push(c.detail);
+    }
+    // Показываем быстрые фазы, которые могли "пролететь" между pollSync (особенно EXCHANGELOG).
+    const ev = j && Array.isArray(j.progress_events) ? j.progress_events : null;
+    if (ev && ev.length) {
+      const tail = ev.slice(Math.max(0, ev.length - 12));
+      const out = [];
+      for (let i = tail.length - 1; i >= 0; i -= 1) {
+        const e = tail[i] || {};
+        const ts = e.ts != null ? String(e.ts) : '';
+        const payload = e.payload && typeof e.payload === 'object' ? e.payload : null;
+        const ph = payload && payload.phase != null ? String(payload.phase) : (e.phase != null ? String(e.phase) : '');
+        if (!ph) continue;
+        const c = payload ? etlProgressLogConcise(payload) : { title: etlPhaseLabelRu(ph) || ph, detail: '' };
+        const head = (ts ? (ts + ' — ') : '') + ('[' + ph + '] ') + (c.title || (etlPhaseLabelRu(ph) || ph));
+        out.push(head + (c.detail ? (' · ' + c.detail) : ''));
+      }
+      if (out.length) {
+        lines.push('—');
+        lines.push('Последние события прогресса:');
+        lines.push(out.join(String.fromCharCode(10)));
+      }
     }
     if (msg && (/Предупреждение/i.test(msg) || !p)) lines.push(msg);
     return lines.filter(Boolean).join(String.fromCharCode(10));
@@ -829,7 +879,7 @@ PAGE = """
         logEl.setAttribute('data-raw', '');
         logEl.title = '';
       }
-      const egStr = j.messages_snapshot_high_egmid != null ? String(j.messages_snapshot_high_egmid) : null;
+      const egStr = j.etl_last_egmid != null ? String(j.etl_last_egmid) : null;
       if (egStr != null && egStr !== '') {
         const en = Number(egStr);
         egEl.textContent = Number.isFinite(en) ? en.toLocaleString('ru-RU') : egStr;
@@ -1600,7 +1650,6 @@ def _merged_yaml_dict_from_form(p: Path, form: Mapping[str, Any]) -> dict[str, A
 
     old["etl"]["batch_size"] = int(form.get("etl_batch") or 500)
     old["etl"]["sync_window_days"] = int(form.get("etl_sync_days") or 30)
-    old["etl"].pop("messages_snapshot_full_refresh", None)
 
     old["auto_sync"]["enabled"] = bool(form.get("auto_sync_enabled"))
     cron_in = str(form.get("auto_sync_schedule_cron", "") or "").strip()

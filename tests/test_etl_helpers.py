@@ -50,8 +50,8 @@ def _cfg(sync_window_days: int = 30, source_query: str | None = None) -> CorpApp
     )
 
 
-def test_messages_journal_full_rescan_when_sync_window_not_positive() -> None:
-    assert _messages_journal_full_rescan(_cfg(sync_window_days=0)) is True
+def test_messages_journal_full_rescan_when_sync_window_negative() -> None:
+    assert _messages_journal_full_rescan(_cfg(sync_window_days=0)) is False
     assert _messages_journal_full_rescan(_cfg(sync_window_days=-1)) is True
     assert _messages_journal_full_rescan(_cfg(sync_window_days=30)) is False
 

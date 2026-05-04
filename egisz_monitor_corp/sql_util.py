@@ -68,7 +68,8 @@ def _clamp_fb_first_limit(limit: int) -> int:
 def egisz_messages_documentid_filled_predicate(*, table_alias: str = "m") -> str:
     """Строки с привязкой к документу СЭМД; без этого — сервисные/служебные сообщения в контуре."""
     a = table_alias.strip() or "m"
-    return f"{a}.DOCUMENTID IS NOT NULL AND TRIM({a}.DOCUMENTID) <> ''"
+    # Без TRIM(...) в предикате: на больших таблицах это часто мешает использованию индекса по DOCUMENTID.
+    return f"{a}.DOCUMENTID IS NOT NULL AND {a}.DOCUMENTID <> ''"
 
 
 def egisz_messages_createdate_window_sql(*, sync_window_days: int | None, table_alias: str = "m") -> str:
@@ -113,7 +114,7 @@ SELECT FIRST {lim} *
 FROM (
 {base}
   AND m.EGMID > {low}
-ORDER BY m.EGMID NULLS LAST, m.MSGID
+ORDER BY m.EGMID NULLS LAST
 ) src
 """.strip()
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -16,6 +17,9 @@ _state: dict[str, Any] = {
     "error": None,
     "last_stats": None,
     "progress": None,
+    # Кольцевой буфер прогресса для UI: помогает увидеть быстрые фазы между poll'ами.
+    "progress_events": [],
+    "_last_progress_phase": None,
     # True после первого успешного try_start_sync в жизни процесса (до рестарта воркера).
     "sync_attempted": False,
 }
@@ -70,7 +74,9 @@ def _compose_stop_summary_stats(
                 out["pg_etl_last_log_id"] = row["last_log_id"]
                 out["pg_etl_last_egmid"] = row["last_egmid"]
                 out["pg_source_max_egmid"] = row["source_max_egmid"]
-                out["pg_messages_snapshot_high_egmid"] = row["messages_snapshot_high_egmid"]
+                out["pg_messages_snapshot_high_egmid"] = row.get(
+                    "messages_snapshot_high_egmid"
+                )
         finally:
             pg.close()
     except Exception:  # pragma: no cover - PG при диагностике
@@ -117,13 +123,32 @@ def _build_sync_failed_progress(
 
 
 def _run_sync_job(config_path: str, merged_dict: dict[str, Any] | None = None) -> None:
+    def push_progress_event(payload: dict[str, Any]) -> None:
+        ph = str((payload or {}).get("phase") or "")
+        evt = {
+            "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "phase": ph,
+            "payload": payload,
+        }
+        with _state_lock:
+            _state["progress"] = payload
+            if ph:
+                _state["_last_progress_phase"] = ph
+            buf = _state.get("progress_events")
+            if not isinstance(buf, list):
+                buf = []
+                _state["progress_events"] = buf
+            buf.append(evt)
+            # Keep last N events to avoid unbounded growth.
+            if len(buf) > 180:
+                del buf[: max(0, len(buf) - 180)]
+
     def log(m: str) -> None:
         with _state_lock:
             _state["message"] = m
 
     def boot_progress(phase: str, **extra: Any) -> None:
-        with _state_lock:
-            _state["progress"] = {"phase": phase, **extra}
+        push_progress_event({"phase": phase, **extra})
 
     log("Синхронизация: фоновый поток стартовал; загрузка модулей и конфигурации…")
     boot_progress("pipeline_bootstrap")
@@ -150,8 +175,7 @@ def _run_sync_job(config_path: str, merged_dict: dict[str, Any] | None = None) -
         def on_progress_detail(payload: dict[str, Any]) -> None:
             nonlocal last_detail_snapshot
             last_detail_snapshot = dict(payload)
-            with _state_lock:
-                _state["progress"] = payload
+            push_progress_event(payload)
 
         stats = run_sync(
             cfg,
@@ -232,6 +256,8 @@ def try_start_sync(
         _state["message"] = "Запуск..."
         _state["last_stats"] = None
         _state["progress"] = None
+        _state["progress_events"] = []
+        _state["_last_progress_phase"] = None
         _cancel_evt.clear()
     # daemon=False: фоновый ETL — долгоживущий поток; при daemon=True он обрывается вместе с процессом
     # при жёстком завершении воркера. Не-daemon даёт шанс завершить поток при обычном shutdown интерпретатора.
@@ -250,6 +276,9 @@ def get_sync_state() -> dict[str, Any]:
             "error": _state["error"],
             "last_stats": _state["last_stats"],
             "progress": _state["progress"],
+            "progress_events": list(_state["progress_events"])
+            if isinstance(_state.get("progress_events"), list)
+            else [],
             "sync_attempted": bool(_state["sync_attempted"]),
         }
 

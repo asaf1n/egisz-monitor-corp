@@ -36,6 +36,41 @@
       "slug": "err_parse_code_filter",
       "type": "string/=",
       "sectionId": "string"
+    },
+    {
+      "id": "c4d5e6f7-a8b9-4012-c345-6789abcdef02",
+      "name": "localUid СЭМД",
+      "slug": "local_uid_filter",
+      "type": "string/=",
+      "sectionId": "string"
+    },
+    {
+      "id": "c4d5e6f7-a8b9-4012-c345-6789abcdef03",
+      "name": "Связанное сообщение (relatesToMessage)",
+      "slug": "relates_to_filter",
+      "type": "string/=",
+      "sectionId": "string"
+    },
+    {
+      "id": "c4d5e6f7-a8b9-4012-c345-6789abcdef04",
+      "name": "Рег. номер РЭМД (emdrid)",
+      "slug": "emdr_id_filter",
+      "type": "string/=",
+      "sectionId": "string"
+    },
+    {
+      "id": "c4d5e6f7-a8b9-4012-c345-6789abcdef05",
+      "name": "LOGID журнала EXCHANGELOG",
+      "slug": "log_id_filter",
+      "type": "string/=",
+      "sectionId": "string"
+    },
+    {
+      "id": "c4d5e6f7-a8b9-4012-c345-6789abcdef06",
+      "name": "EGMID сообщения EGISZ_MESSAGES",
+      "slug": "egmid_filter",
+      "type": "string/=",
+      "sectionId": "string"
     }
   ],
   "cards": [
@@ -603,7 +638,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT id AS \"Номер записи\", error_code AS \"Код ошибки\", LEFT(message, 200) AS \"Сообщение\", created_at AS \"Создано\", relates_to_hint AS \"relatesToMessage (из текста)\", local_uid_hint AS \"localUid (из текста)\", emdr_id_hint AS \"emdrId (из текста)\", exchangelog_log_id AS \"EXCHANGELOG.LOGID\", journal_msgid AS \"EXCHANGELOG.MSGID\", egisz_messages_egmid AS \"EGISZ_MESSAGES.EGMID\", document_group_key AS \"Ключ документа (группировка)\", relates_to_id AS \"relates_to_id (если есть)\" FROM public.v_stg_parse_errors_by_document WHERE 1=1 [[AND {{parse_created}}]] [[AND error_code::text = {{err_parse_code}}]] ORDER BY id DESC LIMIT 100",
+          "query": "SELECT id AS \"Номер записи\", error_code AS \"Код ошибки\", LEFT(message, 200) AS \"Сообщение\", created_at AS \"Создано\", relates_to_hint AS \"relatesToMessage (из текста)\", local_uid_hint AS \"localUid (из текста)\", emdr_id_hint AS \"emdrId (из текста)\", exchangelog_log_id AS \"EXCHANGELOG.LOGID\", journal_msgid AS \"EXCHANGELOG.MSGID\", egisz_messages_egmid AS \"EGISZ_MESSAGES.EGMID\", document_group_key AS \"Ключ документа (группировка)\", relates_to_id AS \"relates_to_id (если есть)\" FROM public.v_stg_parse_errors_by_document WHERE 1=1 [[AND {{parse_created}}]] [[AND error_code::text = {{err_parse_code}}]] [[AND NULLIF(TRIM(local_uid_hint::text), '') = {{local_uid}}]] [[AND NULLIF(TRIM(relates_to_hint::text), '') = {{relates_to}}]] [[AND NULLIF(TRIM(emdr_id_hint::text), '') = {{emdr_id}}]] [[AND NULLIF(TRIM(exchangelog_log_id::text), '') = {{log_id}}]] [[AND NULLIF(TRIM(egisz_messages_egmid::text), '') = {{egmid}}]] ORDER BY id DESC LIMIT 100",
           "template-tags": {
             "err_parse_code": {
               "widget-type": "string/=",
@@ -619,6 +654,46 @@
               "name": "parse_created",
               "display-name": "По дате created_at (staging)",
               "type": "dimension"
+            },
+            "local_uid": {
+              "widget-type": "string/=",
+              "id": "f3000001-0001-4001-8001-000000000012",
+              "name": "local_uid",
+              "display-name": "localUid СЭМД",
+              "type": "text",
+              "required": false
+            },
+            "relates_to": {
+              "widget-type": "string/=",
+              "id": "f3000001-0001-4001-8001-000000000013",
+              "name": "relates_to",
+              "display-name": "Связанное сообщение (relatesToMessage)",
+              "type": "text",
+              "required": false
+            },
+            "emdr_id": {
+              "widget-type": "string/=",
+              "id": "f3000001-0001-4001-8001-000000000014",
+              "name": "emdr_id",
+              "display-name": "Рег. номер РЭМД (emdrid)",
+              "type": "text",
+              "required": false
+            },
+            "log_id": {
+              "widget-type": "string/=",
+              "id": "f3000001-0001-4001-8001-000000000016",
+              "name": "log_id",
+              "display-name": "LOGID журнала EXCHANGELOG",
+              "type": "text",
+              "required": false
+            },
+            "egmid": {
+              "widget-type": "string/=",
+              "id": "f3000001-0001-4001-8001-000000000017",
+              "name": "egmid",
+              "display-name": "EGMID сообщения EGISZ_MESSAGES",
+              "type": "text",
+              "required": false
             }
           }
         },

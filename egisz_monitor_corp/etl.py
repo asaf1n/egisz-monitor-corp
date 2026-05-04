@@ -7,11 +7,10 @@
 
 Источники Firebird в `run_sync`:
   • **JPERSONS** и **EGISZ_LICENSES** — первый шаг после lock: staging, merge **dim_clinics**, кэш для **build_record**.
-  • **EGISZ_MESSAGES** и **EXCHANGELOG** — чередование страниц (``batch_size``); снимок **stg_egisz_messages_journal**
-    инкрементально по **EGMID** с водяным знаком **etl_state.messages_snapshot_high_egmid** (и prune по окну дат);
-    при **sync_window_days <= 0** — для **EXCHANGELOG** и **EGISZ_MESSAGES**/**исходящих** без фильтра по
-    дате в Firebird (все записи за курсорами **LOGID**/ключом снимка); для **`stg_egisz_messages_journal`** —
-    полный пересъём (**TRUNCATE** + сброс **messages_snapshot_high_egmid**); журнал по **LOGID**; догрузка по **MSGID**.
+  • **EGISZ_MESSAGES** и **EXCHANGELOG** — чередование страниц (``batch_size``): сообщения выгружаются в PostgreSQL
+    `stg_egisz_messages_journal` **инкрементально по EGMID** с водяным знаком `etl_state.last_egmid`
+    (и prune по окну дат при `sync_window_days > 0`); затем журнал EXCHANGELOG обрабатывается по LOGID.
+    Сопоставление журнала с сообщениями выполняется уже в PostgreSQL по `MSGID`.
   • Исходящие: `_refresh_outbound_documents` (окно **CREATEDATE** при ``sync_window_days`` > 0).
 
 Кооперативная остановка: проверка **перед** каждым SELECT к Firebird (справочники, страницы журнала и снимка сообщений).
@@ -22,7 +21,7 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping, Sequence, TypedDict
 
@@ -80,11 +79,22 @@ def _etl_sync_window_days(cfg: CorpAppConfig) -> int | None:
 
 
 def _messages_journal_full_rescan(cfg: CorpAppConfig) -> bool:
-    """TRUNCATE снимка сообщений при отсутствии окна по датам (sync_window_days <= 0).
+    """TRUNCATE снимка сообщений только в явном режиме полного пересъёма (sync_window_days < 0).
 
     Само окно для EXCHANGELOG/исходящих задаётся через `_etl_sync_window_days` → ``None`` — без предиката LOGDATE/CREATEDATE.
     """
-    return int(cfg.etl.sync_window_days) <= 0
+    return int(cfg.etl.sync_window_days) < 0
+
+
+def _full_sync_from_start(cfg: CorpAppConfig) -> bool:
+    """Полная синхронизация "с нуля" для журнала и сообщений.
+
+    При включении:
+    - EXCHANGELOG идёт с LOGID > 0 (игнорируем last_log_id)
+    - EGISZ_MESSAGES snapshot идёт с EGMID > 0 (игнорируем messages_snapshot_high_egmid)
+    - окно по датам отключено (sync_window_days <= 0 => None в _etl_sync_window_days)
+    """
+    return int(cfg.etl.sync_window_days) < 0
 
 
 def _etl_fb_fetch(
@@ -310,32 +320,25 @@ def _journal_messages_staging_fetch_keyset_page(
 ) -> tuple[int, int, bool]:
     """Одна страница снимка EGISZ_MESSAGES (EGMID > after) → staging. Возвращает (новый after_egmid, прирост строк, конец)."""
     _raise_if_cancel(cancel_check)
-    detail(
-        {
-            "phase": "journal_messages_export",
-            "loaded_rows": total_before,
-            "parsed_facts": 0,
-            "journal_facts": 0,
-            "staging_errors": 0,
-            "page": page,
-            "journal_batch_rows": batch,
-        }
-    )
+    base_pl: dict[str, Any] = {
+        "loaded_rows": total_before,
+        "parsed_facts": 0,
+        "journal_facts": 0,
+        "staging_errors": 0,
+        "page": page,
+        "journal_batch_rows": batch,
+    }
+    detail({"phase": "journal_messages_export_firebird", **base_pl})  # type: ignore[arg-type]
     sql = journal_messages_keyset_page_sql(base_inner, after_egmid=after_egmid, limit=batch)
     fb_timeout = max(1, int(cfg.etl.firebird_query_timeout_sec))
     tick_sec = min(15, max(5, fb_timeout // 60))
 
     def _fb_wait_tick(elapsed_sec: int) -> None:
         _raise_if_cancel(cancel_check)
-        detail(
+        detail(  # type: ignore[arg-type]
             {
-                "phase": "journal_messages_export",
-                "loaded_rows": total_before,
-                "parsed_facts": 0,
-                "journal_facts": 0,
-                "staging_errors": 0,
-                "page": page,
-                "journal_batch_rows": batch,
+                "phase": "journal_messages_export_firebird",
+                **base_pl,
                 "firebird_elapsed_sec": int(elapsed_sec),
             }
         )
@@ -348,11 +351,23 @@ def _journal_messages_staging_fetch_keyset_page(
     )
     if not rows:
         return after_egmid, 0, True
+    detail({"phase": "journal_messages_export_postgres", **base_pl})  # type: ignore[arg-type]
     insert_journal_messages_staging_rows(pg, rows)
     pg.commit()
     mx = _max_egmid_in_fb_message_rows(rows)
     new_after = int(mx) if mx is not None else after_egmid
     n = len(rows)
+    detail(
+        {
+            "phase": "journal_messages_export_done",
+            "loaded_rows": total_before + n,
+            "parsed_facts": 0,
+            "journal_facts": 0,
+            "staging_errors": 0,
+            "page": page,
+            "journal_batch_rows": n,
+        }  # type: ignore[arg-type]
+    )
     return new_after, n, n < batch
 
 
@@ -370,7 +385,7 @@ def _sync_journal_snapshot_interleaved(
     best_lic_by_jid: dict[int, dict[str, Any]] | None = None,
     mo_uid_to_jid: dict[str, int] | None = None,
 ) -> _PageStats:
-    """Чередование страниц снимка EGISZ_MESSAGES и журнала EXCHANGELOG; затем дочитывание снимка до конца."""
+    """Чередование страниц снимка EGISZ_MESSAGES (EGMID keyset) и журнала EXCHANGELOG (LOGID cursor)."""
     if pg is None:
         return _process_exchangelog_pages(
             cfg,
@@ -413,24 +428,9 @@ def _sync_journal_snapshot_interleaved(
 
     while not journal_exhausted:
         _raise_if_cancel(cancel_check)
-        if not msgs_done:
-            msg_page += 1
-            msg_scan, inc, partial = _journal_messages_staging_fetch_keyset_page(
-                cfg,
-                pg,
-                base_inner=base_msgs,
-                after_egmid=msg_scan,
-                batch=batch,
-                page=msg_page,
-                total_before=msg_total,
-                detail=detail,
-                cancel_check=cancel_check,
-            )
-            msg_total += inc
-            stats.messages_snapshot_scan_high_egmid = msg_scan
-            if partial:
-                msgs_done = True
-
+        # Важно для UX: EXCHANGELOG и EGISZ_MESSAGES должны "чередоваться" в логе.
+        # Если Firebird-запрос к EGISZ_MESSAGES долгий, оператор всё равно должен видеть,
+        # что журнал EXCHANGELOG тоже обрабатывается (и наоборот). Поэтому пакет журнала — первым.
         journal_page += 1
         detail(
             {
@@ -473,6 +473,24 @@ def _sync_journal_snapshot_interleaved(
         )
         if len(jrows) < batch:
             journal_exhausted = True
+
+        if not msgs_done:
+            msg_page += 1
+            msg_scan, inc, partial = _journal_messages_staging_fetch_keyset_page(
+                cfg,
+                pg,
+                base_inner=base_msgs,
+                after_egmid=msg_scan,
+                batch=batch,
+                page=msg_page,
+                total_before=msg_total,
+                detail=detail,
+                cancel_check=cancel_check,
+            )
+            msg_total += inc
+            stats.messages_snapshot_scan_high_egmid = msg_scan
+            if partial:
+                msgs_done = True
 
     while not msgs_done:
         _raise_if_cancel(cancel_check)
@@ -529,7 +547,7 @@ def _raise_if_cancel(cancel_check: CancelCheck) -> None:
 class EtlProgressPayload(TypedDict, total=False):
     """Снимок прогресса для UI (все поля опциональны кроме phase).
 
-    phase: pipeline_bootstrap | pg_schema_apply | references_* | journal_messages_export |
+    phase: pipeline_bootstrap | pg_schema_apply | references_* |
            counting | exchangelog_* | outbound_* | sync_failed …
     """
 
@@ -550,6 +568,12 @@ class EtlProgressPayload(TypedDict, total=False):
     journal_batch_rows: int
     cursor_log_id: int
     firebird_elapsed_sec: int
+    # "Документы" — не по строкам, а по уникальным идентификаторам (localUid/emdrId).
+    documents_unique: int
+    documents_localuid_unique: int
+    documents_emdrid_unique: int
+    outbound_total_docs: int
+    outbound_loaded_docs: int
 
 
 def _to_int(v: Any) -> int | None:
@@ -691,6 +715,29 @@ class _PageStats:
     last_id: int = 0
     max_egmid_seen: int = 0
     messages_snapshot_scan_high_egmid: int = 0
+    # Уникальные "документы" по идентификаторам (не по строкам журнала).
+    _doc_keys: set[str] = field(default_factory=set, repr=False)
+    _doc_localuid: set[str] = field(default_factory=set, repr=False)
+    _doc_emdrid: set[str] = field(default_factory=set, repr=False)
+
+    def note_document_ids(self, *, local_uid: str | None, emdr_id: str | None) -> None:
+        lu = (local_uid or "").strip()
+        ei = (emdr_id or "").strip()
+        if lu:
+            self._doc_keys.add(f"lu:{lu}")
+            self._doc_localuid.add(lu)
+        if ei:
+            self._doc_keys.add(f"emdr:{ei}")
+            self._doc_emdrid.add(ei)
+
+    def documents_unique(self) -> int:
+        return len(self._doc_keys)
+
+    def documents_localuid_unique(self) -> int:
+        return len(self._doc_localuid)
+
+    def documents_emdrid_unique(self) -> int:
+        return len(self._doc_emdrid)
 
 
 def _ingest_exchangelog_rows_chunk(
@@ -717,6 +764,9 @@ def _ingest_exchangelog_rows_chunk(
     def _d(payload: EtlProgressPayload) -> None:
         pl = dict(payload)
         pl["cursor_log_id"] = stats.last_id
+        pl["documents_unique"] = stats.documents_unique()
+        pl["documents_localuid_unique"] = stats.documents_localuid_unique()
+        pl["documents_emdrid_unique"] = stats.documents_emdrid_unique()
         detail(pl)  # type: ignore[arg-type]
 
     def on_stage(err: StagingParseError) -> None:
@@ -843,6 +893,7 @@ def _ingest_exchangelog_rows_chunk(
         if rec is None:
             continue
 
+        stats.note_document_ids(local_uid=rec.local_uid_semd, emdr_id=rec.emdr_id)
         fact_buffer.append(rec.as_fact_row())
         stats.facts += 1
 
@@ -912,7 +963,7 @@ def _process_exchangelog_pages(
     best_lic_by_jid: dict[int, dict[str, Any]] | None = None,
     mo_uid_to_jid: dict[str, int] | None = None,
 ) -> _PageStats:
-    """Постранично: EXCHANGELOG из Firebird; EGISZ_MESSAGES — снимок в PostgreSQL; парсинг, UPSERT."""
+    """Постранично: EXCHANGELOG из Firebird; EGISZ_MESSAGES — догрузка по MSGID из пакетов; парсинг, UPSERT."""
     pipeline = cfg.etl.pipeline_name
     batch = max(1, cfg.etl.batch_size)
     parser = EgiszMonitorParser()
@@ -1009,11 +1060,21 @@ def _refresh_outbound_documents(
     )
     omsg_sorted = omsg
     outbound_n = len(omsg_sorted)
+    # Для UI считаем "документы" как уникальные DOCUMENTID (localUid), а не как строки выборки.
+    outbound_total_docs = len(
+        {
+            _to_str(r.get("documentid"))
+            for r in omsg_sorted
+            if _to_str(r.get("documentid"))
+        }
+    )
     detail(
         {
             "phase": "outbound_fetch",
             "outbound_total": outbound_n,
+            "outbound_total_docs": outbound_total_docs,
             "outbound_loaded": 0,
+            "outbound_loaded_docs": 0,
             **base_progress,
             **metrics_ui,
         }  # type: ignore[arg-type]
@@ -1042,12 +1103,15 @@ def _refresh_outbound_documents(
                     "egmid": _egmid_sql_int(r.get("egmid")),
                 }
             )
+        loaded_docs = len(seen_doc)
         if progress_detail_cb and (oi % 500 == 0 or oi == outbound_n):
             detail(
                 {
                     "phase": "outbound_parse",
                     "outbound_total": outbound_n,
+                    "outbound_total_docs": outbound_total_docs,
                     "outbound_loaded": oi,
+                    "outbound_loaded_docs": loaded_docs,
                     "parsed_facts": len(stg_out),
                     **base_progress,
                     **metrics_ui,
@@ -1058,8 +1122,10 @@ def _refresh_outbound_documents(
     detail(
         {
             "phase": "outbound_postgres",
-            "outbound_total": og_total,
+            "outbound_total": outbound_n,
+            "outbound_total_docs": og_total,
             "outbound_loaded": 0,
+            "outbound_loaded_docs": 0,
             "parsed_facts": og_total,
             **base_progress,
             **metrics_ui,
@@ -1070,8 +1136,10 @@ def _refresh_outbound_documents(
     detail(
         {
             "phase": "outbound_done",
-            "outbound_total": og_total,
-            "outbound_loaded": og_total,
+            "outbound_total": outbound_n,
+            "outbound_total_docs": og_total,
+            "outbound_loaded": outbound_n,
+            "outbound_loaded_docs": og_total,
             "parsed_facts": og_total,
             **base_progress,
             **metrics_ui,
@@ -1204,6 +1272,19 @@ def run_sync(
 
         last_id = _read_cursor(cfg, pg, dry_run=dry_run)
         last_egmid = _read_egmid_cursor(cfg, pg, dry_run=dry_run)
+
+        # Полная синхронизация: пройти EXCHANGELOG и EGISZ_MESSAGES "с начала", игнорируя курсоры.
+        # Это делается только в явном режиме (sync_window_days < 0).
+        if pg is not None and not dry_run and _full_sync_from_start(cfg):
+            log("Полная синхронизация: сброс курсоров etl_state и полный проход EXCHANGELOG/EGISZ_MESSAGES с начала.")
+            boot_detail(0, "pipeline_bootstrap")
+            set_last_log_id(pg, pipeline, 0)
+            set_last_egmid(pg, pipeline, 0)
+            set_messages_snapshot_high_egmid(pg, pipeline, 0)
+            truncate_journal_messages_staging(pg)
+            pg.commit()
+            last_id = 0
+            last_egmid = 0
         log(f"ETL: last_log_id={last_id} last_egmid={last_egmid} pipeline={pipeline}")
 
         detail(
@@ -1272,13 +1353,12 @@ def run_sync(
                 detail=detail,
                 cancel_check=cancel_check,
             )
-            eg_peak = page_stats.max_egmid_seen if page_stats.max_egmid_seen > 0 else None
-            set_etl_source_peaks(pg, pipeline, eg_peak, reference_max_license_modifydate)
-            if page_stats.max_egmid_seen > last_egmid:
-                set_last_egmid(pg, pipeline, page_stats.max_egmid_seen)
-            set_messages_snapshot_high_egmid(
-                pg, pipeline, int(page_stats.messages_snapshot_scan_high_egmid)
-            )
+            # last_egmid — курсор выгрузки снимка EGISZ_MESSAGES (аналог last_log_id для журнала).
+            # messages_snapshot_high_egmid дублирует тот же курсор для совместимости со схемой/диагностикой.
+            set_etl_source_peaks(pg, pipeline, None, reference_max_license_modifydate)
+            snap_hi = int(page_stats.messages_snapshot_scan_high_egmid)
+            set_last_egmid(pg, pipeline, snap_hi)
+            set_messages_snapshot_high_egmid(pg, pipeline, snap_hi)
             pg.commit()
 
         cursor_after = (

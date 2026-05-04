@@ -22,6 +22,48 @@
       "slug": "top_clinic_filter",
       "type": "string/=",
       "sectionId": "string"
+    },
+    {
+      "id": "b08b08c1-0001-4001-8008-000000000012",
+      "name": "localUid СЭМД",
+      "slug": "local_uid_filter",
+      "type": "string/=",
+      "sectionId": "string"
+    },
+    {
+      "id": "b08b08c1-0001-4001-8008-000000000013",
+      "name": "Связанное сообщение (relatesToMessage)",
+      "slug": "relates_to_filter",
+      "type": "string/=",
+      "sectionId": "string"
+    },
+    {
+      "id": "b08b08c1-0001-4001-8008-000000000014",
+      "name": "Рег. номер РЭМД",
+      "slug": "emdr_id_filter",
+      "type": "string/=",
+      "sectionId": "string"
+    },
+    {
+      "id": "b08b08c1-0001-4001-8008-000000000015",
+      "name": "Статус",
+      "slug": "status_filter",
+      "type": "string/=",
+      "sectionId": "string"
+    },
+    {
+      "id": "b08b08c1-0001-4001-8008-000000000016",
+      "name": "LOGID журнала EXCHANGELOG",
+      "slug": "log_id_filter",
+      "type": "string/=",
+      "sectionId": "string"
+    },
+    {
+      "id": "b08b08c1-0001-4001-8008-000000000017",
+      "name": "EGMID сообщения EGISZ_MESSAGES",
+      "slug": "egmid_filter",
+      "type": "string/=",
+      "sectionId": "string"
     }
   ],
   "cards": [
@@ -31,7 +73,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM public.v_rpt_semd_archive_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID\"::text = {{top_clinic}}]]",
+          "query": "SELECT COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM public.v_rpt_semd_archive_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID\"::text = {{top_clinic}}]] [[AND NULLIF(TRIM(\"localUid СЭМД\"::text), '') = {{local_uid}}]] [[AND NULLIF(TRIM(\"Связанное сообщение\"::text), '') = {{relates_to}}]] [[AND NULLIF(TRIM(\"Рег. номер РЭМД\"::text), '') = {{emdr_id}}]] [[AND NULLIF(TRIM(\"Статус\"::text), '') = {{status}}]] [[AND NULLIF(TRIM(\"LOGID журнала EXCHANGELOG\"::text), '') = {{log_id}}]] [[AND NULLIF(TRIM(\"EGISZ_MESSAGES.EGMID (ключ записи, РЭМД)\"::text), '') = {{egmid}}]]",
           "template-tags": {
             "top_semd": {
               "widget-type": "string/=",
@@ -53,6 +95,54 @@
               "id": "f0900001-1001-4001-8001-000000000011",
               "name": "top_clinic",
               "display-name": "JID клиники",
+              "type": "text",
+              "required": false
+            },
+            "local_uid": {
+              "widget-type": "string/=",
+              "id": "f0900001-1001-4001-8001-000000000012",
+              "name": "local_uid",
+              "display-name": "localUid СЭМД",
+              "type": "text",
+              "required": false
+            },
+            "relates_to": {
+              "widget-type": "string/=",
+              "id": "f0900001-1001-4001-8001-000000000013",
+              "name": "relates_to",
+              "display-name": "Связанное сообщение (relatesToMessage)",
+              "type": "text",
+              "required": false
+            },
+            "emdr_id": {
+              "widget-type": "string/=",
+              "id": "f0900001-1001-4001-8001-000000000014",
+              "name": "emdr_id",
+              "display-name": "Рег. номер РЭМД",
+              "type": "text",
+              "required": false
+            },
+            "status": {
+              "widget-type": "string/=",
+              "id": "f0900001-1001-4001-8001-000000000015",
+              "name": "status",
+              "display-name": "Статус",
+              "type": "text",
+              "required": false
+            },
+            "log_id": {
+              "widget-type": "string/=",
+              "id": "f0900001-1001-4001-8001-000000000016",
+              "name": "log_id",
+              "display-name": "LOGID журнала EXCHANGELOG",
+              "type": "text",
+              "required": false
+            },
+            "egmid": {
+              "widget-type": "string/=",
+              "id": "f0900001-1001-4001-8001-000000000017",
+              "name": "egmid",
+              "display-name": "EGMID сообщения EGISZ_MESSAGES",
               "type": "text",
               "required": false
             }
@@ -163,7 +253,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT COUNT(DISTINCT NULLIF(TRIM(\"JID\"::text), ''))::bigint AS \"Клиник\" FROM public.v_rpt_semd_archive_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID\"::text = {{top_clinic}}]]",
+          "query": "SELECT COUNT(DISTINCT NULLIF(TRIM(\"JID\"::text), ''))::bigint AS \"Клиник\" FROM public.v_rpt_semd_archive_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID\"::text = {{top_clinic}}]] [[AND NULLIF(TRIM(\"localUid СЭМД\"::text), '') = {{local_uid}}]] [[AND NULLIF(TRIM(\"Связанное сообщение\"::text), '') = {{relates_to}}]] [[AND NULLIF(TRIM(\"Рег. номер РЭМД\"::text), '') = {{emdr_id}}]] [[AND NULLIF(TRIM(\"Статус\"::text), '') = {{status}}]] [[AND NULLIF(TRIM(\"LOGID журнала EXCHANGELOG\"::text), '') = {{log_id}}]] [[AND NULLIF(TRIM(\"EGISZ_MESSAGES.EGMID (ключ записи, РЭМД)\"::text), '') = {{egmid}}]]",
           "template-tags": {
             "top_semd": {
               "widget-type": "string/=",
@@ -185,6 +275,54 @@
               "id": "f0900002-2002-4002-8002-000000000011",
               "name": "top_clinic",
               "display-name": "JID клиники",
+              "type": "text",
+              "required": false
+            },
+            "local_uid": {
+              "widget-type": "string/=",
+              "id": "f0900002-2002-4002-8002-000000000012",
+              "name": "local_uid",
+              "display-name": "localUid СЭМД",
+              "type": "text",
+              "required": false
+            },
+            "relates_to": {
+              "widget-type": "string/=",
+              "id": "f0900002-2002-4002-8002-000000000013",
+              "name": "relates_to",
+              "display-name": "Связанное сообщение (relatesToMessage)",
+              "type": "text",
+              "required": false
+            },
+            "emdr_id": {
+              "widget-type": "string/=",
+              "id": "f0900002-2002-4002-8002-000000000014",
+              "name": "emdr_id",
+              "display-name": "Рег. номер РЭМД",
+              "type": "text",
+              "required": false
+            },
+            "status": {
+              "widget-type": "string/=",
+              "id": "f0900002-2002-4002-8002-000000000015",
+              "name": "status",
+              "display-name": "Статус",
+              "type": "text",
+              "required": false
+            },
+            "log_id": {
+              "widget-type": "string/=",
+              "id": "f0900002-2002-4002-8002-000000000016",
+              "name": "log_id",
+              "display-name": "LOGID журнала EXCHANGELOG",
+              "type": "text",
+              "required": false
+            },
+            "egmid": {
+              "widget-type": "string/=",
+              "id": "f0900002-2002-4002-8002-000000000017",
+              "name": "egmid",
+              "display-name": "EGMID сообщения EGISZ_MESSAGES",
               "type": "text",
               "required": false
             }
@@ -221,12 +359,136 @@
       "col": 0
     },
     {
+      "name": "06 · Документы по типам СЭМД",
+      "description": "Распределение документов по типам СЭМД в выбранных фильтрах.",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM public.v_rpt_semd_archive_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID\"::text = {{top_clinic}}]] [[AND NULLIF(TRIM(\"localUid СЭМД\"::text), '') = {{local_uid}}]] [[AND NULLIF(TRIM(\"Связанное сообщение\"::text), '') = {{relates_to}}]] [[AND NULLIF(TRIM(\"Рег. номер РЭМД\"::text), '') = {{emdr_id}}]] [[AND NULLIF(TRIM(\"Статус\"::text), '') = {{status}}]] [[AND NULLIF(TRIM(\"LOGID журнала EXCHANGELOG\"::text), '') = {{log_id}}]] [[AND NULLIF(TRIM(\"EGISZ_MESSAGES.EGMID (ключ записи, РЭМД)\"::text), '') = {{egmid}}]] GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 25",
+          "template-tags": {
+            "top_semd": {
+              "widget-type": "string/=",
+              "id": "f0900003-3003-4003-8003-000000000010",
+              "name": "top_semd",
+              "display-name": "Код СЭМД",
+              "type": "text",
+              "required": false
+            },
+            "dwh_date": {
+              "widget-type": "date/all-options",
+              "id": "f0900003-3003-4003-8003-000000000001",
+              "name": "dwh_date",
+              "display-name": "По дате «Дата обработки»",
+              "type": "dimension"
+            },
+            "top_clinic": {
+              "widget-type": "string/=",
+              "id": "f0900003-3003-4003-8003-000000000011",
+              "name": "top_clinic",
+              "display-name": "JID клиники",
+              "type": "text",
+              "required": false
+            },
+            "local_uid": {
+              "widget-type": "string/=",
+              "id": "f0900003-3003-4003-8003-000000000012",
+              "name": "local_uid",
+              "display-name": "localUid СЭМД",
+              "type": "text",
+              "required": false
+            },
+            "relates_to": {
+              "widget-type": "string/=",
+              "id": "f0900003-3003-4003-8003-000000000013",
+              "name": "relates_to",
+              "display-name": "Связанное сообщение (relatesToMessage)",
+              "type": "text",
+              "required": false
+            },
+            "emdr_id": {
+              "widget-type": "string/=",
+              "id": "f0900003-3003-4003-8003-000000000014",
+              "name": "emdr_id",
+              "display-name": "Рег. номер РЭМД",
+              "type": "text",
+              "required": false
+            },
+            "status": {
+              "widget-type": "string/=",
+              "id": "f0900003-3003-4003-8003-000000000015",
+              "name": "status",
+              "display-name": "Статус",
+              "type": "text",
+              "required": false
+            },
+            "log_id": {
+              "widget-type": "string/=",
+              "id": "f0900003-3003-4003-8003-000000000016",
+              "name": "log_id",
+              "display-name": "LOGID журнала EXCHANGELOG",
+              "type": "text",
+              "required": false
+            },
+            "egmid": {
+              "widget-type": "string/=",
+              "id": "f0900003-3003-4003-8003-000000000017",
+              "name": "egmid",
+              "display-name": "EGMID сообщения EGISZ_MESSAGES",
+              "type": "text",
+              "required": false
+            }
+          }
+        },
+        "database": 1
+      },
+      "display": "row",
+      "visualization_settings": {
+        "graph.dimensions": [
+          "Наименование СЭМД"
+        ],
+        "graph.show_values": true,
+        "table": {
+          "columns": {
+            "[\"name\",\"clinic_id\"]": {
+              "display_as": null
+            },
+            "[\"name\",\"service_id\"]": {
+              "display_as": null
+            },
+            "[\"name\",\"transaction_id\"]": {
+              "display_as": null
+            }
+          }
+        },
+        "column_settings": {
+          "[\"name\",\"Код СЭМД\"]": {
+            "column_title": "Код СЭМД"
+          },
+          "[\"name\",\"Наименование СЭМД\"]": {
+            "column_title": "Наименование СЭМД"
+          },
+          "[\"name\",\"Документов\"]": {
+            "column_title": "Документов",
+            "number_separators": ".",
+            "decimals": 0
+          }
+        },
+        "graph.metrics": [
+          "Документов"
+        ]
+      },
+      "sizeX": 12,
+      "sizeY": 4,
+      "row": 4,
+      "col": 12
+    },
+    {
       "name": "06 · Архив СЭМД (все реквизиты)",
       "description": "Строки v_rpt_semd_archive_ui; до 5000 строк за запрос.",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT * FROM public.v_rpt_semd_archive_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID\"::text = {{top_clinic}}]] ORDER BY \"Дата обработки\" DESC NULLS LAST LIMIT 5000",
+          "query": "SELECT * FROM public.v_rpt_semd_archive_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID\"::text = {{top_clinic}}]] [[AND NULLIF(TRIM(\"localUid СЭМД\"::text), '') = {{local_uid}}]] [[AND NULLIF(TRIM(\"Связанное сообщение\"::text), '') = {{relates_to}}]] [[AND NULLIF(TRIM(\"Рег. номер РЭМД\"::text), '') = {{emdr_id}}]] [[AND NULLIF(TRIM(\"Статус\"::text), '') = {{status}}]] [[AND NULLIF(TRIM(\"LOGID журнала EXCHANGELOG\"::text), '') = {{log_id}}]] [[AND NULLIF(TRIM(\"EGISZ_MESSAGES.EGMID (ключ записи, РЭМД)\"::text), '') = {{egmid}}]] ORDER BY \"Дата обработки\" DESC NULLS LAST LIMIT 5000",
           "template-tags": {
             "top_semd": {
               "widget-type": "string/=",
@@ -248,6 +510,54 @@
               "id": "f0900004-4004-4004-8004-000000000011",
               "name": "top_clinic",
               "display-name": "JID клиники",
+              "type": "text",
+              "required": false
+            },
+            "local_uid": {
+              "widget-type": "string/=",
+              "id": "f0900004-4004-4004-8004-000000000012",
+              "name": "local_uid",
+              "display-name": "localUid СЭМД",
+              "type": "text",
+              "required": false
+            },
+            "relates_to": {
+              "widget-type": "string/=",
+              "id": "f0900004-4004-4004-8004-000000000013",
+              "name": "relates_to",
+              "display-name": "Связанное сообщение (relatesToMessage)",
+              "type": "text",
+              "required": false
+            },
+            "emdr_id": {
+              "widget-type": "string/=",
+              "id": "f0900004-4004-4004-8004-000000000014",
+              "name": "emdr_id",
+              "display-name": "Рег. номер РЭМД",
+              "type": "text",
+              "required": false
+            },
+            "status": {
+              "widget-type": "string/=",
+              "id": "f0900004-4004-4004-8004-000000000015",
+              "name": "status",
+              "display-name": "Статус",
+              "type": "text",
+              "required": false
+            },
+            "log_id": {
+              "widget-type": "string/=",
+              "id": "f0900004-4004-4004-8004-000000000016",
+              "name": "log_id",
+              "display-name": "LOGID журнала EXCHANGELOG",
+              "type": "text",
+              "required": false
+            },
+            "egmid": {
+              "widget-type": "string/=",
+              "id": "f0900004-4004-4004-8004-000000000017",
+              "name": "egmid",
+              "display-name": "EGMID сообщения EGISZ_MESSAGES",
               "type": "text",
               "required": false
             }
