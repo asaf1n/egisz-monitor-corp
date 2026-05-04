@@ -1,6 +1,6 @@
 {
   "name": "02 Сервис, healthcheck и парсинг журнала",
-  "description": "Поток callback/витрины (нагрузка, топы СЭМД и клиник) и сигналы healthcheck (`v_health_signals`, heatmap клиники × дни, очередь, тренд ошибок парсинга по уникальным документам, сводка прокси-БД). Период — field filter `dwh_date` по **«Обработано IPS»** там, где указано в карточке; фильтры **Код СЭМД** и **JID клиники** — слаги `top_semd_filter`, `top_clinic_filter` (как на **01**). Карточки healthcheck без привязки к дате в SQL — глобальный виджет даты на них не действует (как раньше на отдельном дашборде 11). Источник SQL healthcheck: `sql/005_healthcheck.sql`. Ниже — **детализация ошибок парсинга** staging (`v_stg_parse_errors_by_document`): отдельный фильтр даты `parse_created_filter` по `created_at`, плюс код ошибки парсинга (`err_parse_code_filter`). Отказы РЭМД — на дашбордах **01** и **04**.",
+  "description": "Поток callback/витрины (нагрузка, топы СЭМД и клиник) и сигналы healthcheck (`v_health_signals`, heatmap клиники × дни по **Обработано IPS**, очередь, тренд ошибок парсинга по уникальным документам, сводка прокси-БД). Период витрины — field filter `dwh_date` по **«Обработано IPS»** на карточках потока и на heatmap (та же логика, что архив СЭМД и дашборд **01**); фильтры **Код СЭМД** и **JID клиники** — `top_semd_filter`, `top_clinic_filter`. Карточки healthcheck (сигналы, топ 24ч, очередь, прокси) — снимок «сейчас» из `sql/005_healthcheck.sql`, без привязки к `dwh_date`. **Парсинг staging** (`v_stg_parse_errors_by_document`): фильтр даты `parse_created_filter` по `created_at`, плюс `err_parse_code_filter`. Отказы РЭМД — на **01** и **04**.",
   "width": "full",
   "parameters": [
     {
@@ -291,13 +291,34 @@
     },
     {
       "name": "02 · Heatmap клиники × дни (доля ошибок)",
-      "description": "Тепловая карта: строки — клиники с объёмом **>5 документов** за 14 дней, столбцы — дни, значение — доля ошибок (%). Окно фиксировано (14 дней) — фильтр периода с дашборда не применяется.",
-      "table_ref": "fact_egisz_transactions",
+      "description": "Тепловая карта по витрине: календарный день из **Обработано IPS**, клиника, доля ошибок (%). Тот же учёт документов, что архив и топы на **02** (COUNT DISTINCT «Связанное сообщение»). Период — общий фильтр **Период по дате обработки (витрина)**; без выбранного периода даты в SQL не режутся (лучше задать диапазон, как на **06**).",
+      "table_ref": "v_egisz_transactions_enriched_ui",
+      "metabase-field-filters": {
+        "dwh_date": {
+          "table_ref": "v_egisz_transactions_enriched_ui",
+          "field_name": "Обработано IPS"
+        }
+      },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH d AS (SELECT date_trunc('day', f.processed_at)::date AS day, COALESCE(NULLIF(TRIM(dc.jname),''),'JID '||f.jid::text) AS clinic, COUNT(DISTINCT f.relates_to_id) AS cnt, COUNT(DISTINCT f.relates_to_id) FILTER (WHERE f.status = 'error') AS err FROM public.fact_egisz_transactions f LEFT JOIN public.dim_clinics dc ON dc.jid = f.jid WHERE f.processed_at >= NOW() - INTERVAL '14 days' AND f.jid IS NOT NULL [[AND f.jid::text = {{top_clinic}}]] GROUP BY 1,2 HAVING COUNT(DISTINCT f.relates_to_id) > 5) SELECT day AS \"День\", clinic AS \"Клиника\", ROUND(100.0 * err / NULLIF(cnt,0), 2) AS \"Доля ошибок, %\" FROM d ORDER BY 1, 2",
+          "query": "WITH d AS ( SELECT date_trunc('day', v.\"Обработано IPS\")::date AS day, COALESCE(NULLIF(TRIM(v.\"Наименование клиники\"), ''), 'JID ' || v.\"JID клиники\"::text) AS clinic, COUNT(DISTINCT v.\"Связанное сообщение\") AS cnt, COUNT(DISTINCT v.\"Связанное сообщение\") FILTER (WHERE v.\"Статус\" = 'error') AS err FROM public.v_egisz_transactions_enriched_ui v WHERE NULLIF(TRIM(v.\"JID клиники\"::text), '') IS NOT NULL [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(v.\"Код СЭМД\"), '') = {{top_semd}}]] [[AND v.\"JID клиники\"::text = {{top_clinic}}]] GROUP BY 1, 2 ) SELECT day AS \"День\", clinic AS \"Клиника\", ROUND(100.0 * err / NULLIF(cnt, 0), 2) AS \"Доля ошибок, %\" FROM d ORDER BY 1, 2",
           "template-tags": {
+            "dwh_date": {
+              "id": "f2000007-0007-4007-8007-000000000001",
+              "name": "dwh_date",
+              "display-name": "По дате «Обработано»",
+              "type": "dimension",
+              "widget-type": "date/all-options"
+            },
+            "top_semd": {
+              "id": "f2000007-0007-4007-8007-000000000010",
+              "name": "top_semd",
+              "display-name": "Код СЭМД",
+              "type": "text",
+              "widget-type": "string/=",
+              "required": false
+            },
             "top_clinic": {
               "id": "h1100002-1001-4101-8101-000000000010",
               "name": "top_clinic",
@@ -366,12 +387,27 @@
     },
     {
       "name": "02 · Тренд ошибок парсинга",
-      "description": "Динамика **уникальных документов** с ошибкой парсинга (`document_group_key` в `v_stg_parse_errors_by_document`) по часам за 24 часа. Всплеск = битый XML или отсутствие `relatesToMessage` в разборе.",
+      "description": "Динамика **уникальных документов** с ошибкой парсинга (`document_group_key`) по часам. Ось времени — **created_at** staging (время разбора журнала, не IPS). Используйте **Период парсинга**; без него берётся окно **30 суток до MAX(created_at)** в таблице (не привязано к календарю сервера).",
       "table_ref": "v_stg_parse_errors_by_document",
+      "metabase-field-filters": {
+        "parse_created": {
+          "table_ref": "v_stg_parse_errors_by_document",
+          "field_name": "created_at"
+        }
+      },
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT date_trunc('hour', created_at) AS \"Час\", COUNT(DISTINCT document_group_key)::bigint AS \"Уникальных документов с ошибкой\" FROM public.v_stg_parse_errors_by_document WHERE created_at >= NOW() - INTERVAL '24 hours' GROUP BY 1 ORDER BY 1"
+          "query": "WITH b AS ( SELECT COALESCE((SELECT MAX(created_at) FROM public.v_stg_parse_errors_by_document), NOW()) AS mx ) SELECT date_trunc('hour', e.created_at) AS \"Час\", COUNT(DISTINCT e.document_group_key)::bigint AS \"Уникальных документов с ошибкой\" FROM public.v_stg_parse_errors_by_document e CROSS JOIN b WHERE e.created_at >= b.mx - INTERVAL '30 days' [[AND {{parse_created}}]] GROUP BY 1 ORDER BY 1",
+          "template-tags": {
+            "parse_created": {
+              "id": "f3parse0-trend-001-4001-8001-000000099002",
+              "name": "parse_created",
+              "display-name": "По дате created_at (staging)",
+              "type": "dimension",
+              "widget-type": "date/all-options"
+            }
+          }
         },
         "database": 1
       },

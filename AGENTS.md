@@ -123,7 +123,7 @@
 | `egisz_monitor_corp/pg_warehouse.py` → `fetch_healthcheck_snapshot(con)` | Чтение трёх view + агрегаты для UI/JSON; `statement_timeout = 10s` на каждый блок. |
 | `GET /api/healthcheck` (`egisz_monitor_corp/config_app.py`) | JSON-снимок `{signals, by_clinic_top, proxy_db, level_summary}`. При недоступной PG — `ok: false` и `errors[]` (graceful). |
 | Config UI: вкладки **Snapshot / Healthcheck** | Snapshot — текущие `EGMID/LOGID/MODIFYDATE` (как раньше). Healthcheck — сигналы, top-3 клиники, прокси-БД (опрос `/api/healthcheck` каждые 30 c). **Сохранить в YAML** также патчит CronJob `egisz-monitor-sync` по `auto_sync` (RBAC SA `conf-ui`). |
-| Дашборд `metabase_dashboards/02_service.json` | «02 Сервис, healthcheck и парсинг журнала»: поток по витрине; сигналы, heatmap, очередь, тренд парсинга; детальные карточки staging (`v_stg_parse_errors_by_document`, фильтр `parse_created_filter`); сводка прокси-БД. |
+| Дашборд `metabase_dashboards/02_service.json` | «02 Сервис, healthcheck и парсинг журнала»: поток по витрине (heatmap по **Обработано IPS** с тем же `dwh_date`, что топы и **06** архив); сигналы healthcheck, очередь, тренд парсинга с `parse_created_filter`; детальные карточки staging; сводка прокси-БД. |
 | Полный аудит BI и интеграции | `docs/BI_EGISZ_INFOKLINIKA_AUDIT.md` (техника, витрина, Metabase, healthcheck, роли, k8s) |
 | Операторам Config UI (лог, прогресс, курсоры, Metabase vs веб) | `README.md` → [Синхронизация Firebird → PostgreSQL](README.md#синхронизация-firebird--postgresql) |
 

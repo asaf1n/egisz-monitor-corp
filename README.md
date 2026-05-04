@@ -159,17 +159,17 @@ Firebird: EXCHANGELOG, EGISZ_MESSAGES, EGISZ_LICENSES (+ JPERSONS)
 
 Описания отчётов задаются JSON в [`metabase_dashboards/`](metabase_dashboards/); при старте пода Metabase [`metabase/provision.sh`](metabase/provision.sh) вызывает `setup-dashboards.sh` и создаёт дашборды в **корне личной коллекции** администратора (см. [`docs/BI_EGISZ_INFOKLINIKA_AUDIT.md`](docs/BI_EGISZ_INFOKLINIKA_AUDIT.md) §4). По витрине колбэков агрегаты считают **документ**, а не строку журнала: **`COUNT(DISTINCT "Связанное сообщение")`** соответствует одному `relates_to_id` на колбэк. Для **очереди без ответа** в отчётах используется **`COUNT(DISTINCT "localUid СЭМД")`** (один исходящий документ). На дашборде **04** топы по тексту отказа РЭМД строятся по **первому значимому** элементу JSON «Ошибки JSON» **на документ**, чтобы один отказ не размножал строки в рейтинге; на **05** та же логика для управленческих карточек по ошибкам.
 
-Блок **healthcheck** (сигналы, heatmap, очередь, парсинг, прокси-БД) на дашборде **02** читает представления **`v_health_*_ui`** из [`sql/005_healthcheck.sql`](sql/005_healthcheck.sql); в Config UI те же данные доступны через **`GET /api/healthcheck`**. Ошибки **разбора канала** (битый XML, нет `relatesToMessage`) — внизу **02** (`v_stg_parse_errors_by_document`, фильтр **`parse_created_filter`**) и в сигнале **parse_errors_burst**.
+На дашборде **02** блок **healthcheck** (сигналы, топ 24ч, очередь, прокси-БД) читает **`v_health_*_ui`** из [`sql/005_healthcheck.sql`](sql/005_healthcheck.sql); **heatmap** по клиникам строится по витрине (**Обработано IPS**), как архив СЭМД. В Config UI те же данные healthcheck — **`GET /api/healthcheck`**. Ошибки **разбора канала** (битый XML, нет `relatesToMessage`) — внизу **02** (`v_stg_parse_errors_by_document`, **`parse_created_filter`**) и в сигнале **parse_errors_burst**.
 
 ### Каталог дашбордов (пять JSON)
 
 **`01_operational.json` — «01 Оперативный мониторинг и динамика».** Срез для смены и L2: последние операции, статусы, ошибки по СЭМД и клиникам, топы, «% ошибок»; плюс **тренды** (календарь по «День (тренд)», объём по часам за 72 ч). Фильтры URL: `dwh_date_filter`, `top_semd_filter`, `top_clinic_filter`.
 
-**`02_service.json` — «02 Сервис, healthcheck и парсинг журнала».** Нагрузка по витрине (топы СЭМД и клиник), healthcheck (сигналы, heatmap, очередь, прокси-БД), почасовой тренд парсинга и **две детальные карточки** staging с отдельным фильтром даты **`parse_created_filter`** и **`err_parse_code_filter`**.
+**`02_service.json` — «02 Сервис, healthcheck и парсинг журнала».** Нагрузка по витрине (топы, heatmap по **Обработано IPS** с тем же периодом, что и остальные карточки потока), healthcheck (сигналы, очередь, прокси-БД), тренд парсинга и **детальные карточки** staging с **`parse_created_filter`** и **`err_parse_code_filter`**.
 
 **`03_documents_no_response.json` — «03 Документы без ответа».** Очередь callback: список, топы, возраст ожидания, типы СЭМД, детализация. Дата по **«Отправлено»**; те же **код СЭМД** и **JID**, что на **01**.
 
-**`04_quality_and_errors.json` — «04 Ошибки и качество данных».** Качество витрины (успешность, JID/OID, полнота полей) и разбор отказов РЭМД (топы, доли, сводные таблицы). Общий период по **«Обработано IPS»**.
+**`04_quality_and_errors.json` — «04 Ошибки и качество данных».** Качество витрины (успешность, JID/OID, полнота полей) и разбор отказов РЭМД (топы, доли, **матрица СЭМД × тип ошибки** для всплесков по всем клиникам, сводные таблицы). Общий период по **«Обработано IPS»**.
 
 **`05_executive.json` — «05 Управление СЭМД».** Сводки для руководства (витрина + очередь, разные привязки `dwh_date` на карточках — см. [`docs/BI_EGISZ_INFOKLINIKA_AUDIT.md`](docs/BI_EGISZ_INFOKLINIKA_AUDIT.md) §4.9).
 

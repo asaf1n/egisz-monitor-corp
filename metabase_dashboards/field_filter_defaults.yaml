@@ -198,15 +198,17 @@ dashboards:
         other_variables: [top_clinic]
         native_filters: none
       - name: 02 · Heatmap клиники × дни (доля ошибок)
-        table_ref: fact_egisz_transactions
-        other_variables: [top_clinic]
-        native_filters: none
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+        other_variables: [top_semd, top_clinic]
       - name: 02 · Возраст очереди без ответа
         table_ref: v_health_proxy_db_ui
         native_filters: none
       - name: 02 · Тренд ошибок парсинга
         table_ref: v_stg_parse_errors_by_document
-        native_filters: none
+        metabase-field-filters:
+          parse_created: { table_ref: v_stg_parse_errors_by_document, field_name: created_at }
       - name: 02 · Сводка прокси-БД
         table_ref: v_health_proxy_db_ui
         native_filters: none
@@ -312,6 +314,10 @@ dashboards:
         metabase-field-filters:
           dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
       - name: 04 · Рейтинг клиник по ошибкам
+        table_ref: v_egisz_transactions_enriched_ui
+        metabase-field-filters:
+          dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }
+      - name: "04 · Матрица: тип СЭМД × тип ошибки"
         table_ref: v_egisz_transactions_enriched_ui
         metabase-field-filters:
           dwh_date: { table_ref: v_egisz_transactions_enriched_ui, field_name: Обработано IPS }

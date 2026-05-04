@@ -1,6 +1,6 @@
 {
   "name": "04 Ошибки и качество данных",
-  "description": "**Качество витрины:** успешность по клиникам и типам СЭМД, проверки JID/OID, полнота ключевых полей. **Отказы РЭМД:** распределение и рейтинги по тексту ошибки из «Ошибки JSON». Общий фильтр периода по дате **«Обработано IPS»** на всех карточках.",
+  "description": "**Качество витрины:** успешность по клиникам и типам СЭМД, проверки JID/OID, полнота ключевых полей. **Отказы РЭМД:** распределение и рейтинги по тексту ошибки из «Ошибки JSON», **матрица СЭМД × тип ошибки** (pivot) для всплесков однотипных отказов по всем клиникам. Общий фильтр периода по дате **«Обработано IPS»** на всех карточках.",
   "width": "full",
   "parameters": [
     {
@@ -733,6 +733,73 @@
       "col": 0
     },
     {
+      "name": "04 · Матрица: тип СЭМД × тип ошибки",
+      "description": "Pivot-таблица: по оси Y — подпись СЭМД (как в рейтингах), по оси X — нормализованный текст ошибки (`egisz_friendly_error_item` по **каждому** значимому элементу «Ошибки JSON», не только первому). **Документов** — число уникальных «Связанное сообщение» в ячейке по **всем клиникам**; один документ с несколькими разными ошибками попадает в несколько ячеек. Пустой/бессодержательный массив — строка «(ошибка без деталей)».",
+      "table_ref": "v_egisz_transactions_enriched_ui",
+      "metabase-field-filters": {
+        "dwh_date": {
+          "table_ref": "v_egisz_transactions_enriched_ui",
+          "field_name": "Обработано IPS"
+        }
+      },
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "WITH raw AS ( SELECT v.\"Связанное сообщение\", LEFT( CASE WHEN NULLIF(TRIM(v.\"Код СЭМД\"), '') IS NOT NULL THEN TRIM(v.\"Код СЭМД\") || COALESCE(' · ' || NULLIF(LEFT(TRIM(v.\"Наименование СЭМД\"), 40), ''), '') WHEN NULLIF(TRIM(v.\"Наименование СЭМД\"), '') IS NOT NULL THEN LEFT(TRIM(v.\"Наименование СЭМД\"), 72) ELSE '(неизвестно)' END, 80 ) AS semd_lbl, v.\"Ошибки JSON\" FROM public.v_egisz_transactions_enriched_ui v WHERE v.\"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] ), expanded AS ( SELECT r.\"Связанное сообщение\", r.semd_lbl, LEFT(public.egisz_friendly_error_item(elem->>'code', elem->>'message'), 120) AS err_lbl FROM raw r CROSS JOIN LATERAL jsonb_array_elements(COALESCE(r.\"Ошибки JSON\", '[]'::jsonb)) AS je(elem) WHERE NULLIF(elem->>'message', '') IS NOT NULL OR NULLIF(elem->>'code', '') IS NOT NULL UNION ALL SELECT r.\"Связанное сообщение\", r.semd_lbl, '(ошибка без деталей)'::text FROM raw r WHERE NOT EXISTS ( SELECT 1 FROM jsonb_array_elements(COALESCE(r.\"Ошибки JSON\", '[]'::jsonb)) AS je2(elem2) WHERE NULLIF(elem2->>'message', '') IS NOT NULL OR NULLIF(elem2->>'code', '') IS NOT NULL ) ) SELECT semd_lbl AS \"Тип СЭМД\", err_lbl AS \"Тип ошибки\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM expanded GROUP BY 1, 2 ORDER BY 3 DESC, 1, 2",
+          "template-tags": {
+            "dwh_date": {
+              "id": "fa000009-0009-4009-8009-000000000001",
+              "name": "dwh_date",
+              "display-name": "По дате «Обработано»",
+              "type": "dimension",
+              "widget-type": "date/all-options"
+            }
+          }
+        },
+        "database": 1
+      },
+      "display": "table",
+      "visualization_settings": {
+        "table.pivot": true,
+        "table.pivot_column": "Тип ошибки",
+        "table.cell_column": "Документов",
+        "table.column_formatting": [
+          {
+            "columns": [
+              "Документов"
+            ],
+            "type": "range",
+            "colors": [
+              "#EFF6FF",
+              "#FBBF24",
+              "#DC2626"
+            ],
+            "min_type": "custom",
+            "min_value": 0,
+            "max_type": "custom",
+            "max_value": 100
+          }
+        ],
+        "column_settings": {
+          "[\"name\",\"Тип СЭМД\"]": {
+            "column_title": "Тип СЭМД"
+          },
+          "[\"name\",\"Тип ошибки\"]": {
+            "column_title": "Тип ошибки"
+          },
+          "[\"name\",\"Документов\"]": {
+            "column_title": "Документов",
+            "number_separators": ".",
+            "decimals": 0
+          }
+        }
+      },
+      "sizeX": 24,
+      "sizeY": 11,
+      "row": 43,
+      "col": 0
+    },
+    {
       "name": "04 · Сводка: тип ошибки × СЭМД × клиника",
       "description": "До 400 сочетаний «тип ошибки × СЭМД × клиника» с наибольшим числом документов. Тип ошибки — первый значимый элемент «Ошибки JSON»; «Количество» — COUNT(DISTINCT «Связанное сообщение») в группе.",
       "table_ref": "v_egisz_transactions_enriched_ui",
@@ -790,7 +857,7 @@
       },
       "sizeX": 24,
       "sizeY": 10,
-      "row": 43,
+      "row": 54,
       "col": 0
     }
   ]
