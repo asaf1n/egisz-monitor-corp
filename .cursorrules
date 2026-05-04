@@ -44,7 +44,7 @@
 | Очередь **без ответа** | `v_rpt_documents_no_response_ui` | Исходящий `DOCUMENTID` есть в staging, в факте **нет** строки с тем же **`local_uid_semd`** — нет callback; возможен сбой шлюза, задержка ЕГИСЗ или разрыв окна ETL. |
 | **`stg_parse_errors`** | таблица + представление **`v_stg_parse_errors_by_document`** + дашборд «Ошибки и разбор» | Не удалось построить факт (нет связки / битый XML). В сводках и healthcheck считают **уникальные документы** (`document_group_key`), не сырые строки журнала; трассировка: **LOGID** журнала, **MSGID** сообщения (**EXCHANGELOG.MSGID**), **EGMID** записи **EGISZ_MESSAGES**. |
 | **`etl_state.last_log_id`** | служебно | Водяной знак по **`LOGID`**, не метрика качества интеграции. |
-| **`etl_state.last_egmid`** | служебно | Курсор выгрузки **`EGISZ_MESSAGES`** в `stg_egisz_messages_journal`: в Firebird читаем строки с **`EGMID > last_egmid`**; после успешного sync фиксируется достигнутый максимум. |
+| **`etl_state.last_egmid`** / **`messages_snapshot_high_egmid`** | служебно | Один смысл: максимальный **EGMID**, до которого дошла keyset-выгрузка снимка **`EGISZ_MESSAGES`** в `stg_egisz_messages_journal` (**`EGMID > after_egmid`**). При старте run читается **`messages_snapshot_high_egmid`**; после **успешного** sync оба столбца обновляются к одному значению. Параллельно пакеты журнала могут **догружать** строки по **`MSGID`** из Firebird, если их ещё нет в staging. |
 
 ---
 
@@ -96,7 +96,7 @@
 2. **Топ клиник по error rate (24ч)** + **Heatmap клиники × дни** (по **Обработано IPS** и фильтру периода дашборда, как архив) — массовая проверка по клиникам. Heatmap полезен для поиска **долгоиграющих** проблем (vs точечного выпада).
 3. **Возраст очереди без ответа** (3 столбца: < 1ч, 1–24ч, > 24ч) — здоровье очереди исходящих.
 4. **Тренд ошибок парсинга** — состояние канала данных (`stg_parse_errors`), не вины МИС.
-5. **Сводка прокси-БД** — снимок `staging_max_egmid`, курсор `etl_state.last_log_id`, **курсор EGMID** (`max(last_egmid, source_max_egmid)` из `etl_state`, без запроса MAX к Firebird), `etl_last_update`. Расхождение **staging** ↔ **курсор EGMID** в Healthcheck (`egmid_lag`) подсвечивает отставание очереди от обработанного журнала.
+5. **Сводка прокси-БД** — снимок `staging_max_egmid`, курсор `etl_state.last_log_id`, **курсор EGMID** (`etl_state.last_egmid` — выгрузка снимка `EGISZ_MESSAGES`, без запроса MAX к Firebird), `etl_last_update`. Расхождение **staging** ↔ **курсор EGMID** в Healthcheck (`egmid_lag`) подсвечивает отставание очереди от обработанного журнала.
 
 **Пороговая логика:**
 
@@ -124,7 +124,7 @@
 }
 ```
 
-`proxy_db.etl_cursor_egmid` в ответе API соответствует в PostgreSQL выражению **GREATEST(`etl_state.last_egmid`, `etl_state.source_max_egmid`)** (пик EGMID ETL для сравнения со staging), а не курсору постраничной выгрузки снимка **`stg_egisz_messages_journal`**.
+`proxy_db.etl_cursor_egmid` в ответе API соответствует в PostgreSQL значению **`etl_state.last_egmid`** (курсор выгрузки снимка `EGISZ_MESSAGES`).
 
 При недоступной PostgreSQL: `{"ok": false, "errors": ["PostgreSQL недоступен: ..."]}` со статусом 200 (graceful degrade — UI показывает заметку, не падает).
 
@@ -149,9 +149,12 @@ Lock — **session-level**: автоматически снимается при
 `run_sync` для тестируемости разнесён на:
 
 - `_count_exchangelog_total()` → `int` (заглушка для прогресса UI);
-- `_export_exchangelog_page(cfg, base_sql, …)` → одна страница **сырого** `EXCHANGELOG` из FB (`base_sql` = `exchangelog_inner_sql_for_etl`, **без** JOIN к `EGISZ_MESSAGES` во Firebird; поля сообщения подтягиваются из PostgreSQL по **MSGID**);
-- `_process_exchangelog_pages(...)` → `_PageStats` (постранично: кэш по **MSGID** из PostgreSQL, парсинг, UPSERT);
-- `_refresh_outbound_documents(cfg, pg, …)` (полная перезапись `stg_egisz_outbound_documents` из `EGISZ_MESSAGES` по окну **CREATEDATE** = `sync_window_days`).
+- `_sync_journal_snapshot_interleaved(...)` — чередование пакетов **EXCHANGELOG** и страниц снимка **EGISZ_MESSAGES** (keyset по **EGMID**), плюс догрузка **`EGISZ_MESSAGES` по MSGID** для строк журнала без метаданных в staging;
+- `_export_exchangelog_page(cfg, base_sql, …)` → одна страница **сырого** `EXCHANGELOG` из FB (`base_sql` = `exchangelog_inner_sql_for_etl`, **без** JOIN к `EGISZ_MESSAGES` во Firebird);
+- `_process_exchangelog_pages(...)` → `_PageStats` (упрощённый путь без PG/staging: только журнал);
+- `_refresh_outbound_documents(cfg, pg, …)` (полная перезапись `stg_egisz_outbound_documents`; прогресс — строки и **уникальные `DOCUMENTID`**).
+
+**System Log / прогресс:** при разборе журнала UI показывает **уникальные документы** (`localUid` / `emdrId`), а не только число строк; для исходящих — **`outbound_*_docs`** (документы) в дополнение к строкам.
 
 Юнит-тесты — `tests/test_etl_helpers.py` (без живого Firebird/Postgres, с mock-fetch и FakeConn для advisory lock).
 

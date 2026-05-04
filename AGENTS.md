@@ -22,9 +22,9 @@
 | Модуль | Роль |
 |--------|------|
 | `cli.py` | CLI: `sync`, `apply-schema`, проверки БД |
-| `etl.py` | **`run_sync`**: справочники первыми; чередование снимка **`EGISZ_MESSAGES`** → **`stg_egisz_messages_journal`** (FB→PG) и **EXCHANGELOG** по **`LOGID`**; курсоры: **`LOGID > etl_state.last_log_id`**, **`EGMID > etl_state.last_egmid`**; при **`sync_window_days` <= 0** — без окна по **`LOGDATE`**/**`CREATEDATE`** в Firebird и полный пересъём staging снимка (**TRUNCATE** + сброс **`last_egmid`** в 0); сопоставление **`MSGID`** в PostgreSQL; UPSERT фактов; outbound по **`DOCUMENTID`**/**`CREATEDATE`**; без COUNT журнала в Firebird; `pg_try_advisory_lock` |
-| `parser.py` | **`EgiszMonitorParser`**: разбор MSGTEXT (SOAP/XML), `relates_to_id`, `status`, `errors_json`, `localUid`, `resolve_clinic` |
-| `sql_util.py` | SQL к Firebird: **EXCHANGELOG** без JOIN (пагинация по **`LOGID`**); **EGISZ_MESSAGES** для снимка журнала (FIRST/SKIP, окно **`CREATEDATE`**, непустой **`DOCUMENTID`**); исходящие для staging; диагностический **`MSGID IN`** |
+| `etl.py` | **`run_sync`**: справочники первыми; **чередование** пакетов **EXCHANGELOG** (`LOGID > last_log_id`, без JOIN к FB `EGISZ_MESSAGES`) и страниц снимка **EGISZ_MESSAGES** в **`stg_egisz_messages_journal`** (keyset **`EGMID > after_egmid`**, стартовый `after` из **`etl_state.messages_snapshot_high_egmid`**, после успешного sync выставляется в тот же максимум, что и **`last_egmid`**); перед разбором пакета журнала — **догрузка** строк **`EGISZ_MESSAGES` по `MSGID`**, отсутствующих в staging (`egisz_messages_by_msgids_sql`); окно **`LOGDATE`/`CREATEDATE`** в Firebird только при **`sync_window_days` > 0**; при **0** — полный охват **за курсором** без дат; при **< 0** — «с нуля»: сброс **`last_log_id`/`last_egmid`/`messages_snapshot_high_egmid`**, `TRUNCATE` staging снимка; сопоставление журнала с сообщениями в PG по **`MSGID`**; UPSERT фактов; **исходящие** — полная перезапись **`stg_egisz_outbound_documents`** в том же окне **`CREATEDATE`**; прогресс UI: **`documents_*`** (uniq `localUid`/`emdrId`) и **`outbound_*_docs`** (uniq **`DOCUMENTID`**); без COUNT журнала в Firebird; `pg_try_advisory_lock` |
+| `parser.py` | **`EgiszMonitorParser`**: разбор MSGTEXT (SOAP/XML), `relates_to_id`, `status`, `errors_json`, `localUid`, `emdr_id`, `resolve_clinic` |
+| `sql_util.py` | SQL к Firebird: **EXCHANGELOG** без JOIN (пагинация по **`LOGID`**); **EGISZ_MESSAGES**: keyset по **`EGMID`** для снимка, выборка по списку **`MSGID`** для догрузки; окно **`CREATEDATE`** и непустой **`DOCUMENTID`** — как у снимка, так и у исходящих |
 | `pg_warehouse.py` | Подключение PG, применение `sql/*.sql`, `etl_state`, staging исходящих, UPSERT факта чанками / измерений |
 | `fb_client.py` | Клиент Firebird |
 | `config_loader.py` | Загрузка YAML (`EGISZ_MONITOR_CONFIG`, по умолчанию `config/egisz_monitor.yaml`) |
@@ -38,10 +38,10 @@
 | Файл | Содержимое |
 |------|------------|
 | `001_schema.sql` | Таблицы факта/измерений, `stg_jpersons_import`, `stg_egisz_licenses_import`, **`stg_egisz_messages_journal`**, `stg_egisz_outbound_documents`, представления `v_*`, **`v_stg_parse_errors_by_document`** (ключ документа для ошибок парсинга), функции `egisz_friendly_*`, `dim_column_display_labels` |
-| `002_etl_state.sql` | Таблица `etl_state`: `last_log_id` (курсор EXCHANGELOG); `last_egmid` (курсор снимка EGISZ_MESSAGES); пики FB (`source_max_*`) |
+| `002_etl_state.sql` | Таблица `etl_state`: `last_log_id` (водяной знак **LOGID** журнала); `last_egmid` и **`messages_snapshot_high_egmid`** — один и тот же смысл (максимум **EGMID**, пройденный keyset-выгрузкой снимка): при старте ETL читается **`messages_snapshot_high_egmid`** для **`EGMID > …`**, в конце успешного run оба поля записываются в одно значение; `source_max_licenses_modifydate`; `source_max_egmid` — устарело (не используется) |
 | `005_healthcheck.sql` | Healthcheck-витрина: `v_health_by_clinic` (агрегаты за 24ч по **уникальным** `relates_to_id`, очередь по **уникальным** `local_uid_semd`), `v_health_signals` (5 сигналов), `v_health_proxy_db` (сводка staging исходящих + курсор ETL) + UI-обёртки `*_ui` для блока healthcheck в `02_service.json` |
 
-В каталоге `sql/` хранятся **только** DDL/витрина для Job `egisz-reports-schema-init` и ETL; **не** добавлять сюда одноразовые диагностические запросы для DBeaver — операторская сверка курсора и объёмов описана в **`README.md`** (раздел «Ручная диагностика синка»).
+В каталоге `sql/` хранятся **только** DDL/витрина для Job `egisz-reports-schema-init` и ETL; **не** добавлять сюда одноразовые диагностические запросы. Предикаты выгрузки и курсоры — в **`egisz_monitor_corp/sql_util.py`** и в этом файле (**раздел ETL**).
 
 Схема на кластере: Job `egisz-reports-schema-init` (порядок файлов — `sql/schema_apply_order.txt`, по умолчанию `001 + 002 + 005`), локально — `egisz-monitor apply-schema`. ETL `run_sync` идемпотентно применяет тот же набор при каждом запуске.
 
@@ -125,15 +125,18 @@
 | Config UI: вкладки **Snapshot / Healthcheck** | Snapshot — текущие `EGMID/LOGID/MODIFYDATE` (как раньше). Healthcheck — сигналы, top-3 клиники, прокси-БД (опрос `/api/healthcheck` каждые 30 c). **Сохранить в YAML** также патчит CronJob `egisz-monitor-sync` по `auto_sync` (RBAC SA `conf-ui`). |
 | Дашборд `metabase_dashboards/02_service.json` | «02 Сервис, healthcheck и парсинг журнала»: поток по витрине (heatmap по **Обработано IPS** с тем же `dwh_date`, что топы и **06** архив); сигналы healthcheck, очередь, тренд парсинга с `parse_created_filter`; детальные карточки staging; сводка прокси-БД. |
 | Полный аудит BI и интеграции | `docs/BI_EGISZ_INFOKLINIKA_AUDIT.md` (техника, витрина, Metabase, healthcheck, роли, k8s) |
-| Операторам Config UI (лог, прогресс, курсоры, Metabase vs веб) | `README.md` → [Синхронизация Firebird → PostgreSQL](README.md#синхронизация-firebird--postgresql) |
+| Операторам Config UI (дашборды vs веб, смысл метрик в отчётах) | `README.md`; технический лог синка и курсоры — **`AGENTS.md`** (раздел ETL), healthcheck — **`GET /api/healthcheck`** |
 
 ## ETL: pipeline и параллельный запуск
 
 `etl.run_sync` расщеплён на чистые функции (см. `etl.py`):
 
 - `_count_exchangelog_total` — заглушка: COUNT в Firebird для прогресса не выполняется.
-- `_process_exchangelog_pages` — постраничный **EXCHANGELOG** из Firebird; кэш полей сообщения по **MSGID** из PostgreSQL (`stg_egisz_messages_journal`); парсинг и UPSERT.
-- `_refresh_outbound_documents` — полная перезапись `stg_egisz_outbound_documents` из Firebird: `EGISZ_MESSAGES` с `DOCUMENTID` в том же окне **`CREATEDATE`**, что и журнал (`sync_window_days`); сортировка `EGMID DESC`, одна строка на `DOCUMENTID`.
+- `_sync_journal_snapshot_interleaved` — основной цикл: пакет **EXCHANGELOG** → догрузка **`EGISZ_MESSAGES` по MSGID** при необходимости → разбор/UPSERT; затем страница снимка **EGISZ_MESSAGES** (`journal_messages_keyset_page_sql`); после исчерпания журнала — добор оставшихся страниц снимка. Поля метаданных сообщения для разбора берутся из PostgreSQL по **MSGID** (`stg_egisz_messages_journal`).
+- `_process_exchangelog_pages` — упрощённый путь без PG (dry-run без staging): только страницы журнала.
+- `_refresh_outbound_documents` — полная перезапись `stg_egisz_outbound_documents` из Firebird: те же отборы **`DOCUMENTID` + окно `CREATEDATE`**, что у снимка; в прогресс кладутся **`outbound_total`/`outbound_loaded`** (строки) и **`outbound_total_docs`/`outbound_loaded_docs`** (уникальные **`DOCUMENTID`**).
+
+**Прогресс Config UI / `EtlProgressPayload`:** при разборе журнала — **`documents_unique`**, **`documents_localuid_unique`**, **`documents_emdrid_unique`** (уникальные значения из разобранного SOAP, не «строки журнала»).
 
 **Single-flight на уровне БД**: в начале `run_sync` берём `pg_try_advisory_lock(hash(pipeline_name))`. Помеченный CronJob `egisz-monitor-sync` (по расписанию `*/15 * * * *`) и UI-кнопка «Синхронизировать сейчас» защищены от гонки — второй процесс выйдет с `PipelineLockBusyError` (CLI exit 75, UI показывает «параллельный sync уже идёт»). Lock — session-level: автоматически освобождается при разрыве соединения, без ручного reset после крэша воркера. Обновления `progress_detail_cb` при неизменной фазе троттлятся (~220 ms), при смене фазы — без задержки, чтобы UI не тормозил выборку и парсинг.
 
@@ -143,14 +146,14 @@
 2. **Витрина / подписи колонок** — `sql/001_schema.sql`; синхронизировать `dim_column_display_labels` и `*_ui` views.
 3. **Дашборды** — править JSON в `metabase_dashboards/` (включая блок healthcheck в `02_service.json`), бамп тега Metabase в `start.ps1` + `k8s/metabase.yaml`, пересборка по **`docs/BI_EGISZ_INFOKLINIKA_AUDIT.md`** §4.
 4. **Healthcheck** — `sql/005_healthcheck.sql`, `pg_warehouse.fetch_healthcheck_snapshot`, эндпоинт `/api/healthcheck`, JS-блок в `config_app.py`, карточки healthcheck в `02_service.json`. Пороги — комментарии к SQL и `docs/BI_EGISZ_INFOKLINIKA_AUDIT.md` §3.3.
-5. **Диагностика синка / курсор для операторов** — только **`README.md`** (раздел «Ручная диагностика синка»); предикаты ETL — **`egisz_monitor_corp/sql_util.py`**.
+5. **Диагностика синка и курсоры** — этот файл (**раздел ETL**) и **`egisz_monitor_corp/sql_util.py`**; снимок **`etl_state`** и healthcheck — Config UI / **`GET /api/healthcheck`**.
 
 ## Где что документировать
 
 | Аудитория | Файл |
 |-----------|------|
-| Операторы, аналитики, обзор продукта и ETL | **`README.md`** |
-| ИИ-агенты и разработчики (структура репо, модули, типовые задачи) | **`AGENTS.md`** |
+| Сотрудники: прототип, дашборды, единицы учёта в отчётах | **`README.md`** |
+| ИИ-агенты и разработчики (структура репо, ETL, модули, выкат) | **`AGENTS.md`** |
 | Домен интеграции, парсинг, сигналы, healthcheck, правила ответа в Cursor | **`.cursorrules`** |
 | Аудит BI + интеграция МИС «Инфоклиника» ↔ ЕГИСЗ (единый том) | **`docs/BI_EGISZ_INFOKLINIKA_AUDIT.md`** |
 

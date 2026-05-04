@@ -45,7 +45,7 @@ def _fmt_fb_timestamp(v: Any) -> str:
 def fetch_firebird_max_license_modifydate(cfg: FirebirdConfig) -> dict[str, Any]:
     """MAX(MODIFYDATE) по EGISZ_LICENSES в Firebird — для сравнения с кешем в etl_state (healthcheck).
 
-    Значения last_egmid / source_max_egmid для UI — из PostgreSQL (etl_state и healthcheck), без MAX(EGMID) по сообщениям в Firebird.
+    Значение last_egmid для UI — из PostgreSQL (etl_state и healthcheck), без MAX(EGMID) по сообщениям в Firebird.
     """
     out: dict[str, Any] = {"max_licenses_modifydate": None, "error": None}
     sql = """

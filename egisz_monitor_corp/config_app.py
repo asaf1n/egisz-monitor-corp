@@ -469,14 +469,12 @@ PAGE = """
     const outT = Number(p.outbound_total);
     const outLD = Number(p.outbound_loaded_docs);
     const outTD = Number(p.outbound_total_docs);
-    const srcEg = p.source_max_egmid;
     const wnote = p.watermark_note != null ? String(p.watermark_note).trim() : '';
     const diag = p.diag_error != null ? String(p.diag_error).trim() : '';
     if (ph === 'sync_failed' || ph === 'stopped_by_user') {
       const parts = [];
       if (logid != null && logid !== '') parts.push('last_log_id ' + String(logid));
       if (egm != null && egm !== '') parts.push('last_egmid ' + String(egm));
-      if (srcEg != null && srcEg !== '') parts.push('source_max_egmid ' + String(srcEg));
       if (wnote) parts.push(wnote);
       if (diag) parts.push(diag);
       const title =
@@ -1013,8 +1011,8 @@ PAGE = """
         { label: 'Очередь > 24ч', value: fmtNum(p.pending_older_24h) },
         { label: 'Очередь 1–24ч', value: fmtNum(p.pending_1_24h) },
         { label: 'Staging max EGMID', value: fmtNum(p.staging_max_egmid) },
-        { label: 'max(last_egmid, source_max_egmid)', value: fmtNum(p.etl_cursor_egmid) },
-        { label: 'Лаг пика etl_state vs staging', value: fmtNum(p.egmid_lag) },
+        { label: 'etl_state.last_egmid (курсор EGISZ_MESSAGES)', value: fmtNum(p.etl_cursor_egmid) },
+        { label: 'Лаг курсора etl_state vs staging', value: fmtNum(p.egmid_lag) },
         { label: 'last_log_id', value: fmtNum(p.etl_last_log_id) },
       ];
       if (p.fact_rows != null) items.push({ label: 'Витрина: строк', value: fmtNum(p.fact_rows) });

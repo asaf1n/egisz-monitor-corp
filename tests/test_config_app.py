@@ -110,7 +110,7 @@ def test_healthcheck_returns_signals_top_clinics_and_proxy(cfg_yaml: Path) -> No
         "egisz_monitor_corp.config_app.fetch_healthcheck_snapshot", return_value=snap
     ), patch(
         "egisz_monitor_corp.config_app.fetch_etl_source_peaks_from_pg",
-        return_value={"source_max_egmid": None, "source_max_licenses_modifydate": None},
+        return_value={"source_max_licenses_modifydate": None},
     ), patch(
         "egisz_monitor_corp.config_app.fetch_firebird_max_license_modifydate", return_value=fb_lic
     ):

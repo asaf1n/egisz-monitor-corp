@@ -51,12 +51,13 @@ def test_default_select_exchangelog_no_join_messages_in_pg() -> None:
 
 
 def test_journal_messages_keyset_page_sql_filters_after_egmid() -> None:
-    inner = journal_messages_staging_base_sql(sync_window_days=None)
-    sql = journal_messages_keyset_page_sql(inner, after_egmid=42_000, limit=500)
+    sql = journal_messages_keyset_page_sql(sync_window_days=None, after_egmid=42_000, limit=500)
     assert "AND m.EGMID > 42000" in sql.replace("\n", " ")
     assert "FIRST 500" in sql.replace("\n", " ")
-    assert "ORDER BY m.EGMID NULLS LAST" in sql.replace("\n", " ")
-    assert "TRIM(m.DOCUMENTID)" in inner
+    assert "ORDER BY m.EGMID" in sql.replace("\n", " ")
+    assert "TRIM(m.DOCUMENTID)" in sql
+    assert "FROM EGISZ_MESSAGES m" in sql
+    assert "FROM (" not in sql
 
 
 def test_journal_messages_base_matches_outbound_predicates() -> None:

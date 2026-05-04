@@ -108,7 +108,7 @@ def test_fetch_healthcheck_snapshot_aggregates_levels_and_top_clinics() -> None:
         19,
         datetime(2026, 4, 30, 12, 5, tzinfo=timezone.utc),
         18000123,
-        29262000,
+        29261989,
     )
 
     con = _FakeConn([signals_rows, by_clinic_rows, [proxy_db_row]])
@@ -138,7 +138,7 @@ def test_fetch_healthcheck_snapshot_aggregates_levels_and_top_clinics() -> None:
     assert proxy["pending_older_24h"] == 19
     assert proxy["etl_last_log_id"] == 18000123
     assert proxy["staging_max_egmid"] == 29261989
-    assert proxy["etl_cursor_egmid"] == 29262000
+    assert proxy["etl_cursor_egmid"] == 29261989
 
 
 def test_fetch_healthcheck_snapshot_fact_fallback_when_staging_empty() -> None:
@@ -202,13 +202,12 @@ def test_fetch_etl_watermark_row_returns_ints() -> None:
     cur = MagicMock()
     cur.__enter__.return_value = cur
     cur.__exit__.return_value = None
-    cur.fetchone.return_value = (29_614_055, 89_339_643, 89_400_000, 88_000_000)
+    cur.fetchone.return_value = (29_614_055, 89_339_643, 88_000_000)
     con = MagicMock()
     con.cursor.return_value = cur
     out = fetch_etl_watermark_row(con, "firebird_exchangelog")
     assert out == {
         "last_log_id": 29_614_055,
         "last_egmid": 89_339_643,
-        "source_max_egmid": 89_400_000,
         "messages_snapshot_high_egmid": 88_000_000,
     }

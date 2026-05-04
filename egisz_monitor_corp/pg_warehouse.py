@@ -221,7 +221,6 @@ def fetch_etl_watermark_row(con, pipeline: str) -> dict[str, int] | None:  # typ
             SELECT
               last_log_id,
               COALESCE(last_egmid, 0),
-              COALESCE(source_max_egmid, 0),
               COALESCE(messages_snapshot_high_egmid, 0)
             FROM etl_state
             WHERE pipeline = %s
@@ -232,11 +231,10 @@ def fetch_etl_watermark_row(con, pipeline: str) -> dict[str, int] | None:  # typ
         row = cur.fetchone()
     if not row:
         return None
-    lid_raw, eg_raw, src_raw, snap_raw = row
+    lid_raw, eg_raw, snap_raw = row
     return {
         "last_log_id": int(lid_raw) if lid_raw is not None else 0,
         "last_egmid": int(eg_raw) if eg_raw is not None else 0,
-        "source_max_egmid": int(src_raw) if src_raw is not None else 0,
         "messages_snapshot_high_egmid": int(snap_raw) if snap_raw is not None else 0,
     }
 
@@ -246,40 +244,30 @@ def fetch_etl_source_peaks_from_pg(con, pipeline: str) -> dict[str, Any]:  # typ
     with con.cursor() as cur:
         cur.execute(
             """
-            SELECT source_max_egmid, source_max_licenses_modifydate
+            SELECT source_max_licenses_modifydate
             FROM etl_state WHERE pipeline = %s
             """,
             (pipeline,),
         )
         row = cur.fetchone()
     if not row:
-        return {"source_max_egmid": None, "source_max_licenses_modifydate": None}
-    eg_raw, lic_raw = row
-    eg = int(eg_raw) if eg_raw is not None else None
+        return {"source_max_licenses_modifydate": None}
+    (lic_raw,) = row
     lic_out: Any = None
     if lic_raw is not None:
         iso = getattr(lic_raw, "isoformat", None)
         lic_out = iso() if callable(iso) else lic_raw
-    return {"source_max_egmid": eg, "source_max_licenses_modifydate": lic_out}
+    return {"source_max_licenses_modifydate": lic_out}
 
 
 def set_etl_source_peaks(
     con,
     pipeline: str,
-    max_egmid: Any,
     max_licenses_modifydate: Any,
 ) -> None:  # type: ignore[no-untyped-def]
-    """Записать в etl_state source_max_egmid и пик MODIFYDATE лицензий.
-
-    ``max_egmid=None`` — явно обнулить source_max_egmid (NULL), если нужно убрать устаревший пик.
-    """
+    """Записать в etl_state пик MODIFYDATE лицензий (кэш для UI без опроса Firebird)."""
     sets: list[str] = []
     params: list[Any] = []
-    if max_egmid is None:
-        sets.append("source_max_egmid = NULL")
-    else:
-        sets.append("source_max_egmid = %s")
-        params.append(int(max_egmid))
     if max_licenses_modifydate is not None:
         sets.append("source_max_licenses_modifydate = %s")
         params.append(max_licenses_modifydate)
@@ -870,14 +858,13 @@ def fetch_healthcheck_snapshot(con, *, top_clinics: int = 5) -> dict[str, Any]: 
 
 
 def fetch_pg_sync_snapshot(con, pipeline: str) -> dict[str, Any]:  # type: ignore[no-untyped-def]
-    """Показатели из etl_state плюс max EGMID из витрины, если курсор в состоянии ещё нулевой."""
+    """Показатели из etl_state (курсоры) + max EGMID из витрины как подсказка, если курсор ещё нулевой."""
     with con.cursor() as cur:
         cur.execute(
             """
             SELECT
                 last_log_id,
                 COALESCE(last_egmid, 0),
-                COALESCE(source_max_egmid, 0),
                 source_max_licenses_modifydate
             FROM etl_state
             WHERE pipeline = %s
@@ -908,11 +895,10 @@ def fetch_pg_sync_snapshot(con, pipeline: str) -> dict[str, Any]:  # type: ignor
             "egmid": facts_only if facts_only > 0 else None,
             "licenses_modifydate": None,
         }
-    lid_raw, last_egmid_raw, src_eg_raw, lic_raw = row
+    lid_raw, last_egmid_raw, lic_raw = row
     log_id = int(lid_raw) if lid_raw is not None else None
     last_eg = int(last_egmid_raw) if last_egmid_raw is not None else 0
-    src_eg = int(src_eg_raw) if src_eg_raw is not None else 0
-    eg_display = max(last_eg, src_eg)
+    eg_display = last_eg
     facts_max_eg = 0
     try:
         with con.cursor() as cur:
@@ -929,7 +915,8 @@ def fetch_pg_sync_snapshot(con, pipeline: str) -> dict[str, Any]:  # type: ignor
                 facts_max_eg = int(mx[0])
     except Exception:
         facts_max_eg = 0
-    eg_display = max(eg_display, facts_max_eg)
+    if eg_display <= 0 and facts_max_eg > 0:
+        eg_display = facts_max_eg
     lic_iso = lic_raw.isoformat() if lic_raw is not None else None
 
     return {

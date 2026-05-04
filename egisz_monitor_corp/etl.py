@@ -7,10 +7,11 @@
 
 Источники Firebird в `run_sync`:
   • **JPERSONS** и **EGISZ_LICENSES** — первый шаг после lock: staging, merge **dim_clinics**, кэш для **build_record**.
-  • **EGISZ_MESSAGES** и **EXCHANGELOG** — чередование страниц (``batch_size``): сообщения выгружаются в PostgreSQL
-    `stg_egisz_messages_journal` **инкрементально по EGMID** с водяным знаком `etl_state.last_egmid`
-    (и prune по окну дат при `sync_window_days > 0`); затем журнал EXCHANGELOG обрабатывается по LOGID.
-    Сопоставление журнала с сообщениями выполняется уже в PostgreSQL по `MSGID`.
+  • **EGISZ_MESSAGES** и **EXCHANGELOG** — чередование пакетов журнала (``LOGID``) и страниц снимка сообщений
+    (**keyset** ``EGMID > after_egmid``, стартовый ``after`` из ``etl_state.messages_snapshot_high_egmid``;
+    в конце успешного run тот же максимум пишется в ``last_egmid``); prune/окно по **CREATEDATE** при
+    ``sync_window_days > 0``. Перед разбором пакета журнала — **догрузка** ``EGISZ_MESSAGES`` по **MSGID**,
+    если строки ещё нет в staging. Сопоставление журнала с сообщениями в PostgreSQL — по **MSGID**.
   • Исходящие: `_refresh_outbound_documents` (окно **CREATEDATE** при ``sync_window_days`` > 0).
 
 Кооперативная остановка: проверка **перед** каждым SELECT к Firebird (справочники, страницы журнала и снимка сообщений).
@@ -61,7 +62,6 @@ from egisz_monitor_corp.sql_util import (
     default_jpersons_select_sql,
     egisz_messages_by_msgids_sql,
     exchangelog_inner_sql_for_etl,
-    journal_messages_staging_base_sql,
     outbound_documents_staging_select,
     journal_messages_keyset_page_sql,
     paginated_exchangelog_sql,
@@ -245,7 +245,7 @@ def _load_reference_tables(
     merge_dim_clinics_from_license_staging(pg)
     pg.commit()
     peak_lic = _max_license_modifydate(lic_rows)
-    set_etl_source_peaks(pg, pipeline, None, peak_lic)
+    set_etl_source_peaks(pg, pipeline, peak_lic)
     pg.commit()
     log(
         "Справочники: запись staging, merge dim_clinics (JPERSONS + EGISZ_LICENSES), пик лицензий в etl_state."
@@ -310,7 +310,6 @@ def _journal_messages_staging_fetch_keyset_page(
     cfg: CorpAppConfig,
     pg: Any,
     *,
-    base_inner: str,
     after_egmid: int,
     batch: int,
     page: int,
@@ -329,7 +328,11 @@ def _journal_messages_staging_fetch_keyset_page(
         "journal_batch_rows": batch,
     }
     detail({"phase": "journal_messages_export_firebird", **base_pl})  # type: ignore[arg-type]
-    sql = journal_messages_keyset_page_sql(base_inner, after_egmid=after_egmid, limit=batch)
+    sql = journal_messages_keyset_page_sql(
+        sync_window_days=_etl_sync_window_days(cfg),
+        after_egmid=after_egmid,
+        limit=batch,
+    )
     fb_timeout = max(1, int(cfg.etl.firebird_query_timeout_sec))
     tick_sec = min(15, max(5, fb_timeout // 60))
 
@@ -402,7 +405,6 @@ def _sync_journal_snapshot_interleaved(
         )
 
     batch = max(1, cfg.etl.batch_size)
-    base_msgs = journal_messages_staging_base_sql(sync_window_days=_etl_sync_window_days(cfg))
     pipeline = cfg.etl.pipeline_name
 
     if _messages_journal_full_rescan(cfg):
@@ -479,7 +481,6 @@ def _sync_journal_snapshot_interleaved(
             msg_scan, inc, partial = _journal_messages_staging_fetch_keyset_page(
                 cfg,
                 pg,
-                base_inner=base_msgs,
                 after_egmid=msg_scan,
                 batch=batch,
                 page=msg_page,
@@ -498,7 +499,6 @@ def _sync_journal_snapshot_interleaved(
         msg_scan, inc, partial = _journal_messages_staging_fetch_keyset_page(
             cfg,
             pg,
-            base_inner=base_msgs,
             after_egmid=msg_scan,
             batch=batch,
             page=msg_page,
@@ -1163,7 +1163,7 @@ def _read_cursor(cfg: CorpAppConfig, pg: Any, *, dry_run: bool) -> int:
 
 
 def _read_egmid_cursor(cfg: CorpAppConfig, pg: Any, *, dry_run: bool) -> int:
-    """Прочитать `etl_state.last_egmid` — ватермарк по max(EGMID) из обработанного журнала (EGMID = ключ строки EGISZ_MESSAGES)."""
+    """Прочитать `etl_state.last_egmid` для лога старта (водяной знак EGMID снимка; в цикле keyset используется `messages_snapshot_high_egmid`, после sync оба поля совпадают)."""
     pipeline = cfg.etl.pipeline_name
     if dry_run:
         pg_r = connect_pg(cfg.postgres)
@@ -1355,7 +1355,7 @@ def run_sync(
             )
             # last_egmid — курсор выгрузки снимка EGISZ_MESSAGES (аналог last_log_id для журнала).
             # messages_snapshot_high_egmid дублирует тот же курсор для совместимости со схемой/диагностикой.
-            set_etl_source_peaks(pg, pipeline, None, reference_max_license_modifydate)
+            set_etl_source_peaks(pg, pipeline, reference_max_license_modifydate)
             snap_hi = int(page_stats.messages_snapshot_scan_high_egmid)
             set_last_egmid(pg, pipeline, snap_hi)
             set_messages_snapshot_high_egmid(pg, pipeline, snap_hi)

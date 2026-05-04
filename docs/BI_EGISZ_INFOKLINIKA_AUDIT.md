@@ -1,6 +1,6 @@
 # Аналитика сервиса интеграции с РЭМД ЕГИСЗ (МИС «Инфоклиника», портал Инфоклиника.РУ)
 
-**Дата актуализации:** 2026-05-03.
+**Дата актуализации:** 2026-05-04.
 
 **Назначение документа:** описать, **какие данные** лежат в основе отчётности по обмену с РЭМД ЕГИСЗ, **какие отчёты и сигналы** поддерживают **управление сервисом интеграции** и **рост ключевых показателей** (доступность регистрации СЭМД, прозрачность отказов, очередь, качество канала). Техническая реализация — **кратко в конце** ([приложение A](#приложение-a-технический-стек-кратко)); развёртывание и runbook — [приложение B](#приложение-b-развёртывание-и-эксплуатация) и [README](../README.md).
 
@@ -76,7 +76,7 @@ flowchart LR
 | **Ошибки парсинга / канала** | Строка журнала не дала валидный факт (XML, нет `relatesToMessage`, слишком большой `MSGTEXT` и т.д.). | `stg_parse_errors`, `v_stg_parse_errors_by_document` — дашборд **03**, сигнал `parse_errors_burst`. |
 | **Отказы контента РЭМД** | Ответ шлюза со статусом ошибки и массивом сообщений проверки. | `errors_json`, функции `egisz_friendly_*` — дашборды **04**, **01**, **05**. |
 | **Справочники** | Клиника (JID, название, ИНН, OID), тип СЭМД. | `dim_clinics`, `dim_semd_types`; срезы «по клинике», «по типу документа». |
-| **Снимок здоровья пайплайна** | Курсоры ETL, пики Firebird, агрегаты по клиникам и сигналы порогов. | `etl_state`, представления `v_health_*` — API `/api/healthcheck`, дашборд **02**. |
+| **Снимок здоровья пайплайна** | Курсоры ETL (`LOGID`, **EGMID** снимка сообщений), пики лицензий, агрегаты по клиникам и сигналы порогов. | `etl_state`, представления `v_health_*` — API `/api/healthcheck`, дашборд **02**. |
 
 **Важно для интерпретации:** «Обработано» в витрине привязано к времени сообщения/журнала по правилам ETL; часть карточек использует дату регистрации в XML — при презентации KPI бизнесу стоит явно называть ось времени (см. [про field filters Metabase](#field-filters-metabase) на дашборде **05**).
 
@@ -109,7 +109,7 @@ flowchart TB
 | **05** | `05_executive.json` | **Сводка для руководства** (витрина + очередь); разные оси даты на карточках ([field filters](#field-filters-metabase)). |
 | **06** | `06_semd_archive.json` | **Архив СЭМД** (`v_rpt_semd_archive_ui`): итоги, столбчатая диаграмма по типам СЭМД, полная таблица. |
 
-Краткие текстовые описания — [README: Metabase](../README.md#metabase-и-дашборды).
+Краткие текстовые описания — [README: дашборды Metabase](../README.md#дашборды-metabase).
 
 ### 4.3 Ключевые объекты витрины (для авторов отчётов)
 
@@ -120,7 +120,7 @@ flowchart TB
 | `v_stg_parse_errors_by_document` | Ошибки парсинга **на документ** (`document_group_key`). |
 | `v_health_*_ui` | Показатели для **02** и `/api/healthcheck`. |
 | `egisz_friendly_error_item`, `egisz_friendly_errors_row` | Человекочитаемые подсказки по отказам без искажения сырого ответа. |
-| `etl_state` | **`last_log_id`** по журналу; **`last_egmid`** — ватермарк журнала по max **EGMID** сообщения (не paging выгрузки **`stg_egisz_messages_journal`**). **Не** бизнес-время, но критично для «двинулся ли синк». |
+| `etl_state` | **`last_log_id`** — водяной знак **EXCHANGELOG.LOGID**. **`last_egmid`** и **`messages_snapshot_high_egmid`** — один смысл: максимальный **EGMID**, пройденный keyset-выгрузкой снимка **`EGISZ_MESSAGES`** в staging (плюс догрузка по **MSGID** из пакетов журнала). После успешного sync оба поля выравниваются. **Не** бизнес-время, но критично для «двинулся ли синк». |
 
 Агрегаты по умолчанию: документы — **`COUNT(DISTINCT "Связанное сообщение")`** (`relates_to_id`); очередь — **`COUNT(DISTINCT "localUid СЭМД")`**.
 
@@ -139,7 +139,7 @@ flowchart TB
 | Сценарий | Источник / смысл |
 | :--- | :--- |
 | Массовая авария по клинике | `v_health_by_clinic`: error-rate × объём за 24h. |
-| Застой ETL или отставание прокси | `cursor_stale`; расхождение `last_egmid` / `source_max_egmid`, лаг пика etl_state vs staging в `v_health_proxy_db`. |
+| Застой ETL или отставание прокси | `cursor_stale`; лаг курсора `etl_state.last_egmid` vs `staging_max_egmid` в `v_health_proxy_db`. |
 | Очередь в РЭМД | `queue_red_24h`, возрастные корзины в `pending_age_buckets`. |
 | Всплеск проблем парсинга | `parse_errors_burst` по уникальным документам за час. |
 | Смена формата ответа | `unknown_high` — рост доли «неизвестно» после разборки статуса. |
@@ -207,14 +207,14 @@ flowchart TB
 | Слой | Реализация |
 | :--- | :--- |
 | **Источник** | Firebird: `EXCHANGELOG`, `EGISZ_MESSAGES`, `JPERSONS`, `EGISZ_LICENSES` (прокси обмена; типично WIN1251). |
-| **Интеграция данных** | Python 3: пакет `egisz_monitor_corp` — `etl.run_sync` (справочники; чередование снимка **EGISZ_MESSAGES** в PG и журнала по `LOGID`; парсер SOAP; UPSERT). |
+| **Интеграция данных** | Python 3: пакет `egisz_monitor_corp` — `etl.run_sync` (справочники; чередование пакетов **EXCHANGELOG** и keyset-снимка **EGISZ_MESSAGES** по **EGMID**; догрузка сообщений по **MSGID** при необходимости; парсер SOAP; UPSERT). |
 | **Хранилище витрины** | PostgreSQL, БД `egisz_reports`: факт `fact_egisz_transactions`, staging, измерения, представления `v_*`, SQL healthcheck. |
 | **Парсинг** | `parser.EgiszMonitorParser` — XML из `MSGTEXT`, `local-name`, связь с исходящим по `relatesToMessage`. |
 | **Синхронизация и API** | Flask Config UI: `POST /api/sync/start` (single-flight), `/api/healthcheck`; advisory lock в PG против гонки CronJob и UI. |
 | **Расписание** | Kubernetes `CronJob` (`k8s/etl-cron.yaml`), опционально Airflow DAG `airflow/dags/egisz_monitor_etl_dag.py`. |
 | **BI** | Metabase OSS; дашборды из `metabase_dashboards/*.json`, провижининг в образе `metabase/Dockerfile` + `setup-dashboards.sh`. |
 
-**Курсоры ETL (для отладки):** `etl_state.last_log_id` — журнал `EXCHANGELOG.LOGID` (коммит постранично); `etl_state.last_egmid` — max `EGISZ_MESSAGES.EGMID` по **обработанному журналу** (обновление в конце успешного sync; **не** задаёт постраничную выгрузку снимка из Firebird). Снимок `EGISZ_MESSAGES` в `stg_egisz_messages_journal` — полная перезагрузка на sync (непустой `DOCUMENTID`, окно `CREATEDATE`); outbound — по окну `CREATEDATE`, без отсечения по `last_egmid` ([`sql_util`](../egisz_monitor_corp/sql_util.py)). В healthcheck поле `etl_cursor_egmid` = **GREATEST(`last_egmid`, `source_max_egmid`)** для сравнения со staging.
+**Курсоры ETL (для отладки):** `etl_state.last_log_id` — журнал `EXCHANGELOG.LOGID` (водяной знак после пакетов). Снимок **`EGISZ_MESSAGES` → `stg_egisz_messages_journal`:** keyset **`EGMID > after_egmid`** (старт с **`messages_snapshot_high_egmid`**); после успешного run **`last_egmid`** и **`messages_snapshot_high_egmid`** записываются в одно и то же значение. Отбор в Firebird: непустой **`DOCUMENTID`**, опционально окно **`CREATEDATE`** при `sync_window_days > 0`; при `sync_window_days ≤ 0` — без фильтра по дате, только за курсором. Дополнительно из пакетов журнала догружаются строки по **`MSGID`**, если их ещё нет в staging. Outbound — полная перезапись staging теми же предикатами **`DOCUMENTID`/дата** ([`sql_util`](../egisz_monitor_corp/sql_util.py)). В healthcheck **`etl_cursor_egmid`** = **`etl_state.last_egmid`** для сравнения со staging.
 
 ---
 

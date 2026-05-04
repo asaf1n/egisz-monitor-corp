@@ -85,7 +85,7 @@ def egisz_messages_createdate_window_sql(*, sync_window_days: int | None, table_
 
 
 def journal_messages_staging_base_sql(*, sync_window_days: int | None) -> str:
-    """Базовый SELECT EGISZ_MESSAGES для снимка в PostgreSQL (в ETL — ключевая пагинация `journal_messages_keyset_page_sql`).
+    """Базовый SELECT EGISZ_MESSAGES для снимка в PostgreSQL (тот же предикат, что и у `journal_messages_keyset_page_sql`).
 
     Те же отборы, что и для исходящих (`outbound_documents_staging_select`): непустой DOCUMENTID и то же окно CREATEDATE.
     """
@@ -104,18 +104,35 @@ WHERE {doc}
 """.strip()
 
 
-def journal_messages_keyset_page_sql(inner_select: str, *, after_egmid: int, limit: int) -> str:
-    """Firebird: страница снимка EGISZ_MESSAGES с EGMID строго больше after_egmid (ключевая пагинация)."""
+def journal_messages_keyset_page_sql(
+    *,
+    sync_window_days: int | None,
+    after_egmid: int,
+    limit: int,
+) -> str:
+    """Firebird: страница снимка EGISZ_MESSAGES с EGMID строго больше after_egmid (ключевая пагинация).
+
+    Запрос **одноуровневый** (без обёртки ``SELECT FIRST … FROM (SELECT … ORDER BY)``): на больших
+    ``EGISZ_MESSAGES`` вложенный вариант часто приводит к полной сортировке/материализации подзапроса
+    до применения ``FIRST``, тогда как ``SELECT FIRST n … ORDER BY m.EGMID`` позволяет оптимизатору
+    остановиться после *n* подходящих строк при наличии индекса по **EGMID**.
+    """
     low = max(0, int(after_egmid))
     lim = _clamp_fb_first_limit(limit)
-    base = inner_select.strip().rstrip(";")
+    doc = egisz_messages_documentid_filled_predicate()
+    date_clause = egisz_messages_createdate_window_sql(sync_window_days=sync_window_days)
     return f"""
-SELECT FIRST {lim} *
-FROM (
-{base}
+SELECT FIRST {lim}
+    m.MSGID AS msgid,
+    m.EGMID AS egmid,
+    m.REPLYTO AS replyto,
+    TRIM(m.DOCUMENTID) AS documentid,
+    m.CREATEDATE AS msg_created_at
+FROM EGISZ_MESSAGES m
+WHERE {doc}
+{date_clause}
   AND m.EGMID > {low}
-ORDER BY m.EGMID NULLS LAST
-) src
+ORDER BY m.EGMID
 """.strip()
 
 

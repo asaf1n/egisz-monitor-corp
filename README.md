@@ -26,7 +26,7 @@ Firebird: EXCHANGELOG, EGISZ_MESSAGES, EGISZ_LICENSES (+ JPERSONS)
 
 | Документ | Для кого | Что внутри |
 |----------|----------|-----------|
-| [`AGENTS.md`](AGENTS.md) | ИИ-агенты и разработчики | Архитектура, модули, ETL и курсоры, инфраструктура, тесты, правила правок |
+| [`AGENTS.md`](AGENTS.md) | ИИ-агенты и разработчики | Архитектура, модули, ETL (чередование журнала и снимка, MSGID/EGMID, прогресс по документам), инфраструктура, тесты |
 | [`.cursorrules`](.cursorrules) | ИИ-агенты (домен) | Термины, парсинг, статусы, сигналы, единицы учёта в отчётах |
 | [`docs/BI_EGISZ_INFOKLINIKA_AUDIT.md`](docs/BI_EGISZ_INFOKLINIKA_AUDIT.md) | Глубокий разбор | Техника, витрина, Metabase, healthcheck, Kubernetes, роли |
 
@@ -62,5 +62,5 @@ Firebird: EXCHANGELOG, EGISZ_MESSAGES, EGISZ_LICENSES (+ JPERSONS)
 
 ### Примечания
 
-- **Технические детали** (ETL, курсоры, схема, инфраструктура, как править/выкатывать) находятся в [`AGENTS.md`](AGENTS.md) и [`.cursorrules`](.cursorrules).
+- **Технические детали** (ETL, курсоры, схема, инфраструктура, как править/выкатывать) находятся в [`AGENTS.md`](AGENTS.md) и [`.cursorrules`](.cursorrules). В Config UI **System Log** при синхронизации отображаются в т.ч. **уникальные документы** (по разобранным `localUid`/`emdrId` и по `DOCUMENTID` в исходящих), а не только сырые строки.
 - Полный аудит (включая healthcheck/кластеры/роли) — в [`docs/BI_EGISZ_INFOKLINIKA_AUDIT.md`](docs/BI_EGISZ_INFOKLINIKA_AUDIT.md).

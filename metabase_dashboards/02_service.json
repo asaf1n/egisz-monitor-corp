@@ -505,11 +505,11 @@
     },
     {
       "name": "02 · Сводка прокси-БД",
-      "description": "Цифры из `v_health_proxy_db_ui`: staging исходящих (`stg_egisz_outbound_documents`), max EGMID в нём, очередь без ответа, `etl_state.last_log_id`, GREATEST(last_egmid, source_max_egmid) в etl_state (колонка «etl_state max(...)» в представлении).",
+      "description": "Цифры из `v_health_proxy_db_ui`: staging исходящих (`stg_egisz_outbound_documents`), max EGMID в нём, очередь без ответа, `etl_state.last_log_id`, `etl_state.last_egmid` (курсор выгрузки снимка `EGISZ_MESSAGES`).",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT \"Staging: всего строк\", \"Без EGMID\", \"Очередь всего\", \"Очередь > 24ч\", \"Staging max EGMID\", \"Staging max Sent\", \"Последний апдейт курсора\", \"etl_state.last_log_id\" FROM public.v_health_proxy_db_ui",
+          "query": "SELECT \"Staging: всего строк\", \"Без EGMID\", \"Очередь всего\", \"Очередь > 24ч\", \"Staging max EGMID\", \"Staging max Sent\", \"Последний апдейт курсора\", \"etl_state.last_log_id\", \"etl_state.last_egmid (курсор EGISZ_MESSAGES)\" FROM public.v_health_proxy_db_ui",
           "template-tags": {}
         },
         "database": 1

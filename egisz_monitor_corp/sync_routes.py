@@ -73,7 +73,6 @@ def _compose_stop_summary_stats(
             if row:
                 out["pg_etl_last_log_id"] = row["last_log_id"]
                 out["pg_etl_last_egmid"] = row["last_egmid"]
-                out["pg_source_max_egmid"] = row["source_max_egmid"]
                 out["pg_messages_snapshot_high_egmid"] = row.get(
                     "messages_snapshot_high_egmid"
                 )
@@ -107,7 +106,6 @@ def _build_sync_failed_progress(
             if row:
                 progress["cursor_log_id"] = row["last_log_id"]
                 progress["etl_last_egmid"] = row["last_egmid"]
-                progress["source_max_egmid"] = row["source_max_egmid"]
             else:
                 miss = "etl_state: нет строки для пайплайна"
                 progress["diag_error"] = (
