@@ -505,8 +505,15 @@ function Wait-CorpMetabaseProvisioning {
         # Любой маркер: штамп JSON (успешный импорт) или public UUID.
         $sh = "test -s /shared/corp-metabase-dashboards-manifest.sha256 -o -s /shared/main-dashboard-public-uuid"
         $args = @('-n', $ns, 'exec', 'deployment/metabase', '-c', 'metabase', '--', 'bash', '-lc', $sh)
-        $p = Start-Process -FilePath $kubectlExe -ArgumentList $args -Wait -PassThru -NoNewWindow
-        $code = if ($null -ne $p -and $null -ne $p.ExitCode) { [int]$p.ExitCode } else { -1 }
+        $code = 1
+        try {
+            # В PowerShell non-zero exit от native command может стать NativeCommandError
+            # (в зависимости от $ErrorActionPreference). Нам нужен именно код, а не исключение.
+            $null = & $kubectlExe @args 2>$null
+            $code = [int]$LASTEXITCODE
+        } catch {
+            $code = 1
+        }
         if ($code -eq 0) {
             Write-Host "`[kubectl] Metabase provisioning markers detected." -ForegroundColor Green
             return

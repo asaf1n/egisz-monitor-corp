@@ -1,6 +1,6 @@
 {
-  "name": "02 Сервис, healthcheck и парсинг журнала",
-  "description": "Поток callback/витрины (нагрузка, топы СЭМД и клиник) и сигналы healthcheck (`v_health_signals`, heatmap клиники × дни по **Обработано IPS**, очередь, тренд ошибок парсинга по уникальным документам, сводка прокси-БД). Период витрины — field filter `dwh_date` по **«Обработано IPS»** на карточках потока и на heatmap (та же логика, что архив СЭМД и дашборд **01**); фильтры **Код СЭМД** и **JID клиники** — `top_semd_filter`, `top_clinic_filter`. Карточки healthcheck (сигналы, топ 24ч, очередь, прокси) — снимок «сейчас» из `sql/005_healthcheck.sql`, без привязки к `dwh_date`. **Парсинг staging** (`v_stg_parse_errors_by_document`): фильтр даты `parse_created_filter` по `created_at`, плюс `err_parse_code_filter`. Отказы РЭМД — на **01** и **04**.",
+  "name": "02 Сервис, healthcheck и сбои канала",
+  "description": "Поток callback/витрины (нагрузка, топы СЭМД и клиник) и сигналы healthcheck (`v_health_signals`, heatmap клиники × дни по **Обработано IPS**, очередь, тренд сбоев канала по уникальным документам, сводка прокси-БД). Период витрины — field filter `dwh_date` по **«Обработано IPS»** на карточках потока и на heatmap (та же логика, что архив СЭМД и дашборд **01**); фильтры **Код СЭМД** и **JID клиники** — `top_semd_filter`, `top_clinic_filter`. Карточки healthcheck (сигналы, топ 24ч, очередь, прокси) — снимок «сейчас» из `sql/005_healthcheck.sql`, без привязки к `dwh_date`. **Staging канала** (`v_stg_channel_errors_by_document`: ошибка связи vs асинхронный ответ РЭМД): фильтр даты `parse_created_filter` по `created_at`, плюс `err_parse_code_filter`. Отказы РЭМД — на **01** и **04**.",
   "parameters": [
     {
       "id": "d4e5f6a7-b8c9-0d1e-2f3a-4b5c6d7e8f0a1",
@@ -25,8 +25,8 @@
       "sectionId": "string"
     },
     {
-      "id": "b1a2c3d4-e5f6-4789-a02b-parsecreated0",
-      "name": "Период парсинга (staging: created_at)",
+      "id": "b1a2c3d4-e5f6-4789-a02b-0123456789ac",
+      "name": "Период по created_at (stg_channel_errors)",
       "slug": "parse_created_filter",
       "type": "date/all-options",
       "default": "past30days",
@@ -34,7 +34,7 @@
     },
     {
       "id": "b3a4f5e6-d7c8-4901-9234-56789abcdef0",
-      "name": "Код ошибки парсинга",
+      "name": "Код ошибки канала",
       "slug": "err_parse_code_filter",
       "type": "string/=",
       "sectionId": "string"
@@ -230,7 +230,7 @@
     },
     {
       "name": "02 · Сигналы healthcheck",
-      "description": "Пять сигналов: error_rate_high (>10% за 24ч при объёме **документов** >50), unknown_high (>5%), parse_errors_burst (**уникальных документов** с ошибкой парсинга за час >10), queue_red_24h (>50 в очереди >24ч), cursor_stale (etl_state.updated_at >6ч). Уровень — green/yellow/red.",
+      "description": "Пять сигналов: error_rate_high (>10% за 24ч при объёме **документов** >50), unknown_high (>5%), channel_errors_burst (**уникальных документов** со сбоем канала за час >10), queue_red_24h (>50 в очереди >24ч), cursor_stale (etl_state.updated_at >6ч). Уровень — green/yellow/red.",
       "dataset_query": {
         "type": "native",
         "native": {
@@ -452,16 +452,16 @@
       "col": 0
     },
     {
-      "name": "02 · Тренд ошибок парсинга",
-      "description": "Динамика **уникальных документов** с ошибкой парсинга (`document_group_key`) по часам. Ось времени — **created_at** staging (время разбора журнала, не IPS). Используйте **Период парсинга**; без него берётся окно **30 суток до MAX(created_at)** в таблице (не привязано к календарю сервера).",
+      "name": "02 · Тренд сбоев канала",
+      "description": "Динамика **уникальных документов** со сбоем канала (`document_group_key`) по часам. Ось времени — **created_at** в `stg_channel_errors` (не IPS). Используйте фильтр по **created_at**; без него берётся окно **30 суток до MAX(created_at)** (не привязано к календарю сервера).",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH b AS ( SELECT COALESCE((SELECT MAX(created_at) FROM public.v_stg_parse_errors_by_document), NOW()) AS mx ) SELECT date_trunc('hour', e.created_at) AS \"Час\", COUNT(DISTINCT e.document_group_key)::bigint AS \"Уникальных документов с ошибкой\" FROM public.v_stg_parse_errors_by_document e CROSS JOIN b WHERE e.created_at >= b.mx - INTERVAL '30 days' [[AND {{parse_created}}]] GROUP BY 1 ORDER BY 1",
+          "query": "WITH b AS ( SELECT COALESCE((SELECT MAX(created_at) FROM public.v_stg_channel_errors_by_document), NOW()) AS mx ) SELECT date_trunc('hour', e.created_at) AS \"Час\", COUNT(DISTINCT e.document_group_key)::bigint AS \"Уникальных документов с ошибкой\" FROM public.v_stg_channel_errors_by_document e CROSS JOIN b WHERE e.created_at >= b.mx - INTERVAL '30 days' [[AND {{parse_created}}]] GROUP BY 1 ORDER BY 1",
           "template-tags": {
             "parse_created": {
               "widget-type": "date/all-options",
-              "id": "f3parse0-trend-001-4001-8001-000000099002",
+              "id": "f3a00002-0002-4002-8002-000000099002",
               "name": "parse_created",
               "display-name": "По дате created_at (staging)",
               "type": "dimension"
@@ -549,7 +549,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT COUNT(*)::bigint AS \"Строк в stg_parse_errors\", COUNT(DISTINCT document_group_key)::bigint AS \"Уникальных документов с ошибкой\" FROM public.v_stg_parse_errors_by_document WHERE 1=1 [[AND {{parse_created}}]] [[AND error_code::text = {{err_parse_code}}]]",
+          "query": "SELECT COUNT(*)::bigint AS \"Строк в stg_channel_errors\", COUNT(DISTINCT document_group_key)::bigint AS \"Уникальных документов с ошибкой\" FROM public.v_stg_channel_errors_by_document WHERE 1=1 [[AND {{parse_created}}]] [[AND error_code::text = {{err_parse_code}}]]",
           "template-tags": {
             "err_parse_code": {
               "widget-type": "string/=",
@@ -561,7 +561,7 @@
             },
             "parse_created": {
               "widget-type": "date/all-options",
-              "id": "f3parse0-0001-4001-8001-000000099001",
+              "id": "f3a00001-0001-4001-8001-000000099001",
               "name": "parse_created",
               "display-name": "По дате created_at (staging)",
               "type": "dimension"
@@ -592,7 +592,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT \"Наименование клиники\" AS \"Наименование клиники\", \"Доля ошибок, %\" AS \"Доля ошибок, %\", \"Транзакций за 24ч\" AS \"Транзакций за 24ч\", \"В очереди сейчас\" AS \"В очереди сейчас\", \"Уровень здоровья\" AS \"Уровень здоровья\" FROM public.v_health_by_clinic_ui WHERE \"Транзакций за 24ч\" >= 20 [[AND \"JID клиники\"::text = {{top_clinic}}]] ORDER BY \"Доля ошибок, %\" DESC NULLS LAST, \"Транзакций за 24ч\" DESC LIMIT 15",
+          "query": "SELECT \"Наименование клиники\" AS \"Наименование клиники\", \"Доля ошибок, %\" AS \"Доля ошибок, %\", \"Документов за 24ч\" AS \"Документов за 24ч\", \"В очереди (документов)\" AS \"В очереди (документов)\", \"Уровень здоровья\" AS \"Уровень здоровья\" FROM public.v_health_by_clinic_ui WHERE \"Документов за 24ч\" >= 20 [[AND \"JID клиники\"::text = {{top_clinic}}]] ORDER BY \"Доля ошибок, %\" DESC NULLS LAST, \"Документов за 24ч\" DESC LIMIT 15",
           "template-tags": {
             "top_clinic": {
               "widget-type": "string/=",
@@ -635,12 +635,12 @@
       "col": 8
     },
     {
-      "name": "02 · Ошибки парсинга (stg_parse_errors)",
+      "name": "02 · Ошибки парсинга (stg_channel_errors)",
       "description": "Последние 100 записей staging с **ссылками на источник** (LOGID, MSGID, EGMID) и подсказками из сырого XML. Деталь по строкам журнала; для KPI используйте карточку «строки vs документы» и `document_group_key`.",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT id AS \"Номер записи\", error_code AS \"Код ошибки\", LEFT(message, 200) AS \"Сообщение\", created_at AS \"Создано\", relates_to_hint AS \"relatesToMessage (из текста)\", local_uid_hint AS \"localUid (из текста)\", emdr_id_hint AS \"emdrId (из текста)\", exchangelog_log_id AS \"EXCHANGELOG.LOGID\", journal_msgid AS \"EXCHANGELOG.MSGID\", egisz_messages_egmid AS \"EGISZ_MESSAGES.EGMID\", document_group_key AS \"Ключ документа (группировка)\", relates_to_id AS \"relates_to_id (если есть)\" FROM public.v_stg_parse_errors_by_document WHERE 1=1 [[AND {{parse_created}}]] [[AND error_code::text = {{err_parse_code}}]] [[AND NULLIF(TRIM(local_uid_hint::text), '') = {{local_uid}}]] [[AND NULLIF(TRIM(relates_to_hint::text), '') = {{relates_to}}]] [[AND NULLIF(TRIM(emdr_id_hint::text), '') = {{emdr_id}}]] [[AND NULLIF(TRIM(exchangelog_log_id::text), '') = {{log_id}}]] [[AND NULLIF(TRIM(egisz_messages_egmid::text), '') = {{egmid}}]] ORDER BY id DESC LIMIT 100",
+          "query": "SELECT id AS \"Номер записи\", error_code AS \"Код ошибки\", LEFT(message, 200) AS \"Сообщение\", created_at AS \"Создано\", relates_to_hint AS \"relatesToMessage (из текста)\", local_uid_hint AS \"localUid (из текста)\", emdr_id_hint AS \"emdrId (из текста)\", exchangelog_log_id AS \"EXCHANGELOG.LOGID\", journal_msgid AS \"EXCHANGELOG.MSGID\", egisz_messages_egmid AS \"EGISZ_MESSAGES.EGMID\", document_group_key AS \"Ключ документа (группировка)\", relates_to_id AS \"relates_to_id (если есть)\" FROM public.v_stg_channel_errors_by_document WHERE 1=1 [[AND {{parse_created}}]] [[AND error_code::text = {{err_parse_code}}]] [[AND NULLIF(TRIM(local_uid_hint::text), '') = {{local_uid}}]] [[AND NULLIF(TRIM(relates_to_hint::text), '') = {{relates_to}}]] [[AND NULLIF(TRIM(emdr_id_hint::text), '') = {{emdr_id}}]] [[AND NULLIF(TRIM(exchangelog_log_id::text), '') = {{log_id}}]] [[AND NULLIF(TRIM(egisz_messages_egmid::text), '') = {{egmid}}]] ORDER BY id DESC LIMIT 100",
           "template-tags": {
             "err_parse_code": {
               "widget-type": "string/=",
@@ -652,7 +652,7 @@
             },
             "parse_created": {
               "widget-type": "date/all-options",
-              "id": "f3parse0-0001-4001-8001-000000099001",
+              "id": "f3a00001-0001-4001-8001-000000099001",
               "name": "parse_created",
               "display-name": "По дате created_at (staging)",
               "type": "dimension"
@@ -736,15 +736,15 @@
     },
     {
       "name": "02 · Сетевые ошибки (LOGSTATE=3)",
-      "description": "Документы, попавшие в staging как NETWORK_ERROR (LOGSTATE=3). Счёт — уникальные документы (DISTINCT document_group_key), чтобы разные строки журнала не раздували статистику.",
+      "description": "Ошибка связи (error_top_type=network, код INTEGRATION_LOGSTATE_3 / legacy NETWORK_ERROR, LOGSTATE=3). Счёт — уникальные документы (DISTINCT document_group_key).",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT LEFT(message, 140) AS \"Сетевая ошибка\", COUNT(DISTINCT document_group_key)::bigint AS \"Уникальных документов\" FROM public.v_stg_parse_errors_by_document WHERE error_top_type = 'network' [[AND {{parse_created}}]] GROUP BY 1 ORDER BY 2 DESC LIMIT 50",
+          "query": "SELECT LEFT(message, 140) AS \"Сетевая ошибка\", COUNT(DISTINCT document_group_key)::bigint AS \"Уникальных документов\" FROM public.v_stg_channel_errors_by_document WHERE error_top_type = 'network' [[AND {{parse_created}}]] GROUP BY 1 ORDER BY 2 DESC LIMIT 50",
           "template-tags": {
             "parse_created": {
               "widget-type": "date/all-options",
-              "id": "f3parse0-0002-4002-8002-000000099001",
+              "id": "f3a00002-0002-4002-8002-000000099001",
               "name": "parse_created",
               "display-name": "По дате created_at (staging)",
               "type": "dimension"
@@ -769,6 +769,175 @@
       "sizeX": 12,
       "sizeY": 6,
       "row": 48,
+      "col": 0
+    },
+    {
+      "name": "02 · Парсинг: network vs async_response (доля)",
+      "description": "Доля ошибок связи среди всех записей канала (связь vs асинхронный ответ РЭМД), в терминах **уникальных документов** (DISTINCT document_group_key). Период — `parse_created_filter` (created_at staging).",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT CASE WHEN COALESCE(NULLIF(error_top_type, ''), 'async_response') = 'network' THEN 'Ошибка связи' ELSE 'Ошибка в асинхронном ответе РЭМД' END AS \"Тип\", COUNT(DISTINCT document_group_key)::bigint AS \"Уникальных документов\" FROM public.v_stg_channel_errors_by_document WHERE 1=1 [[AND {{parse_created}}]] GROUP BY 1 ORDER BY 2 DESC",
+          "template-tags": {
+            "parse_created": {
+              "widget-type": "date/all-options",
+              "id": "f3a00003-0003-4003-8003-000000099001",
+              "name": "parse_created",
+              "display-name": "По дате created_at (staging)",
+              "type": "dimension"
+            }
+          }
+        },
+        "database": 1
+      },
+      "display": "pie",
+      "visualization_settings": {
+        "pie.dimension": "Тип",
+        "pie.metric": "Уникальных документов",
+        "pie.show_legend": true,
+        "pie.show_total": true,
+        "pie.percent_visibility": "inside",
+        "pie.slice_threshold": 0,
+        "version": 2,
+        "column_settings": {
+          "[\"name\",\"Уникальных документов\"]": {
+            "number_separators": ".",
+            "decimals": 0
+          }
+        }
+      },
+      "sizeX": 6,
+      "sizeY": 6,
+      "row": 48,
+      "col": 12
+    },
+    {
+      "name": "02 · Тренд: ошибка связи (уникальные документы)",
+      "description": "Динамика сетевых ошибок (error_top_type='network') по часам: COUNT(DISTINCT document_group_key). Ось времени — created_at staging (время разбора журнала).",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "WITH b AS ( SELECT COALESCE((SELECT MAX(created_at) FROM public.v_stg_channel_errors_by_document), NOW()) AS mx ) SELECT date_trunc('hour', e.created_at) AS \"Час\", COUNT(DISTINCT e.document_group_key)::bigint AS \"Уникальных документов\" FROM public.v_stg_channel_errors_by_document e CROSS JOIN b WHERE e.error_top_type = 'network' AND e.created_at >= b.mx - INTERVAL '30 days' [[AND {{parse_created}}]] GROUP BY 1 ORDER BY 1",
+          "template-tags": {
+            "parse_created": {
+              "widget-type": "date/all-options",
+              "id": "f3a00004-0004-4004-8004-000000099001",
+              "name": "parse_created",
+              "display-name": "По дате created_at (staging)",
+              "type": "dimension"
+            }
+          }
+        },
+        "database": 1
+      },
+      "display": "line",
+      "visualization_settings": {
+        "graph.dimensions": [
+          "Час"
+        ],
+        "graph.metrics": [
+          "Уникальных документов"
+        ],
+        "graph.show_values": true,
+        "graph.x_axis.scale": "timeseries",
+        "column_settings": {
+          "[\"name\",\"Час\"]": {
+            "date_style": "D MMMM, YYYY",
+            "time_style": "HH:mm"
+          },
+          "[\"name\",\"Уникальных документов\"]": {
+            "number_separators": ".",
+            "decimals": 0
+          }
+        }
+      },
+      "sizeX": 18,
+      "sizeY": 6,
+      "row": 54,
+      "col": 0
+    },
+    {
+      "name": "02 · Сетевые ошибки: топ формулировок",
+      "description": "Топ нормализованных формулировок сетевых ошибок (message уже нормализуется в парсере: URL/host заменяются плейсхолдерами). Счёт — уникальные документы.",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT LEFT(COALESCE(NULLIF(TRIM(message), ''), '(без текста)'), 160) AS \"Сообщение (норм.)\", COUNT(DISTINCT document_group_key)::bigint AS \"Уникальных документов\" FROM public.v_stg_channel_errors_by_document WHERE error_top_type = 'network' [[AND {{parse_created}}]] GROUP BY 1 ORDER BY 2 DESC LIMIT 25",
+          "template-tags": {
+            "parse_created": {
+              "widget-type": "date/all-options",
+              "id": "f3a00005-0005-4005-8005-000000099001",
+              "name": "parse_created",
+              "display-name": "По дате created_at (staging)",
+              "type": "dimension"
+            }
+          }
+        },
+        "database": 1
+      },
+      "display": "row",
+      "visualization_settings": {
+        "graph.dimensions": [
+          "Сообщение (норм.)"
+        ],
+        "graph.metrics": [
+          "Уникальных документов"
+        ],
+        "graph.show_values": true,
+        "column_settings": {
+          "[\"name\",\"Уникальных документов\"]": {
+            "number_separators": ".",
+            "decimals": 0
+          }
+        }
+      },
+      "sizeX": 18,
+      "sizeY": 7,
+      "row": 60,
+      "col": 0
+    },
+    {
+      "name": "02 · Сетевые ошибки: последние события",
+      "description": "Последние записи staging по сетевым ошибкам с ключами трассировки (LOGID/MSGID/EGMID) и log_excerpt. Полезно для ручной диагностики (поиск в первичном журнале).",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT id AS \"№ записи\", created_at AS \"Создано\", error_subtype AS \"Подтип\", LEFT(message, 220) AS \"Сообщение\", exchangelog_log_id AS \"EXCHANGELOG.LOGID\", journal_msgid AS \"EXCHANGELOG.MSGID\", egisz_messages_egmid AS \"EGISZ_MESSAGES.EGMID\", LEFT(COALESCE(log_excerpt, ''), 240) AS \"log_excerpt\" FROM public.v_stg_channel_errors_by_document WHERE error_top_type = 'network' [[AND {{parse_created}}]] ORDER BY id DESC LIMIT 100",
+          "template-tags": {
+            "parse_created": {
+              "widget-type": "date/all-options",
+              "id": "f3a00006-0006-4006-8006-000000099001",
+              "name": "parse_created",
+              "display-name": "По дате created_at (staging)",
+              "type": "dimension"
+            }
+          }
+        },
+        "database": 1
+      },
+      "display": "table",
+      "visualization_settings": {
+        "column_settings": {
+          "[\"name\",\"№ записи\"]": {
+            "column_title": "№ записи"
+          },
+          "[\"name\",\"Создано\"]": {
+            "column_title": "Создано",
+            "date_style": "D MMMM, YYYY",
+            "date_abbreviate": true,
+            "time_style": "HH:mm"
+          },
+          "[\"name\",\"EXCHANGELOG.LOGID\"]": {
+            "column_title": "EXCHANGELOG.LOGID"
+          },
+          "[\"name\",\"EGISZ_MESSAGES.EGMID\"]": {
+            "column_title": "EGISZ_MESSAGES.EGMID"
+          }
+        }
+      },
+      "sizeX": 24,
+      "sizeY": 10,
+      "row": 67,
       "col": 0
     }
   ]

@@ -68,7 +68,7 @@ universal_identifier_filters:
     primary_table: v_egisz_transactions_enriched_ui
 
 # Один логический «диапазон дат» на дашборде (slug dwh_date_filter), но при привязке к карточке Metabase использует поле из metabase-field-filters этой карточки.
-# На дашборде 02 для парсинга staging используется отдельный slug `parse_created_filter` → переменная `parse_created` в native SQL.
+# На дашборде 02 для stg_channel_errors используется отдельный slug `parse_created_filter` → переменная `parse_created` в native SQL.
 dwh_date_bindings:
   by_logical_scope:
     processed_ips:
@@ -83,12 +83,12 @@ dwh_date_bindings:
       table_ref: v_rpt_documents_no_response_ui
       field_name: Отправлено
       sql_fragment: '[[AND {{dwh_date}}]]'
-    parse_errors_created:
-      table_ref: v_stg_parse_errors_by_document
+    channel_errors_created:
+      table_ref: v_stg_channel_errors_by_document
       field_name: created_at
       sql_fragment: '[[AND {{dwh_date}}]]'
     parse_created_staging:
-      table_ref: v_stg_parse_errors_by_document
+      table_ref: v_stg_channel_errors_by_document
       field_name: created_at
       sql_fragment: '[[AND {{parse_created}}]]'
 
@@ -121,9 +121,9 @@ text_parameter_bindings:
     template_tag: err_parse_code
     widget: string/=
     equality_targets:
-      - table: stg_parse_errors
+      - table: stg_channel_errors
         expression: 'error_code::text = {{err_parse_code}}'
-      - table: v_stg_parse_errors_by_document
+      - table: v_stg_channel_errors_by_document
         expression: 'error_code::text = {{err_parse_code}}'
 
 dashboards:
@@ -196,7 +196,7 @@ dashboards:
         note: Окно 72 ч от MAX(Обработано IPS); глобальный dwh_date к SQL не подключён.
 
   - file: 02_service.json
-    name: 02 Сервис, healthcheck и парсинг журнала
+    name: 02 Сервис, healthcheck и сбои канала
     parameters:
       - slug: dwh_date_filter
         maps_to: dwh_date
@@ -207,7 +207,7 @@ dashboards:
         maps_to: top_clinic
       - slug: parse_created_filter
         maps_to: parse_created
-        note: Только карточки детализации парсинга staging (created_at).
+        note: Только карточки детализации stg_channel_errors (created_at).
       - slug: err_parse_code_filter
         maps_to: err_parse_code
     cards:
@@ -239,22 +239,22 @@ dashboards:
       - name: 02 · Возраст очереди без ответа
         table_ref: v_health_proxy_db_ui
         native_filters: none
-      - name: 02 · Тренд ошибок парсинга
-        table_ref: v_stg_parse_errors_by_document
+      - name: 02 · Тренд сбоев канала
+        table_ref: v_stg_channel_errors_by_document
         metabase-field-filters:
-          parse_created: { table_ref: v_stg_parse_errors_by_document, field_name: created_at }
+          parse_created: { table_ref: v_stg_channel_errors_by_document, field_name: created_at }
       - name: 02 · Сводка прокси-БД
         table_ref: v_health_proxy_db_ui
         native_filters: none
-      - name: "02 · Парсинг: строки журнала vs уникальные документы"
-        table_ref: v_stg_parse_errors_by_document
+      - name: "02 · Канал: строки vs уникальные документы"
+        table_ref: v_stg_channel_errors_by_document
         metabase-field-filters:
-          parse_created: { table_ref: v_stg_parse_errors_by_document, field_name: created_at }
+          parse_created: { table_ref: v_stg_channel_errors_by_document, field_name: created_at }
         other_variables: [err_parse_code]
-      - name: 02 · Ошибки парсинга (stg_parse_errors)
-        table_ref: v_stg_parse_errors_by_document
+      - name: 02 · Сбои канала (stg_channel_errors)
+        table_ref: v_stg_channel_errors_by_document
         metabase-field-filters:
-          parse_created: { table_ref: v_stg_parse_errors_by_document, field_name: created_at }
+          parse_created: { table_ref: v_stg_channel_errors_by_document, field_name: created_at }
         other_variables: [err_parse_code]
 
   - file: 03_documents_no_response.json

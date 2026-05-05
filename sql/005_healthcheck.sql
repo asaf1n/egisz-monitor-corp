@@ -1,11 +1,21 @@
 -- Healthcheck-витрина EGISZ Monitor Corp.
--- Источники: fact_egisz_transactions, dim_clinics, stg_parse_errors, stg_egisz_outbound_documents, etl_state.
+-- Источники: fact_egisz_transactions, dim_clinics, stg_channel_errors, stg_egisz_outbound_documents, etl_state.
 -- Запрашиваются Config UI (/api/healthcheck) и дашбордом Metabase 02_service (блок healthcheck).
 -- Идемпотентен: применяется в run_sync.apply_reports_schema и в k8s Job egisz-reports-schema-init.
 
 -- Индекс для горячих агрегатов по дате обработки (ETL загрузка / пересчёт healthcheck).
 CREATE INDEX IF NOT EXISTS idx_fact_egisz_processed_at ON fact_egisz_transactions (processed_at);
-CREATE INDEX IF NOT EXISTS idx_stg_parse_errors_created_at ON stg_parse_errors (created_at);
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.relkind = 'i' AND n.nspname = 'public' AND c.relname = 'idx_stg_parse_errors_created_at'
+  ) THEN
+    ALTER INDEX idx_stg_parse_errors_created_at RENAME TO idx_stg_channel_errors_created_at;
+  END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS idx_stg_channel_errors_created_at ON stg_channel_errors (created_at);
 CREATE INDEX IF NOT EXISTS idx_stg_outbound_sent_at ON stg_egisz_outbound_documents (sent_at);
 
 -- Агрегат по клиникам за последние 24 часа + текущая очередь без ответа.
@@ -62,16 +72,18 @@ WITH params AS (
         50::numeric  AS error_min_volume,
         0.10::numeric AS error_red_ratio,
         0.05::numeric AS unknown_yellow_ratio,
-        10::numeric  AS parse_burst_per_hour,
+        10::numeric  AS channel_burst_per_hour,
         50::numeric  AS queue_red_24h,
-        INTERVAL '6 hours' AS cursor_stale_after
+        INTERVAL '6 hours' AS cursor_stale_after,
+        10::numeric  AS sync_burst_per_hour
 ),
 agg AS (
     SELECT
         (SELECT COUNT(DISTINCT relates_to_id) FROM fact_egisz_transactions WHERE processed_at > NOW() - INTERVAL '24 hours') AS facts_24h,
         (SELECT COUNT(DISTINCT relates_to_id) FROM fact_egisz_transactions WHERE processed_at > NOW() - INTERVAL '24 hours' AND status = 'error') AS errors_24h,
         (SELECT COUNT(DISTINCT relates_to_id) FROM fact_egisz_transactions WHERE processed_at > NOW() - INTERVAL '24 hours' AND status = 'unknown') AS unknown_24h,
-        (SELECT COUNT(DISTINCT d.document_group_key) FROM v_stg_parse_errors_by_document d WHERE d.created_at > NOW() - INTERVAL '1 hour') AS parse_errors_1h,
+        (SELECT COUNT(DISTINCT d.document_group_key) FROM v_stg_channel_errors_by_document d WHERE d.created_at > NOW() - INTERVAL '1 hour') AS channel_errors_1h,
+        (SELECT COUNT(DISTINCT f.relates_to_id) FROM fact_egisz_transactions f WHERE f.processed_at > NOW() - INTERVAL '1 hour' AND f.jid_sources_mismatch) AS sync_jid_mismatch_1h,
         (SELECT COUNT(DISTINCT r.local_uid_semd) FROM v_rpt_documents_no_response r WHERE r.sent_at < NOW() - INTERVAL '24 hours') AS queue_older_24h,
         (SELECT MAX(updated_at) FROM etl_state) AS etl_last_update
 )
@@ -107,17 +119,31 @@ SELECT
 FROM agg a CROSS JOIN params p
 UNION ALL
 SELECT
-    'parse_errors_burst',
-    'Всплеск ошибок парсинга',
+    'channel_errors_burst',
+    'Всплеск ошибок канала (связь/парсинг/ошибка РЭМД)',
     CASE
-        WHEN a.parse_errors_1h > p.parse_burst_per_hour THEN 'red'
-        WHEN a.parse_errors_1h > 0 THEN 'yellow'
+        WHEN a.channel_errors_1h > p.channel_burst_per_hour THEN 'red'
+        WHEN a.channel_errors_1h > 0 THEN 'yellow'
         ELSE 'green'
     END,
-    a.parse_errors_1h,
+    a.channel_errors_1h,
     'docs/hour (distinct document_group_key)',
     NULL,
-    'Уникальные документы с ошибкой парсинга за час (по relatesToMessage / localUid / emdrId / id). Подробности: stg_parse_errors, v_stg_parse_errors_by_document.'
+    'Уникальные документы со сбоем канала за час (см. v_stg_channel_errors_by_document.error_global_subcategory).'
+FROM agg a CROSS JOIN params p
+UNION ALL
+SELECT
+    'sync_jid_mismatch_burst',
+    'Ошибка синхронизации: конфликт источников JID',
+    CASE
+        WHEN a.sync_jid_mismatch_1h > p.sync_burst_per_hour THEN 'red'
+        WHEN a.sync_jid_mismatch_1h > 0 THEN 'yellow'
+        ELSE 'green'
+    END,
+    a.sync_jid_mismatch_1h,
+    'docs/hour (distinct relates_to_id)',
+    NULL,
+    'Документы с конфликтом JID (расхождение источников) за последний час.'
 FROM agg a CROSS JOIN params p
 UNION ALL
 SELECT
@@ -149,7 +175,7 @@ SELECT
     'Если red: проверьте Airflow / Config UI sync; etl_state.updated_at не двигается.'
 FROM agg a CROSS JOIN params p;
 
-COMMENT ON VIEW v_health_signals IS 'Пять сигналов healthcheck (error_rate_high, unknown_high, parse_errors_burst, queue_red_24h, cursor_stale) с уровнями green/yellow/red.';
+COMMENT ON VIEW v_health_signals IS 'Сигналы healthcheck (error_rate_high, unknown_high, channel_errors_burst, sync_jid_mismatch_burst, queue_red_24h, cursor_stale) с уровнями green/yellow/red.';
 
 -- Healthcheck прокси-БД: сводка по staging исходящих; last_log_id и курсор EGMID снимка сообщений из etl_state (без MAX(EGMID) по сообщениям в Firebird).
 CREATE OR REPLACE VIEW v_health_proxy_db AS

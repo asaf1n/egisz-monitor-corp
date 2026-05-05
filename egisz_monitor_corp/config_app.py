@@ -27,6 +27,8 @@ from egisz_monitor_corp.pg_warehouse import (
     fetch_etl_source_peaks_from_pg,
     fetch_healthcheck_snapshot,
     fetch_pg_sync_snapshot,
+    set_last_egmid,
+    set_last_log_id,
     test_pg_connection,
 )
 
@@ -1920,14 +1922,30 @@ def create_app() -> Flask:
             )
         os.environ["EGISZ_MONITOR_CONFIG"] = str(logical_config_path())
         try:
-            parse_corp_config_dict(merged)
+            cfg_saved = parse_corp_config_dict(merged)
         except Exception as e:
             return jsonify({"ok": False, "message": f"Файл записан, но конфиг не читается: {e}"})
+        cursor_note = ""
+        if int(cfg_saved.etl.sync_window_days) < 0:
+            try:
+                pg = connect_pg(cfg_saved.postgres)
+                try:
+                    pl = cfg_saved.etl.pipeline_name
+                    set_last_log_id(pg, pl, 0)
+                    set_last_egmid(pg, pl, 0)
+                    pg.commit()
+                finally:
+                    pg.close()
+                cursor_note = (
+                    " Курсоры etl_state (last_log_id, last_egmid) сброшены для режима полного пересъёма (sync_window_days < 0)."
+                )
+            except Exception as e:  # pragma: no cover - сеть/PG в окружении
+                cursor_note = f" Предупреждение: не удалось сбросить курсоры etl_state в PostgreSQL: {e}"
         cron_ok, cron_detail = reconcile_egisz_monitor_sync_cronjob(merged.get("auto_sync") or {})
         etl_sec = merged.get("etl") if isinstance(merged.get("etl"), dict) else {}
         bs = etl_sec.get("batch_size")
         sw = etl_sec.get("sync_window_days")
-        base = f"Сохранено. ETL: batch_size={bs}, sync_window_days={sw}."
+        base = f"Сохранено. ETL: batch_size={bs}, sync_window_days={sw}.{cursor_note}"
         if cron_ok:
             msg = f"{base} {cron_detail}"
         else:

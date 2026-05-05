@@ -87,7 +87,17 @@ COMMENT ON COLUMN fact_egisz_transactions.journal_msgid IS 'EXCHANGELOG.MSGID (=
 
 CREATE INDEX IF NOT EXISTS idx_fact_journal_msgid ON fact_egisz_transactions (journal_msgid) WHERE journal_msgid IS NOT NULL;
 
-CREATE TABLE IF NOT EXISTS stg_parse_errors (
+DO $$
+BEGIN
+  IF to_regclass('public.stg_parse_errors') IS NOT NULL
+     AND to_regclass('public.stg_channel_errors') IS NULL THEN
+    ALTER TABLE public.stg_parse_errors RENAME TO stg_channel_errors;
+  END IF;
+END $$;
+
+DROP VIEW IF EXISTS v_stg_parse_errors_by_document CASCADE;
+
+CREATE TABLE IF NOT EXISTS stg_channel_errors (
     id BIGSERIAL PRIMARY KEY,
     relates_to_id VARCHAR(256),
     error_code VARCHAR(64) NOT NULL,
@@ -96,29 +106,29 @@ CREATE TABLE IF NOT EXISTS stg_parse_errors (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-ALTER TABLE stg_parse_errors ADD COLUMN IF NOT EXISTS exchangelog_log_id BIGINT;
-ALTER TABLE stg_parse_errors ADD COLUMN IF NOT EXISTS egisz_messages_egmid BIGINT;
-ALTER TABLE stg_parse_errors ADD COLUMN IF NOT EXISTS journal_msgid VARCHAR(256);
-ALTER TABLE stg_parse_errors ADD COLUMN IF NOT EXISTS error_top_type VARCHAR(32);
-ALTER TABLE stg_parse_errors ADD COLUMN IF NOT EXISTS error_group VARCHAR(32);
-ALTER TABLE stg_parse_errors ADD COLUMN IF NOT EXISTS error_subtype VARCHAR(64);
-ALTER TABLE stg_parse_errors ADD COLUMN IF NOT EXISTS relates_to_hint VARCHAR(512);
-ALTER TABLE stg_parse_errors ADD COLUMN IF NOT EXISTS local_uid_hint VARCHAR(512);
-ALTER TABLE stg_parse_errors ADD COLUMN IF NOT EXISTS emdr_id_hint VARCHAR(512);
+ALTER TABLE stg_channel_errors ADD COLUMN IF NOT EXISTS exchangelog_log_id BIGINT;
+ALTER TABLE stg_channel_errors ADD COLUMN IF NOT EXISTS egisz_messages_egmid BIGINT;
+ALTER TABLE stg_channel_errors ADD COLUMN IF NOT EXISTS journal_msgid VARCHAR(256);
+ALTER TABLE stg_channel_errors ADD COLUMN IF NOT EXISTS error_top_type VARCHAR(32);
+ALTER TABLE stg_channel_errors ADD COLUMN IF NOT EXISTS error_group VARCHAR(32);
+ALTER TABLE stg_channel_errors ADD COLUMN IF NOT EXISTS error_subtype VARCHAR(64);
+ALTER TABLE stg_channel_errors ADD COLUMN IF NOT EXISTS relates_to_hint VARCHAR(512);
+ALTER TABLE stg_channel_errors ADD COLUMN IF NOT EXISTS local_uid_hint VARCHAR(512);
+ALTER TABLE stg_channel_errors ADD COLUMN IF NOT EXISTS emdr_id_hint VARCHAR(512);
 
-COMMENT ON TABLE stg_parse_errors IS 'Rows where MSGTEXT could not yield relates_to_id or XML is unusable; see relates_to_hint / local_uid_hint / emdr_id_hint and EXCHANGELOG keys for document-level reporting';
-COMMENT ON COLUMN stg_parse_errors.exchangelog_log_id IS 'EXCHANGELOG.LOGID — исходная строка прокси-журнала (трассировка)';
-COMMENT ON COLUMN stg_parse_errors.egisz_messages_egmid IS 'EGISZ_MESSAGES.EGMID — идентификатор записи сообщения (трассировка)';
-COMMENT ON COLUMN stg_parse_errors.journal_msgid IS 'EXCHANGELOG.MSGID — идентификатор сообщения в контуре обмена (трассировка к EGISZ_MESSAGES.MSGID)';
-COMMENT ON COLUMN stg_parse_errors.error_top_type IS 'Унифицированный верхний тип ошибки: network | async_response';
-COMMENT ON COLUMN stg_parse_errors.error_group IS 'Внутренняя группировка ошибок парсинга (network/parse/linkage/identifiers/other)';
-COMMENT ON COLUMN stg_parse_errors.error_subtype IS 'Подтип внутри группировки (стабильный идентификатор для отчётов)';
-COMMENT ON COLUMN stg_parse_errors.relates_to_hint IS 'Регексп по тегу relatesToMessage в сыром MSGTEXT, если факт не построен';
-COMMENT ON COLUMN stg_parse_errors.local_uid_hint IS 'Регексп по localUid в сыром MSGTEXT (экземпляр СЭМД в МИС)';
-COMMENT ON COLUMN stg_parse_errors.emdr_id_hint IS 'Регексп по emdrId в сыром MSGTEXT (рег. номер в РЭМД, если уже фигурирует в теле)';
+COMMENT ON TABLE stg_channel_errors IS 'Сбои канала ETL без построенного факта: ошибка связи (напр. EXCHANGELOG LOGSTATE=3, LOGTEXT) или ошибка в асинхронном ответе РЭМД (MSGTEXT/SOAP). Классификация: error_top_type, error_group, error_subtype.';
+COMMENT ON COLUMN stg_channel_errors.exchangelog_log_id IS 'EXCHANGELOG.LOGID — исходная строка прокси-журнала (трассировка)';
+COMMENT ON COLUMN stg_channel_errors.egisz_messages_egmid IS 'EGISZ_MESSAGES.EGMID — идентификатор записи сообщения (трассировка)';
+COMMENT ON COLUMN stg_channel_errors.journal_msgid IS 'EXCHANGELOG.MSGID — идентификатор сообщения в контуре обмена (трассировка к EGISZ_MESSAGES.MSGID)';
+COMMENT ON COLUMN stg_channel_errors.error_top_type IS 'Глобальный тип: network = ошибка связи/канала; async_response = ошибка в асинхронном ответе РЭМД (разбор/связка)';
+COMMENT ON COLUMN stg_channel_errors.error_group IS 'Внутренняя группа: network | parse | linkage | identifiers | other';
+COMMENT ON COLUMN stg_channel_errors.error_subtype IS 'Подтип внутри группировки (стабильный идентификатор для отчётов)';
+COMMENT ON COLUMN stg_channel_errors.relates_to_hint IS 'Регексп по тегу relatesToMessage в сыром MSGTEXT, если факт не построен';
+COMMENT ON COLUMN stg_channel_errors.local_uid_hint IS 'Регексп по localUid в сыром MSGTEXT (экземпляр СЭМД в МИС)';
+COMMENT ON COLUMN stg_channel_errors.emdr_id_hint IS 'Регексп по emdrId в сыром MSGTEXT (рег. номер в РЭМД, если уже фигурирует в теле)';
 
 -- Ключ для агрегации «один документ — одна ошибка» в Metabase/healthcheck: coalesce идентификаторов, иначе уникальный id строки.
-CREATE OR REPLACE VIEW v_stg_parse_errors_by_document AS
+CREATE OR REPLACE VIEW v_stg_channel_errors_by_document AS
 SELECT
     s.*,
     COALESCE(
@@ -129,14 +139,30 @@ SELECT
         'id:' || s.id::text
     ) AS document_group_key,
     CASE
-        WHEN s.error_top_type = 'network' THEN 'сетевые'
-        WHEN s.error_top_type = 'async_response' THEN 'ошибка асинхронного ответа РЭМД'
-        WHEN s.error_code = 'NETWORK_ERROR' THEN 'сетевые' -- backward compatibility, если колонок top_type ещё нет
-        ELSE NULL
-    END AS error_global_subcategory
-FROM stg_parse_errors s;
+        WHEN s.error_top_type = 'network'
+            OR UPPER(COALESCE(s.error_code, '')) IN ('NETWORK_ERROR', 'INTEGRATION_LOGSTATE_3') THEN 'Ошибка связи'
+        WHEN s.error_group = 'parse' THEN 'Ошибка парсинга'
+        ELSE 'Ошибка в асинхронном ответе РЭМД'
+    END AS error_global_subcategory,
+    CASE s.error_group
+        WHEN 'network' THEN 'Канал: связь и транспорт'
+        WHEN 'parse' THEN 'Колбэк РЭМД: разбор XML/SOAP'
+        WHEN 'linkage' THEN 'Колбэк РЭМД: связка запрос–ответ'
+        WHEN 'identifiers' THEN 'Колбэк РЭМД: идентификаторы документа'
+        WHEN 'other' THEN 'Колбэк РЭМД: прочее'
+        ELSE COALESCE(s.error_group, '')
+    END AS error_group_label_ru,
+    CASE s.error_subtype
+        WHEN 'logstate_3' THEN 'Журнал: LOGSTATE=3 (связь/транспорт; детали в message, URL/host нормализованы)'
+        WHEN 'xml_broken' THEN 'Неразборный XML колбэка'
+        WHEN 'msgtext_too_large' THEN 'MSGTEXT превышает лимит ETL'
+        WHEN 'missing_relates_to_message' THEN 'Нет relatesToMessage'
+        WHEN 'missing_localuid_documentid_emdrid' THEN 'Нет localUid / DOCUMENTID / emdrId'
+        ELSE COALESCE(s.error_subtype, '')
+    END AS error_subtype_label_ru
+FROM stg_channel_errors s;
 
-COMMENT ON VIEW v_stg_parse_errors_by_document IS 'stg_parse_errors + document_group_key: агрегация по уникальным документам (document_group_key), а не по числу строк EXCHANGELOG';
+COMMENT ON VIEW v_stg_channel_errors_by_document IS 'Надстройка над stg_channel_errors: document_group_key и русские подписи классификации.';
 
 -- Агрегированная «интерпретация ошибок» по errors_json: одна строка на факт, без искажения сырого ответа.
 -- Разбор нескольких блоков Schematron в одном message: разделитель внутри элемента — " — ".
@@ -611,6 +637,8 @@ CREATE TABLE IF NOT EXISTS dim_column_display_labels (
 
 COMMENT ON TABLE dim_column_display_labels IS 'Имя колонки в представлении/таблице (source_object.source_column) → подпись для Metabase и UI';
 
+DELETE FROM dim_column_display_labels WHERE source_object = 'v_stg_parse_errors_by_document';
+
 INSERT INTO dim_column_display_labels (source_object, source_column, display_label_ru) VALUES
     ('v_egisz_transactions_enriched', 'relates_to_id', 'Связанное сообщение'),
     ('v_egisz_transactions_enriched', 'exchangelog_log_id', 'LOGID журнала EXCHANGELOG'),
@@ -660,7 +688,18 @@ INSERT INTO dim_column_display_labels (source_object, source_column, display_lab
     ('v_rpt_documents_no_response', 'jid', 'JID клиники'),
     ('v_rpt_documents_no_response', 'clinic_name', 'Наименование клиники'),
     ('v_rpt_documents_no_response', 'gost_host', 'Хост клиники (VPN ГОСТ)'),
-    ('v_rpt_documents_no_response', 'sent_at', 'Отправлено')
+    ('v_rpt_documents_no_response', 'sent_at', 'Отправлено'),
+    (
+        'v_stg_channel_errors_by_document',
+        'error_global_subcategory',
+        'Глобальный класс: Ошибка связи | Ошибка в асинхронном ответе РЭМД'
+    ),
+    ('v_stg_channel_errors_by_document', 'error_group_label_ru', 'Внутренняя группа (рус.)'),
+    (
+        'v_stg_channel_errors_by_document',
+        'error_subtype_label_ru',
+        'Подтип (рус.); переменные адреса/URL — в message (нормализация для агрегатов)'
+    )
 ON CONFLICT (source_object, source_column) DO UPDATE SET display_label_ru = EXCLUDED.display_label_ru;
 
 -- Metabase / отчёты: те же данные, что v_egisz_transactions_enriched, с русскими именами колонок (ResultSet / «Спросить данные»).

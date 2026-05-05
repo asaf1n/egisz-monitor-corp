@@ -22,6 +22,7 @@ from egisz_monitor_corp.etl import (
     _is_test_clinic,
     _messages_journal_full_rescan,
     _process_exchangelog_pages,
+    _sync_window_rescan_each_run,
     _to_int,
 )
 from egisz_monitor_corp.pg_warehouse import (
@@ -54,6 +55,12 @@ def test_messages_journal_full_rescan_when_sync_window_negative() -> None:
     assert _messages_journal_full_rescan(_cfg(sync_window_days=0)) is False
     assert _messages_journal_full_rescan(_cfg(sync_window_days=-1)) is True
     assert _messages_journal_full_rescan(_cfg(sync_window_days=30)) is False
+
+
+def test_sync_window_rescan_each_run_only_when_positive_window() -> None:
+    assert _sync_window_rescan_each_run(_cfg(sync_window_days=0)) is False
+    assert _sync_window_rescan_each_run(_cfg(sync_window_days=-1)) is False
+    assert _sync_window_rescan_each_run(_cfg(sync_window_days=30)) is True
 
 
 def test_count_exchangelog_total_is_zero_without_firebird() -> None:
@@ -213,7 +220,7 @@ def test_process_exchangelog_pages_msgtext_too_large_staging_only() -> None:
 
     with (
         patch("egisz_monitor_corp.etl._export_exchangelog_page", side_effect=fake_export),
-        patch("egisz_monitor_corp.etl.insert_staging_errors", side_effect=capture_insert),
+        patch("egisz_monitor_corp.etl.insert_staging_channel_errors", side_effect=capture_insert),
         patch("egisz_monitor_corp.etl.fetch_journal_messages_by_msgids", return_value=[]),
     ):
         stats = _process_exchangelog_pages(

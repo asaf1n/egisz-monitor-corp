@@ -8,9 +8,11 @@
 Источники Firebird в `run_sync`:
   • **JPERSONS** и **EGISZ_LICENSES** — первый шаг после lock: staging, merge **dim_clinics**, кэш для **build_record**.
   • **EGISZ_MESSAGES** и **EXCHANGELOG** — чередование пакетов журнала (``LOGID``) и страниц снимка сообщений
-    (**keyset** ``EGMID > after_egmid``, стартовый ``after`` из ``etl_state.last_egmid``; после каждой страницы
-    снимка курсор фиксируется в ``last_egmid``); prune/окно по **CREATEDATE** при
-    ``sync_window_days > 0``. Перед разбором пакета журнала — **догрузка** ``EGISZ_MESSAGES`` по **MSGID**,
+    (**keyset** ``EGMID > after_egmid`` / ``LOGID > last_log_id``). При ``sync_window_days > 0`` в начале run
+    оба курсора сбрасываются в 0 и обе таблицы перечитываются внутри окна по датам (**LOGDATE** / **CREATEDATE**)
+    — единая логика догрузки пропусков; после страниц курсоры снова фиксируются в ``etl_state``. При ``0`` —
+    инкремент без дат; при ``< 0`` — полный пересъём без дат (см. ``run_sync``). Перед разбором пакета журнала —
+    **догрузка** ``EGISZ_MESSAGES`` по **MSGID**,
     если строки ещё нет в staging. Сопоставление журнала с сообщениями в PostgreSQL — по **MSGID**.
   • Исходящие: `_refresh_outbound_documents` (окно **CREATEDATE** при ``sync_window_days`` > 0).
 
@@ -29,7 +31,12 @@ from typing import Any, Callable, Mapping, Sequence, TypedDict
 from egisz_monitor_corp.config_loader import CorpAppConfig, load_corp_config
 from egisz_monitor_corp.fb_client import fetch_all
 from egisz_monitor_corp.error_model import classify_staging_error_code
-from egisz_monitor_corp.parser import EgiszMonitorParser, StagingParseError, extract_parse_hints
+from egisz_monitor_corp.parser import (
+    EgiszMonitorParser,
+    StagingChannelError,
+    coerce_exchangelog_log_state,
+    extract_parse_hints,
+)
 from egisz_monitor_corp.pg_warehouse import (
     PipelineLockBusyError,
     apply_reports_schema,
@@ -42,7 +49,7 @@ from egisz_monitor_corp.pg_warehouse import (
     get_last_egmid,
     get_last_log_id,
     insert_journal_messages_staging_rows,
-    insert_staging_errors,
+    insert_staging_channel_errors,
     merge_dim_clinics_from_license_staging,
     refresh_license_staging_from_firebird_exports,
     refresh_outbound_documents_staging,
@@ -52,7 +59,6 @@ from egisz_monitor_corp.pg_warehouse import (
     set_last_egmid,
     set_last_log_id,
     try_acquire_pipeline_lock,
-    truncate_journal_messages_staging,
     upsert_dim_clinic,
     upsert_dim_semd,
     upsert_facts_batch,
@@ -86,13 +92,23 @@ def _messages_journal_full_rescan(cfg: CorpAppConfig) -> bool:
     return int(cfg.etl.sync_window_days) < 0
 
 
+def _sync_window_rescan_each_run(cfg: CorpAppConfig) -> bool:
+    """При ``sync_window_days > 0`` каждый запуск sync перечитывает данные внутри окна с начала keyset.
+
+    Единая логика для **EXCHANGELOG** и **EGISZ_MESSAGES**:
+    предикат по дате в Firebird (``LOGDATE`` / ``CREATEDATE`` через ``_etl_sync_window_days``) и сброс
+    ``etl_state.last_log_id`` / ``last_egmid`` в 0 в начале run, чтобы догружать пропуски, которые иначе
+    «перепрыгнул» бы инкрементальный курсор.
+    """
+    return int(cfg.etl.sync_window_days) > 0
+
+
 def _full_sync_from_start(cfg: CorpAppConfig) -> bool:
     """Полная синхронизация "с нуля" для журнала и сообщений.
 
     При включении:
-    - EXCHANGELOG идёт с LOGID > 0 (игнорируем last_log_id)
-    - EGISZ_MESSAGES snapshot идёт с EGMID > 0 (курсор снимка — last_egmid)
-    - окно по датам отключено (sync_window_days <= 0 => None в _etl_sync_window_days)
+    - сброс ``last_log_id`` и ``last_egmid`` в 0 (полный keyset с начала; staging снимка не TRUNCATE);
+    - окно по датам отключено (``_etl_sync_window_days`` → ``None``).
     """
     return int(cfg.etl.sync_window_days) < 0
 
@@ -410,12 +426,18 @@ def _sync_journal_snapshot_interleaved(
     pipeline = cfg.etl.pipeline_name
 
     if _messages_journal_full_rescan(cfg):
-        truncate_journal_messages_staging(pg)
+        # Полный пересъём (sync_window_days < 0): staging не очищаем; keyset снимка с минимального EGMID
+        # (run_sync уже сбросил last_egmid в 0).
+        msg_scan = get_last_egmid(pg, pipeline)
         pg.commit()
-        msg_scan = 0
     else:
         prune_stg_egisz_messages_journal_by_sync_window(pg, _etl_sync_window_days(cfg))
-        msg_scan = get_last_egmid(pg, pipeline)
+        # sync_window_days > 0: перечитываем EGISZ_MESSAGES внутри окна "с начала",
+        # чтобы догружать пропуски, которые могли быть пропущены курсором last_egmid.
+        if _sync_window_rescan_each_run(cfg):
+            msg_scan = 0
+        else:
+            msg_scan = get_last_egmid(pg, pipeline)
         pg.commit()
 
     parser = EgiszMonitorParser()
@@ -521,7 +543,7 @@ def _sync_journal_snapshot_interleaved(
         _upsert_facts_from_buffer(pg, fact_buffer, cfg)
         pg.commit()
     if staging_buffer:
-        insert_staging_errors(pg, staging_buffer)
+        insert_staging_channel_errors(pg, staging_buffer)
         pg.commit()
 
     return stats
@@ -778,17 +800,17 @@ def _ingest_exchangelog_rows_chunk(
         pl["skipped_existing"] = stats.skipped_existing
         detail(pl)  # type: ignore[arg-type]
 
-    def on_stage(err: StagingParseError) -> None:
+    def on_stage(err: StagingChannelError) -> None:
         staging_buffer.append(err.as_insert_tuple())
         stats.staging_n += 1
         if pg is not None and len(staging_buffer) >= 200:
-            insert_staging_errors(pg, staging_buffer)
+            insert_staging_channel_errors(pg, staging_buffer)
             pg.commit()
             staging_buffer.clear()
 
     msg_by_msgid = _build_msg_cache_for_journal_page(cfg, pg, rows, log, cancel_check=cancel_check)
     # Полный пересъём (sync_window_days < 0): если факт по journal_msgid уже есть,
-    # ранние строки журнала по тому же MSGID без SOAP/relatesToMessage не должны раздувать stg_parse_errors.
+    # ранние строки журнала по тому же MSGID без SOAP/relatesToMessage не должны раздувать stg_channel_errors.
     existing_fact_msgids: set[str] = set()
     if pg is not None and _full_sync_from_start(cfg):
         page_msgids: list[str] = []
@@ -853,11 +875,7 @@ def _ingest_exchangelog_rows_chunk(
         jid_from_row = _to_int(lic_r.get("jid")) if lic_r else None
 
         log_created = _sent_at_utc(r.get("log_created_at"))
-        raw_ls = r.get("logstate")
-        try:
-            log_state = int(raw_ls) if raw_ls is not None else None
-        except (TypeError, ValueError):
-            log_state = None
+        log_state = coerce_exchangelog_log_state(r.get("logstate"))
         lim = cfg.etl.max_msgtext_bytes
         if lim is not None and lim > 0 and msgtext:
             nbytes = len(msgtext.encode("utf-8", errors="replace"))
@@ -872,7 +890,7 @@ def _ingest_exchangelog_rows_chunk(
                 rth, luh, emh = extract_parse_hints(msgtext)
                 c = classify_staging_error_code("MSGTEXT_TOO_LARGE")
                 on_stage(
-                    StagingParseError(
+                    StagingChannelError(
                         relates_to_id=None,
                         error_code="MSGTEXT_TOO_LARGE",
                         message=f"MSGTEXT UTF-8 size {nbytes} exceeds max_msgtext_bytes={lim}",
@@ -951,7 +969,7 @@ def _ingest_exchangelog_rows_chunk(
         fact_buffer.clear()
 
     if pg is not None and staging_buffer:
-        insert_staging_errors(pg, staging_buffer)
+        insert_staging_channel_errors(pg, staging_buffer)
         pg.commit()
         staging_buffer.clear()
 
@@ -1063,7 +1081,7 @@ def _process_exchangelog_pages(
         _upsert_facts_from_buffer(pg, fact_buffer, cfg)
         pg.commit()
     if pg is not None and staging_buffer:
-        insert_staging_errors(pg, staging_buffer)
+        insert_staging_channel_errors(pg, staging_buffer)
         pg.commit()
 
     return stats
@@ -1274,7 +1292,8 @@ def run_sync(
             "ETL: первый шаг данных — JPERSONS и EGISZ_LICENSES → PostgreSQL (staging, merge dim_clinics)."
         )
         log(
-            "ETL: EGISZ_MESSAGES и EXCHANGELOG — чередование страниц с ранних записей; "
+            "ETL: EGISZ_MESSAGES и EXCHANGELOG — чередование страниц; при sync_window_days>0 каждый запуск "
+            "перечитывает обе таблицы внутри окна с минимального keyset (догрузка пропусков); "
             "недостающие MSGID для пакета журнала подгружаются из Firebird; затем исходящие в staging."
         )
         boot_detail(0, "pipeline_bootstrap")
@@ -1320,11 +1339,23 @@ def run_sync(
         # Полная синхронизация: пройти EXCHANGELOG и EGISZ_MESSAGES "с начала", игнорируя курсоры.
         # Это делается только в явном режиме (sync_window_days < 0).
         if pg is not None and not dry_run and _full_sync_from_start(cfg):
-            log("Полная синхронизация: сброс курсоров etl_state и полный проход EXCHANGELOG/EGISZ_MESSAGES с начала.")
+            log(
+                "Полная синхронизация (sync_window_days < 0): сброс last_log_id и last_egmid в 0 — "
+                "полный проход EXCHANGELOG и снимка EGISZ_MESSAGES с начала keyset; staging снимка не очищаем (UPSERT по MSGID)."
+            )
             boot_detail(0, "pipeline_bootstrap")
             set_last_log_id(pg, pipeline, 0)
             set_last_egmid(pg, pipeline, 0)
-            truncate_journal_messages_staging(pg)
+            pg.commit()
+            last_id = 0
+            last_egmid = 0
+        elif pg is not None and not dry_run and _sync_window_rescan_each_run(cfg):
+            log(
+                "Окно sync_window_days>0: сброс last_log_id и last_egmid — перечитывание EXCHANGELOG (LOGDATE) "
+                "и снимка EGISZ_MESSAGES (CREATEDATE) внутри окна с начала keyset."
+            )
+            set_last_log_id(pg, pipeline, 0)
+            set_last_egmid(pg, pipeline, 0)
             pg.commit()
             last_id = 0
             last_egmid = 0

@@ -197,7 +197,9 @@ def apply_sql_files(con, *names: str) -> None:  # type: ignore[no-untyped-def]
         def _one_file() -> None:
             with con.cursor() as cur:
                 # DDL может конфликтовать с параллельными SELECT (Metabase/Config UI).
-                cur.execute("SET LOCAL lock_timeout = '5s'")
+                # 5 секунд часто недостаточно при активных дашбордах (Metabase держит соединения/транзакции).
+                # DDL применяется редко и идемпотентно, поэтому допускаем больше ожидания.
+                cur.execute("SET LOCAL lock_timeout = '60s'")
                 cur.execute(sql_text)
             con.commit()
 
@@ -504,7 +506,9 @@ def _dedupe_journal_snapshot_rows_by_msgid(rows: list[dict[str, Any]]) -> list[d
 
 def truncate_journal_messages_staging(con) -> None:  # type: ignore[no-untyped-def]
     with con.cursor() as cur:
-        cur.execute("TRUNCATE stg_egisz_messages_journal")
+        # TRUNCATE требует ACCESS EXCLUSIVE и легко конфликтует с Metabase SELECT по v_rpt_* (архив/очередь).
+        # В full-rescan важнее гарантировать прогресс ETL, чем мгновенно очистить таблицу.
+        cur.execute("DELETE FROM stg_egisz_messages_journal")
 
 
 def insert_journal_messages_staging_rows(con, rows: list[dict[str, Any]]) -> None:  # type: ignore[no-untyped-def]
@@ -603,7 +607,7 @@ def fetch_journal_messages_by_msgids(con, msgids: list[str]) -> list[dict[str, A
 def fact_journal_msgids_present_in_facts(con, msgids: list[str]) -> set[str]:  # type: ignore[no-untyped-def]
     """Множество EXCHANGELOG.MSGID, которые уже представлены в fact_egisz_transactions.journal_msgid.
 
-    Используется в режиме полного пересъёма (sync_window_days < 0), чтобы не раздувать `stg_parse_errors`
+    Используется в режиме полного пересъёма (sync_window_days < 0), чтобы не раздувать `stg_channel_errors`
     ранними строками журнала без SOAP/relatesToMessage, если по этому MSGID факт уже собран из более поздней записи.
     """
     if not msgids:
@@ -724,7 +728,9 @@ def refresh_outbound_documents_staging(con, rows: list[dict[str, Any]]) -> None:
     """Полная перезапись stg_egisz_outbound_documents снимком (порядок строк как во входном iterable — типично EGMID DESC)."""
     def _do_refresh() -> None:
         with con.cursor() as cur:
-            cur.execute("SET LOCAL lock_timeout = '5s'")
+            # Удаление/перезапись staging допускает ожидание: оно совместимо с SELECT,
+            # но может конфликтовать с редкими DDL/maintenance операциями.
+            cur.execute("SET LOCAL lock_timeout = '60s'")
             cur.execute("DELETE FROM stg_egisz_outbound_documents")
 
         if rows:
@@ -743,7 +749,7 @@ def refresh_outbound_documents_staging(con, rows: list[dict[str, Any]]) -> None:
                 )
             template = "(%s, %s, %s, %s, %s, %s, %s, NOW())"
             with con.cursor() as cur2:
-                cur2.execute("SET LOCAL lock_timeout = '5s'")
+                cur2.execute("SET LOCAL lock_timeout = '60s'")
                 execute_values(
                     cur2,
                     """
@@ -765,7 +771,7 @@ def fetch_healthcheck_snapshot(con, *, top_clinics: int = 5) -> dict[str, Any]: 
 
     Использует представления из sql/005_healthcheck.sql:
       - v_health_signals — пять сигналов (error_rate_high, unknown_high,
-        parse_errors_burst, queue_red_24h, cursor_stale).
+        channel_errors_burst, queue_red_24h, cursor_stale).
       - v_health_by_clinic — агрегаты по клиникам за 24h.
       - v_health_proxy_db — счётчики staging исходящих + последний апдейт ETL.
 
@@ -990,7 +996,7 @@ def fetch_pg_sync_snapshot(con, pipeline: str) -> dict[str, Any]:  # type: ignor
                     """
                     SELECT GREATEST(
                       COALESCE((SELECT MAX(exchangelog_log_id) FROM fact_egisz_transactions), 0),
-                      COALESCE((SELECT MAX(exchangelog_log_id) FROM stg_parse_errors), 0)
+                      COALESCE((SELECT MAX(exchangelog_log_id) FROM stg_channel_errors), 0)
                     )
                     """
                 )
@@ -1031,7 +1037,7 @@ def fetch_pg_sync_snapshot(con, pipeline: str) -> dict[str, Any]:  # type: ignor
                 """
                 SELECT GREATEST(
                   COALESCE((SELECT MAX(exchangelog_log_id) FROM fact_egisz_transactions), 0),
-                  COALESCE((SELECT MAX(exchangelog_log_id) FROM stg_parse_errors), 0)
+                  COALESCE((SELECT MAX(exchangelog_log_id) FROM stg_channel_errors), 0)
                 )
                 """
             )
@@ -1156,7 +1162,7 @@ def upsert_facts_batch(
             con.commit()
 
 
-def insert_staging_errors(
+def insert_staging_channel_errors(
     con,
     rows: list[
         tuple[
@@ -1182,7 +1188,7 @@ def insert_staging_errors(
         execute_batch(
             cur,
             """
-            INSERT INTO stg_parse_errors (
+            INSERT INTO stg_channel_errors (
                 relates_to_id, error_code, message, log_excerpt,
                 exchangelog_log_id, egisz_messages_egmid, journal_msgid,
                 error_top_type, error_group, error_subtype,

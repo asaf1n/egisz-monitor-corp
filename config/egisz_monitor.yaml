@@ -17,7 +17,10 @@ postgres:
 etl:
   batch_size: 1000
   pipeline_name: firebird_exchangelog
-  sync_window_days: 0
+  # Окно выборки по датам (EXCHANGELOG.LOGDATE / EGISZ_MESSAGES.CREATEDATE).
+  # Ненулевое значение нужно, чтобы витрина «06 Архив СЭМД» быстро покрывала все документы за период,
+  # даже если курсоры (last_log_id/last_egmid) отстают от текущего хвоста Firebird.
+  sync_window_days: 60
   source_query: null
 auto_sync:
   enabled: false

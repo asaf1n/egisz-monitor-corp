@@ -342,6 +342,26 @@ def test_save_applies_cronjob_reconcile(cfg_yaml: Path) -> None:
     assert call_auto["enabled"] is True
 
 
+def test_save_resets_etl_cursors_when_sync_window_negative(cfg_yaml: Path) -> None:
+    from unittest.mock import MagicMock, patch
+
+    app = create_app()
+    app.testing = True
+    client = app.test_client()
+    form = {**_full_config_form(), "etl_sync_days": "-1"}
+    mock_pg = MagicMock()
+    with patch(
+        "egisz_monitor_corp.config_app.reconcile_egisz_monitor_sync_cronjob",
+        return_value=(True, "CronJob ok"),
+    ), patch("egisz_monitor_corp.config_app.connect_pg", return_value=mock_pg):
+        resp = client.post("/save", data=form)
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["ok"] is True
+    assert "курсор" in (body.get("message") or "").lower()
+    mock_pg.commit.assert_called()
+
+
 def test_save_writes_etl_even_when_yaml_had_null_etl(cfg_yaml: Path) -> None:
     import yaml
 

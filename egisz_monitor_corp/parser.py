@@ -14,6 +14,7 @@ import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, Callable, Mapping
 
 from defusedxml.ElementTree import fromstring as _xml_fromstring
@@ -98,6 +99,43 @@ def _normalize_network_error_text(log_text: str | None) -> str | None:
     return t or None
 
 
+def coerce_exchangelog_log_state(value: Any) -> int | None:
+    """EXCHANGELOG.LOGSTATE из Firebird: int/str/bytes/Decimal/float; ``bool`` не используем как код состояния."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return None
+        try:
+            return int(s, 10)
+        except ValueError:
+            return None
+    if isinstance(value, bytes):
+        try:
+            s = value.decode("ascii", errors="replace").strip()
+            return int(s, 10) if s else None
+        except ValueError:
+            return None
+    if isinstance(value, float):
+        if value.is_integer():
+            return int(value)
+        return None
+    if isinstance(value, Decimal):
+        try:
+            return int(value)
+        except Exception:
+            return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _extract_embedded_xml(raw: str) -> str:
     """MSGTEXT may prefix transport lines before the SOAP document."""
     markers = ("<?xml", "<soap:", "<SOAP:", "<soap ", "<SOAP ", "<s:Envelope", "<S:Envelope")
@@ -171,8 +209,8 @@ def _norm_kind_code(raw: str | None) -> str | None:
 
 
 @dataclass
-class StagingParseError:
-    """Ошибка разбора без факта; поля трассировки: LOGID журнала, MSGID сообщения, EGMID записи EGISZ_MESSAGES."""
+class StagingChannelError:
+    """Сбой канала ETL без факта; трассировка: LOGID журнала, MSGID сообщения, EGMID записи EGISZ_MESSAGES."""
 
     relates_to_id: str | None
     error_code: str
@@ -525,7 +563,7 @@ class EgiszMonitorParser:
         log_text: str | None,
         *,
         msg_text: str | None = None,
-        log_state: int | None = None,
+        log_state: Any = None,
         kind_from_egisz_licenses: str | int | None = None,
         mo_uid_from_egisz_licenses: str | None = None,
         jid_from_egisz_licenses_row: int | None = None,
@@ -534,7 +572,7 @@ class EgiszMonitorParser:
         document_id: str | None = None,
         msg_created_at: datetime | None = None,
         log_created_at: datetime | None = None,
-        on_staging_error: Callable[[StagingParseError], None] | None = None,
+        on_staging_error: Callable[[StagingChannelError], None] | None = None,
         exchangelog_log_id: int | None = None,
         egisz_messages_egmid: int | None = None,
         journal_msgid: str | None = None,
@@ -616,14 +654,14 @@ class EgiszMonitorParser:
 
         hint_relates, hint_local, hint_emdr = extract_parse_hints(soap_src)
 
-        def _stage(err: StagingParseError) -> None:
+        def _stage(err: StagingChannelError) -> None:
             if on_staging_error:
                 on_staging_error(err)
 
         def _stage_code(*, code: str, message: str, relates_to: str | None) -> None:
             c = classify_staging_error_code(code)
             _stage(
-                StagingParseError(
+                StagingChannelError(
                     relates_to_id=relates_to,
                     error_code=code,
                     message=message,
@@ -640,21 +678,16 @@ class EgiszMonitorParser:
                 )
             )
 
-        # LOGSTATE=3: network errors are stored in EXCHANGELOG.LOGTEXT (no SOAP). Keep them in staging for reporting.
-        try:
-            ls = int(log_state) if log_state is not None else None
-        except (TypeError, ValueError):
-            ls = None
+        ls = coerce_exchangelog_log_state(log_state)
         if ls == 3:
             net_text = _normalize_network_error_text(log_text) or "Сетевая ошибка (LOGSTATE=3)"
-            _stage_code(code="NETWORK_ERROR", message=net_text, relates_to=None)
+            _stage_code(code="INTEGRATION_LOGSTATE_3", message=net_text, relates_to=None)
             return None
 
         if not relates_to_id:
             if parsed and parsed.get("_xml_ok") and parsed.get("relates_to_id") is None:
                 # Шумоподавление: не каждый SOAP/XML фрагмент в журнале — callback РЭМД.
-                # Пишем ошибку только если фрагмент похож на callback (registerDocumentResult / hints),
-                # иначе пропускаем без записи в stg_parse_errors.
+                # Ошибка только если фрагмент похож на callback (registerDocumentResult / hints).
                 blob = (soap_src or "").lower()
                 callback_like = (
                     ("registerdocumentresult" in blob)

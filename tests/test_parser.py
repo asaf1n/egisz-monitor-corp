@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from egisz_monitor_corp.parser import EgiszMonitorParser, extract_parse_hints
+from decimal import Decimal
+
+from egisz_monitor_corp.parser import EgiszMonitorParser, coerce_exchangelog_log_state, extract_parse_hints
 
 
 NS = "http://egisz.rosminzdrav.ru/iehr/emdr/callback/"
@@ -354,7 +356,7 @@ def test_staging_error_missing_relates() -> None:
 
 
 def test_staging_error_when_relates_but_no_localuid_or_emdr() -> None:
-    """relatesToMessage без localUid, без DOCUMENTID и без emdrId — только stg_parse_errors, не факт."""
+    """relatesToMessage без localUid, без DOCUMENTID и без emdrId — только stg_channel_errors, не факт."""
     p = EgiszMonitorParser()
     errors: list = []
 
@@ -472,3 +474,38 @@ def test_parse_xml_rejects_external_entity_system() -> None:
   <status>success</status>
 </registerDocumentResult>"""
     assert p.parse_xml(xml) is None
+
+
+def test_coerce_exchangelog_log_state_firebird_shapes() -> None:
+    assert coerce_exchangelog_log_state(None) is None
+    assert coerce_exchangelog_log_state(3) == 3
+    assert coerce_exchangelog_log_state("3") == 3
+    assert coerce_exchangelog_log_state(b"3") == 3
+    assert coerce_exchangelog_log_state(Decimal("3")) == 3
+    assert coerce_exchangelog_log_state(3.0) == 3
+    assert coerce_exchangelog_log_state(3.7) is None
+    assert coerce_exchangelog_log_state(True) is None
+
+
+def test_build_record_logstate_3_network_error_typed_like_firebird() -> None:
+    p = EgiszMonitorParser()
+    staged: list = []
+
+    def on_staging_error(e) -> None:
+        staged.append(e)
+
+    for raw_ls in ("3", b"3", Decimal("3")):
+        staged.clear()
+        r = p.build_record(
+            "http://gost-5008.infoclinica.lan:9945/timeout",
+            msg_text=None,
+            log_state=raw_ls,
+            on_staging_error=on_staging_error,
+            journal_msgid="MSG-NET",
+        )
+        assert r is None
+        assert len(staged) == 1
+        assert staged[0].error_code == "INTEGRATION_LOGSTATE_3"
+        assert staged[0].error_top_type == "network"
+        assert staged[0].error_group == "network"
+        assert staged[0].error_subtype == "logstate_3"

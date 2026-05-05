@@ -3,7 +3,7 @@
   "description": "Контроль текущего состояния. Период задаётся [field filter](https://www.metabase.com/docs/v0.60/questions/native-editor/field-filters) `dwh_date` по **«Обработано IPS»** (актуальные поля витрины: `registration_date`, `semd_creation_at`, `processed_at`); при необходимости — фильтр по коду СЭМД и JID клиники (v0.60+). Slug фильтров `top_*_filter` совпадают с query string в URL (закладки и шаринг). Сигналы здоровья сервиса (error_rate, queue, parse_errors) и детализация парсинга — на дашборде **«02 Сервис, healthcheck и парсинг журнала»**. Блок **трендов и календарной динамики** (раньше отдельный дашборд 05): на карточках с осью «День (тренд)» виджет даты привязан к этой колонке; «Объём по часам» — окно 72 ч без общего фильтра.",
   "parameters": [
     {
-      "id": "a1b2c3d4-e5f6-4789-a01b-01operational0",
+      "id": "a1b2c3d4-e5f6-4789-a01b-0123456789ab",
       "name": "Период по дате обработки (витрина)",
       "slug": "dwh_date_filter",
       "type": "date/all-options",
@@ -383,7 +383,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH fact_status AS ( SELECT CASE WHEN \"Статус\" = 'error' AND NULLIF(TRIM(\"Подкатегория ошибки (глобально)\"), '') = 'ошибка асинхронного ответа РЭМД' THEN 'ошибка асинхронного ответа' WHEN \"Статус\" = 'error' THEN 'отказы РЭМД (status=error)' ELSE \"Статус\" END AS \"Статус\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID клиники\"::text = {{top_clinic}}]] GROUP BY 1 ), net AS ( SELECT 'сетевые ошибки связи'::text AS \"Статус\", COUNT(DISTINCT document_group_key)::bigint AS \"Документов\" FROM public.v_stg_parse_errors_by_document WHERE error_top_type = 'network' [[AND {{parse_created}}]] ) SELECT * FROM fact_status UNION ALL SELECT * FROM net WHERE \"Документов\" > 0 ORDER BY 2 DESC",
+          "query": "WITH fact_status AS ( SELECT CASE WHEN \"Статус\" = 'error' AND NULLIF(TRIM(\"Подкатегория ошибки (глобально)\"), '') = 'ошибка асинхронного ответа РЭМД' THEN 'ошибка асинхронного ответа' WHEN \"Статус\" = 'error' THEN 'отказы РЭМД (status=error)' ELSE \"Статус\" END AS \"Статус\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID клиники\"::text = {{top_clinic}}]] GROUP BY 1 ), net AS ( SELECT 'Ошибка связи'::text AS \"Статус\", COUNT(DISTINCT document_group_key)::bigint AS \"Документов\" FROM public.v_stg_channel_errors_by_document WHERE error_top_type = 'network' [[AND {{parse_created}}]] ) SELECT * FROM fact_status UNION ALL SELECT * FROM net WHERE \"Документов\" > 0 ORDER BY 2 DESC",
           "template-tags": {
             "dwh_date": {
               "type": "dimension",

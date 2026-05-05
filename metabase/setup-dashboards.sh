@@ -458,13 +458,13 @@ create_card() {
           end
         );
       def infer_table_ref($q):
-        # Некоторые запросы объединяют факты + staging (например UNION ALL с v_stg_parse_errors_by_document).
+        # Некоторые запросы объединяют факты + staging (например UNION ALL с v_stg_channel_errors_by_document).
         # Для dwh_date_filter и большинства фильтров базовая витрина — v_egisz_transactions_enriched_ui, поэтому
         # при наличии выбираем её приоритетно.
         if ($q | test("v_rpt_documents_no_response_ui")) then "v_rpt_documents_no_response_ui"
         elif ($q | test("v_rpt_semd_archive_ui")) then "v_rpt_semd_archive_ui"
         elif ($q | test("v_egisz_transactions_enriched_ui")) then "v_egisz_transactions_enriched_ui"
-        elif ($q | test("v_stg_parse_errors_by_document")) then "v_stg_parse_errors_by_document"
+        elif ($q | test("v_stg_channel_errors_by_document")) then "v_stg_channel_errors_by_document"
         else null end;
       def infer_field_name($tr; $q; $tagKey):
         if $tagKey == "parse_created" then "created_at"
@@ -522,7 +522,7 @@ create_card() {
     | .table = (.table // {})
     | .table.columns = (
         if ($display == "table")
-           and ($query | test("v_egisz_transactions_enriched_ui|stg_parse_errors"))
+           and ($query | test("v_egisz_transactions_enriched_ui|stg_channel_errors"))
            and ($query | test("v_rpt_documents_no_response_ui") | not) then
           (.table.columns // []) as $cols
           | if ($cols | length) == 0 then

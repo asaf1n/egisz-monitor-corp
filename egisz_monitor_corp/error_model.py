@@ -5,20 +5,33 @@ from enum import Enum
 
 
 class ErrorTopType(str, Enum):
-    """Два больших типа ошибок для мониторинга витрины."""
+    """Два глобальных типа для мониторинга (значения в БД — machine-readable)."""
 
+    # Ошибка связи / транспорта / интеграционного контура (не разбор SOAP колбэка РЭМД).
     NETWORK = "network"
+    # Ошибка в асинхронном ответе РЭМД: разбор колбэка, связка, идентификаторы.
     ASYNC_RESPONSE = "async_response"
 
 
+# Подписи верхнего уровня для отчётов и UI (согласовано с v_stg_channel_errors_by_document.error_global_subcategory).
+ERROR_TOP_TYPE_LABEL_RU: dict[str, str] = {
+    ErrorTopType.NETWORK.value: "Ошибка связи",
+    ErrorTopType.ASYNC_RESPONSE.value: "Ошибка в асинхронном ответе РЭМД",
+}
+
+
 class StagingErrorGroup(str, Enum):
-    """Внутренние группировки ошибок парсинга (stg_parse_errors)."""
+    """Внутренние группы внутри глобального типа (таблица stg_channel_errors)."""
 
     NETWORK = "network"
     PARSE = "parse"
     LINKAGE = "linkage"
     IDENTIFIERS = "identifiers"
     OTHER = "other"
+
+
+# Коды ошибок: сбой связи/журнала (LOGSTATE=3 и др.), не путать с XML_BROKEN и т.п.
+_INTEGRATION_CONNECTIVITY_CODES = frozenset({"INTEGRATION_LOGSTATE_3", "NETWORK_ERROR"})
 
 
 @dataclass(frozen=True)
@@ -30,12 +43,13 @@ class StagingErrorClass:
 
 def classify_staging_error_code(error_code: str) -> StagingErrorClass:
     """
-    Классификация ошибок ETL-парсинга (stg_parse_errors).
+    Классификация записей staging-ошибок канала ETL (таблица ``stg_channel_errors``).
 
-    Требование прототипа: стабильный top-level (network vs async_response) + внутренние группы.
+    Два глобальных типа: **связь/интеграция** (``network``) и **асинхронный ответ РЭМД** (``async_response``).
+    ``NETWORK_ERROR`` — устаревший код, эквивалентен ``INTEGRATION_LOGSTATE_3``.
     """
     code = (error_code or "").strip().upper()
-    if code == "NETWORK_ERROR":
+    if code in _INTEGRATION_CONNECTIVITY_CODES:
         return StagingErrorClass(
             top_type=ErrorTopType.NETWORK,
             group=StagingErrorGroup.NETWORK,
