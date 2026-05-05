@@ -105,4 +105,3 @@ Firebird → ETL/парсер → PostgreSQL (витрина) → Metabase (да
 
 - **Техническая часть (структура репо, ETL, SQL, k8s, выкат)**: `AGENTS.md`.
 - **Домен (парсинг SOAP/XML, статусы, сигналы, единицы учёта, healthcheck)**: `.cursorrules`.
-- **Полный BI-аудит и методология**: `docs/BI_EGISZ_INFOKLINIKA_AUDIT.md`.
