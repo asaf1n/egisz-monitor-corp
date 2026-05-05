@@ -1242,18 +1242,20 @@ def run_sync(
         )
         boot_detail(0, "pipeline_bootstrap")
         if pg is not None:
-            log("PostgreSQL: применение DDL витрины (идемпотентно), ожидайте…")
-            boot_detail(1, "pg_schema_apply")
-            apply_reports_schema(pg)
-            log("PostgreSQL: DDL применён; запрос advisory lock для пайплайна…")
-            boot_detail(2, "pg_advisory_lock")
+            # Важно: advisory lock нужно брать ДО применения DDL, иначе два параллельных запуска sync
+            # могут одновременно зайти в apply_reports_schema (DROP/CREATE VIEW) и словить deadlock.
+            log("PostgreSQL: запрос advisory lock для пайплайна…")
+            boot_detail(1, "pg_advisory_lock")
             lock_acquired = try_acquire_pipeline_lock(pg, pipeline)
             if not lock_acquired:
                 raise PipelineLockBusyError(
                     f"Sync пайплайна '{pipeline}' уже выполняется (advisory lock занят). "
                     "Дождитесь завершения текущего запуска или проверьте `pg_locks`."
                 )
-            log("PostgreSQL: lock получен.")
+            log("PostgreSQL: lock получен; применение DDL витрины (идемпотентно), ожидайте…")
+            boot_detail(2, "pg_schema_apply")
+            apply_reports_schema(pg)
+            log("PostgreSQL: DDL применён.")
 
         _raise_if_cancel(cancel_check)
 

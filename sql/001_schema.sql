@@ -532,36 +532,71 @@ ON CONFLICT (source_object, source_column) DO UPDATE SET display_label_ru = EXCL
 
 -- Metabase / отчёты: те же данные, что v_egisz_transactions_enriched, с русскими именами колонок (ResultSet / «Спросить данные»).
 CREATE OR REPLACE VIEW v_egisz_transactions_enriched_ui AS
-SELECT
-    local_uid_semd AS "localUid СЭМД",
-    exchangelog_log_id::text AS "LOGID журнала EXCHANGELOG",
-    egisz_messages_egmid::text AS "EGISZ_MESSAGES.EGMID (ключ записи, РЭМД)",
-    jid::text AS "JID клиники",
-    gost_host AS "Хост клиники (VPN ГОСТ)",
-    org_oid AS "OID организации",
-    kind_code::text AS "Код СЭМД",
-    kind_name AS "Наименование СЭМД",
-    status AS "Статус",
-    error_global_subcategory AS "Подкатегория ошибки (глобально)",
-    emdr_id AS "Рег. номер РЭМД (emdrid)",
-    errors_json AS "Ошибки JSON",
-    errors_friendly AS "Сводка ошибок",
-    registration_date AS "Зарегистрирован в ЕГИСЗ РЭМД",
-    semd_creation_at AS "Создание СЭМД",
-    processed_at AS "Обработано IPS",
-    chart_day AS "День (тренд)",
-    clinic_name AS "Наименование клиники",
-    clinic_inn AS "ИНН клиники",
-    clinic_mo_oid AS "OID клиники",
-    jid_from_license::text AS "JID (EGISZ_LICENSES)",
-    jid_from_gost_log::text AS "JID из gost в LOGTEXT",
-    jid_from_gost_reply::text AS "JID из gost в REPLYTO",
-    gost_token_logtext AS "Токен gost (LOGTEXT)",
-    gost_token_replyto AS "Токен gost (REPLYTO)",
-    jid_sources_mismatch AS "Расхождение источников JID",
-    journal_msgid AS "MSGID обмена (EXCHANGELOG)",
-    relates_to_id AS "Связанное сообщение"
-FROM v_egisz_transactions_enriched;
+SELECT *
+FROM (
+    SELECT
+        local_uid_semd AS "localUid СЭМД",
+        exchangelog_log_id::text AS "LOGID журнала EXCHANGELOG",
+        egisz_messages_egmid::text AS "EGISZ_MESSAGES.EGMID (ключ записи, РЭМД)",
+        jid::text AS "JID клиники",
+        gost_host AS "Хост клиники (VPN ГОСТ)",
+        org_oid AS "OID организации",
+        kind_code::text AS "Код СЭМД",
+        kind_name AS "Наименование СЭМД",
+        status AS "Статус",
+        error_global_subcategory AS "Подкатегория ошибки (глобально)",
+        emdr_id AS "Рег. номер РЭМД (emdrid)",
+        errors_json AS "Ошибки JSON",
+        errors_friendly AS "Сводка ошибок",
+        registration_date AS "Зарегистрирован в ЕГИСЗ РЭМД",
+        semd_creation_at AS "Создание СЭМД",
+        processed_at AS "Обработано IPS",
+        chart_day AS "День (тренд)",
+        clinic_name AS "Наименование клиники",
+        clinic_inn AS "ИНН клиники",
+        clinic_mo_oid AS "OID клиники",
+        jid_from_license::text AS "JID (EGISZ_LICENSES)",
+        jid_from_gost_log::text AS "JID из gost в LOGTEXT",
+        jid_from_gost_reply::text AS "JID из gost в REPLYTO",
+        gost_token_logtext AS "Токен gost (LOGTEXT)",
+        gost_token_replyto AS "Токен gost (REPLYTO)",
+        jid_sources_mismatch AS "Расхождение источников JID",
+        journal_msgid AS "MSGID обмена (EXCHANGELOG)",
+        relates_to_id AS "Связанное сообщение"
+    FROM v_egisz_transactions_enriched
+    UNION ALL
+    SELECT
+        NULL::text AS "localUid СЭМД",
+        s.exchangelog_log_id::text AS "LOGID журнала EXCHANGELOG",
+        s.egisz_messages_egmid::text AS "EGISZ_MESSAGES.EGMID (ключ записи, РЭМД)",
+        NULL::text AS "JID клиники",
+        NULL::text AS "Хост клиники (VPN ГОСТ)",
+        NULL::text AS "OID организации",
+        NULL::text AS "Код СЭМД",
+        NULL::text AS "Наименование СЭМД",
+        'error'::text AS "Статус",
+        'сетевые'::text AS "Подкатегория ошибки (глобально)",
+        NULL::text AS "Рег. номер РЭМД (emdrid)",
+        jsonb_build_array(jsonb_build_object('code', 'NETWORK_ERROR', 'message', s.message)) AS "Ошибки JSON",
+        s.message AS "Сводка ошибок",
+        NULL::timestamptz AS "Зарегистрирован в ЕГИСЗ РЭМД",
+        NULL::timestamptz AS "Создание СЭМД",
+        s.created_at AS "Обработано IPS",
+        DATE(s.created_at) AS "День (тренд)",
+        'Сетевые ошибки (LOGSTATE=3)'::text AS "Наименование клиники",
+        NULL::text AS "ИНН клиники",
+        NULL::text AS "OID клиники",
+        NULL::text AS "JID (EGISZ_LICENSES)",
+        NULL::text AS "JID из gost в LOGTEXT",
+        NULL::text AS "JID из gost в REPLYTO",
+        NULL::text AS "Токен gost (LOGTEXT)",
+        NULL::text AS "Токен gost (REPLYTO)",
+        false AS "Расхождение источников JID",
+        s.journal_msgid::text AS "MSGID обмена (EXCHANGELOG)",
+        ('net:' || s.document_group_key)::text AS "Связанное сообщение"
+    FROM v_stg_parse_errors_by_document s
+    WHERE s.error_global_subcategory = 'сетевые'
+) u;
 
 COMMENT ON VIEW v_egisz_transactions_enriched_ui IS 'Обёртка над v_egisz_transactions_enriched с подписями колонок для отчётов; см. dim_column_display_labels. JID клиники, Код СЭМД, LOGID/EGMID — TEXT (идентификаторы: без разделителей тысяч и суммирования в Metabase). «Сводка ошибок» — errors_friendly: агрегация подсказок по errors_json, исходные «Ошибки JSON» не меняются. Колонка «Связанное сообщение» (relates_to_id) — последняя для удобства витрин и Metabase.';
 

@@ -10,6 +10,13 @@
       "sectionId": "date"
     },
     {
+      "id": "a8f3c2b1-4d5e-6f70-a8b9-c0d1e2f3a4b7",
+      "name": "Период по дате (сетевые ошибки / канал, created_at)",
+      "slug": "parse_date",
+      "type": "date/all-options",
+      "sectionId": "date"
+    },
+    {
       "id": "a8f3c2b1-4d5e-6f70-a8b9-c0d1e2f3a4b6",
       "name": "localUid СЭМД",
       "slug": "local_uid_filter",
@@ -76,11 +83,11 @@
     },
     {
       "name": "05 · Статусы за период (доля)",
-      "description": "Круговая диаграмма: успех / ошибка / неизвестно по дате «Обработано».",
+      "description": "Круговая диаграмма по дате «Обработано»: success / unknown / ошибка асинхронного ответа РЭМД / прочие ошибки (error).",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT COALESCE(NULLIF(TRIM(\"Статус\"), ''), '(нет)') AS \"Статус\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ORDER BY 2 DESC",
+          "query": "SELECT CASE WHEN \"Статус\" = 'error' AND NULLIF(TRIM(\"Подкатегория ошибки (глобально)\"), '') = 'сетевые' THEN 'сетевые ошибки связи' WHEN \"Статус\" = 'error' AND NULLIF(TRIM(\"Подкатегория ошибки (глобально)\"), '') = 'ошибка асинхронного ответа РЭМД' THEN 'ошибка асинхронного ответа' WHEN \"Статус\" = 'error' THEN 'ошибка (прочие)' ELSE COALESCE(NULLIF(TRIM(\"Статус\"), ''), '(нет)') END AS \"Статус\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ORDER BY 2 DESC",
           "template-tags": {
             "dwh_date": {
               "widget-type": "date/all-options",
@@ -128,6 +135,48 @@
       "sizeY": 5,
       "row": 3,
       "col": 0
+    },
+    {
+      "name": "05 · Сетевые ошибки связи (доля)",
+      "description": "Круговая диаграмма по сетевым ошибкам (LOGSTATE=3) из `stg_parse_errors`: метрика — число уникальных документов (document_group_key). Фильтр по created_at (отдельный date filter).",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT 'Сетевые ошибки связи'::text AS \"Тип\", COUNT(DISTINCT document_group_key)::bigint AS \"Документов\" FROM public.v_stg_parse_errors_by_document WHERE 1=1 AND error_global_subcategory = 'сетевые' [[AND {{parse_date}}]]",
+          "template-tags": {
+            "parse_date": {
+              "widget-type": "date/all-options",
+              "id": "f90000d1-d001-4001-8001-000000000001",
+              "name": "parse_date",
+              "display-name": "По дате created_at (канал)",
+              "type": "dimension"
+            }
+          }
+        },
+        "database": 1
+      },
+      "display": "pie",
+      "visualization_settings": {
+        "pie.show_legend": true,
+        "pie.show_total": true,
+        "pie.percent_visibility": "inside",
+        "pie.slice_threshold": 0,
+        "version": 2,
+        "column_settings": {
+          "[\"name\",\"Тип\"]": {
+            "column_title": "Тип"
+          },
+          "[\"name\",\"Документов\"]": {
+            "number_separators": ".",
+            "decimals": 0,
+            "column_title": "Документов"
+          }
+        }
+      },
+      "sizeX": 8,
+      "sizeY": 5,
+      "row": 3,
+      "col": 16
     },
     {
       "name": "05 · Топ причин ошибок (ЕГИСЗ, доля)",
@@ -234,7 +283,7 @@
       },
       "sizeX": 8,
       "sizeY": 5,
-      "row": 3,
+      "row": 25,
       "col": 16
     },
     {

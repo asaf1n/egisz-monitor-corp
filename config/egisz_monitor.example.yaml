@@ -27,12 +27,12 @@ postgres:
   schema: "public"
 
 etl:
-  batch_size: 500
+  batch_size: 1000
   pipeline_name: "firebird_exchangelog"
   # Окно по датам в Firebird: EXCHANGELOG.LOGDATE и EGISZ_MESSAGES.CREATEDATE (DATEADD -N DAY TO CURRENT_TIMESTAMP).
   # 0 — синхронизация по всем записям (без предиката по дате) по курсорам: EXCHANGELOG по LOGID, EGISZ_MESSAGES по EGMID.
   # < 0 — полная синхронизация "с начала": сброс курсоров etl_state (LOGID/EGMID) и полный проход EXCHANGELOG + EGISZ_MESSAGES постранично, без окна по датам.
-  sync_window_days: 30
+  sync_window_days: 0
   # Игнорируется пайплайном: журнал всегда строится из встроенного SELECT по EXCHANGELOG.LOGID.
   source_query: null
   # Таймаут (сек.) каждого SELECT к Firebird в ETL (не настраивается в Config UI; задайте здесь или через CI/Secret).

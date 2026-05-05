@@ -72,9 +72,9 @@ class PostgresConfig:
 @dataclass
 class EtlConfig:
     # Размер страницы EXCHANGELOG (FIRST n по LOGID) и шаг гранулярности кооперативной остановки sync.
-    batch_size: int = 8000
+    batch_size: int = 1000
     pipeline_name: str = "firebird_exchangelog"
-    sync_window_days: int = 30
+    sync_window_days: int = 0
     source_query: str | None = None
     # None / не задано — без лимита. UTF-8 размер MSGTEXT; при превышении строка журнала пропускается (staging MSGTEXT_TOO_LARGE).
     max_msgtext_bytes: int | None = None
@@ -230,9 +230,9 @@ def parse_corp_config_dict(
             schema=pg_schema,
         ),
         etl=EtlConfig(
-            batch_size=_int(etl.get("batch_size"), 8000),
+            batch_size=_int(etl.get("batch_size"), 1000),
             pipeline_name=_str(etl.get("pipeline_name"), "firebird_exchangelog"),
-            sync_window_days=_int(etl.get("sync_window_days"), 30),
+            sync_window_days=_int(etl.get("sync_window_days"), 0),
             source_query=_str(etl.get("source_query"), "") or None,
             max_msgtext_bytes=max_msgtext_bytes,
             firebird_query_timeout_sec=_fb_to,

@@ -71,7 +71,7 @@ def test_etl_firebird_query_timeout_defaults_and_clamp() -> None:
     assert cfg.etl.firebird_query_timeout_sec == 900
     assert cfg.etl.skip_firebird_progress_count is False
     assert cfg.etl.facts_upsert_chunk_size == 500
-    assert cfg.etl.batch_size == 8000
+    assert cfg.etl.batch_size == 1000
     assert cfg.etl.pg_upsert_statement_timeout_sec == 120
     hi = parse_corp_config_dict(
         {

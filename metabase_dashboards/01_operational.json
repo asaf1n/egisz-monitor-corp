@@ -378,11 +378,11 @@
     },
     {
       "name": "Статусы за период",
-      "description": "Успех / ошибка / неизвестно в выбранном периоде.",
+      "description": "Успех / неизвестно / ошибка асинхронного ответа РЭМД / прочие ошибки (error) в выбранном периоде.",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT \"Статус\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID клиники\"::text = {{top_clinic}}]] GROUP BY 1 ORDER BY 2 DESC",
+          "query": "SELECT CASE WHEN \"Статус\" = 'error' AND NULLIF(TRIM(\"Подкатегория ошибки (глобально)\"), '') = 'сетевые' THEN 'сетевые ошибки связи' WHEN \"Статус\" = 'error' AND NULLIF(TRIM(\"Подкатегория ошибки (глобально)\"), '') = 'ошибка асинхронного ответа РЭМД' THEN 'ошибка асинхронного ответа' WHEN \"Статус\" = 'error' THEN 'ошибка (прочие)' ELSE \"Статус\" END AS \"Статус\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID клиники\"::text = {{top_clinic}}]] GROUP BY 1 ORDER BY 2 DESC",
           "template-tags": {
             "dwh_date": {
               "type": "dimension",
@@ -434,38 +434,6 @@
         ],
         "pie.show_labels": false,
         "graph.x_axis.axis_enabled": "rotate-45",
-        "pie.rows": [
-          {
-            "key": "success",
-            "name": "success",
-            "originalName": "success",
-            "color": "#689735",
-            "defaultColor": true,
-            "enabled": true,
-            "hidden": false,
-            "isOther": false
-          },
-          {
-            "key": "error",
-            "name": "error",
-            "originalName": "error",
-            "color": "#E3595E",
-            "defaultColor": true,
-            "enabled": true,
-            "hidden": false,
-            "isOther": false
-          },
-          {
-            "key": "unknown",
-            "name": "unknown",
-            "originalName": "unknown",
-            "color": "#98D9D9",
-            "defaultColor": true,
-            "enabled": true,
-            "hidden": false,
-            "isOther": false
-          }
-        ],
         "graph.metrics": [
           "Документов"
         ],
