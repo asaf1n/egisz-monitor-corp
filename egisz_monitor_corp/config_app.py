@@ -544,6 +544,7 @@ PAGE = """
     const outT = Number(p.outbound_total);
     const outLD = Number(p.outbound_loaded_docs);
     const outTD = Number(p.outbound_total_docs);
+    const skipped = Number(p.skipped_existing);
     const wnote = p.watermark_note != null ? String(p.watermark_note).trim() : '';
     const diag = p.diag_error != null ? String(p.diag_error).trim() : '';
     if (ph === 'sync_failed' || ph === 'stopped_by_user') {
@@ -589,6 +590,7 @@ PAGE = """
       if (Number.isFinite(lo) && lo > 0) parts.push('строк журнала обработано ' + fmtIntRu(lo));
       if (Number.isFinite(facts) && facts >= 0) parts.push('фактов ' + fmtIntRu(facts));
       if (Number.isFinite(docs) && docs > 0) parts.push('документов (uniq) ' + fmtIntRu(docs));
+      if (Number.isFinite(skipped) && skipped > 0) parts.push('пропущено (уже есть) ' + fmtIntRu(skipped));
       if (logid != null && logid !== '') parts.push('LOGID ' + String(logid));
       return { title: 'Журнал EXCHANGELOG — этап 2/3: обработка пакета (прогресс)', detail: parts.join(' · ') };
     }
@@ -601,6 +603,7 @@ PAGE = """
       if (logid != null && logid !== '') segs.push('LOGID курсор ' + String(logid));
       if (Number.isFinite(facts) && facts >= 0) segs.push('фактов ' + fmtIntRu(facts));
       if (Number.isFinite(docs) && docs > 0) segs.push('документов (uniq) ' + fmtIntRu(docs));
+      if (Number.isFinite(skipped) && skipped > 0) segs.push('пропущено (уже есть) ' + fmtIntRu(skipped));
       if (Number.isFinite(stag) && stag > 0) segs.push('ошибок staging ' + fmtIntRu(stag));
       if (ph === 'exchangelog_export') {
         return { title: 'Журнал EXCHANGELOG — этап 1/3: чтение пакета (Firebird)', detail: segs.join(', ') };
@@ -1124,9 +1127,8 @@ PAGE = """
         { label: 'Без EGMID', value: fmtNum(p.stg_without_egmid) },
         { label: 'Очередь > 24ч', value: fmtNum(p.pending_older_24h) },
         { label: 'Очередь 1–24ч', value: fmtNum(p.pending_1_24h) },
-        { label: 'Staging max EGMID', value: fmtNum(p.staging_max_egmid) },
-        { label: 'etl_state.last_egmid (курсор EGISZ_MESSAGES)', value: fmtNum(p.etl_cursor_egmid) },
-        { label: 'Лаг курсора etl_state vs staging', value: fmtNum(p.egmid_lag) },
+        { label: 'Курсор EGMID (etl_state.last_egmid)', value: fmtNum(p.etl_cursor_egmid) },
+        { label: 'Лаг EGMID (курсор − staging max)', value: fmtNum(p.egmid_lag) },
         { label: 'last_log_id', value: fmtNum(p.etl_last_log_id) },
       ];
       if (p.fact_rows != null) items.push({ label: 'Витрина: строк', value: fmtNum(p.fact_rows) });

@@ -7,6 +7,7 @@
       "name": "Период по дате обработки (витрина)",
       "slug": "dwh_date_filter",
       "type": "date/all-options",
+      "default": "past90days",
       "sectionId": "date"
     },
     {
@@ -268,11 +269,11 @@
     },
     {
       "name": "04 · Топ причин отказов ЕГИСЗ",
-      "description": "Рейтинг формулировок отказа РЭМД: для каждого документа берётся первый значимый элемент массива «Ошибки JSON», краткая подпись — `egisz_friendly_error_item(code, message)`. Счёт документов: COUNT(DISTINCT «Связанное сообщение»).",
+      "description": "Рейтинг причин отказа РЭМД: для каждого документа берётся первый значимый элемент массива «Ошибки JSON», краткая подпись — `egisz_error_interpretation_type(code, message)` (нормализует переменные: ФИО/адрес/ID/URL). Счёт документов: COUNT(DISTINCT «Связанное сообщение»).",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT COALESCE( ( SELECT LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 200) FROM jsonb_array_elements(COALESCE(\"Ошибки JSON\", '[]'::jsonb)) AS e(err) WHERE NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL LIMIT 1 ), '(ошибка без деталей)' ) AS \"Сводка ошибки\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ORDER BY 2 DESC LIMIT 20",
+          "query": "SELECT COALESCE( ( SELECT LEFT(public.egisz_error_interpretation_type(err->>'code', err->>'message'), 200) FROM jsonb_array_elements(COALESCE(\"Ошибки JSON\", '[]'::jsonb)) AS e(err) WHERE NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL LIMIT 1 ), '(ошибка без деталей)' ) AS \"Сводка ошибки\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ORDER BY 2 DESC LIMIT 20",
           "template-tags": {
             "dwh_date": {
               "widget-type": "date/all-options",
@@ -329,7 +330,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH per_doc AS ( SELECT \"JID клиники\"::text AS \"JID клиники\", \"Наименование клиники\", COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS kod_semd, COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS name_semd, COALESCE( ( SELECT LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 120) FROM jsonb_array_elements(COALESCE(\"Ошибки JSON\", '[]'::jsonb)) AS e(err) WHERE NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL LIMIT 1 ), '(ошибка без деталей)' ) AS err_summary, \"Связанное сообщение\" FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] ) SELECT \"JID клиники\", \"Наименование клиники\", kod_semd AS \"Код СЭМД\", name_semd AS \"Наименование СЭМД\", err_summary AS \"Сводка ошибки\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM per_doc GROUP BY 1, 2, 3, 4, 5 ORDER BY 6 DESC LIMIT 50",
+          "query": "WITH per_doc AS ( SELECT \"JID клиники\"::text AS \"JID клиники\", \"Наименование клиники\", COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS kod_semd, COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS name_semd, COALESCE( ( SELECT LEFT(public.egisz_error_interpretation_type(err->>'code', err->>'message'), 120) FROM jsonb_array_elements(COALESCE(\"Ошибки JSON\", '[]'::jsonb)) AS e(err) WHERE NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL LIMIT 1 ), '(ошибка без деталей)' ) AS err_summary, \"Связанное сообщение\" FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] ) SELECT \"JID клиники\", \"Наименование клиники\", kod_semd AS \"Код СЭМД\", name_semd AS \"Наименование СЭМД\", err_summary AS \"Сводка ошибки\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM per_doc GROUP BY 1, 2, 3, 4, 5 ORDER BY 6 DESC LIMIT 50",
           "template-tags": {
             "dwh_date": {
               "widget-type": "date/all-options",
@@ -438,7 +439,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH per_err AS ( SELECT COALESCE( ( SELECT LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 52) FROM jsonb_array_elements(COALESCE(\"Ошибки JSON\", '[]'::jsonb)) AS e(err) WHERE NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL LIMIT 1 ), '(ошибка без деталей)' ) AS err_lbl, COUNT(DISTINCT \"Связанное сообщение\")::bigint AS cnt FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ), ranked AS ( SELECT err_lbl, cnt, ROW_NUMBER() OVER (ORDER BY cnt DESC) AS rn FROM per_err ), tail AS ( SELECT COALESCE(SUM(cnt), 0)::bigint AS tail_cnt FROM ranked WHERE rn > 8 ) SELECT CASE WHEN r.rn <= 8 THEN r.err_lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END AS \"Тип ошибки\", SUM(r.cnt)::bigint AS \"Количество\" FROM ranked r CROSS JOIN tail t GROUP BY CASE WHEN r.rn <= 8 THEN r.err_lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END ORDER BY 2 DESC",
+          "query": "WITH per_err AS ( SELECT COALESCE( ( SELECT LEFT(public.egisz_error_interpretation_type(err->>'code', err->>'message'), 52) FROM jsonb_array_elements(COALESCE(\"Ошибки JSON\", '[]'::jsonb)) AS e(err) WHERE NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL LIMIT 1 ), '(ошибка без деталей)' ) AS err_lbl, COUNT(DISTINCT \"Связанное сообщение\")::bigint AS cnt FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ), ranked AS ( SELECT err_lbl, cnt, ROW_NUMBER() OVER (ORDER BY cnt DESC) AS rn FROM per_err ), tail AS ( SELECT COALESCE(SUM(cnt), 0)::bigint AS tail_cnt FROM ranked WHERE rn > 8 ) SELECT CASE WHEN r.rn <= 8 THEN r.err_lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END AS \"Тип ошибки\", SUM(r.cnt)::bigint AS \"Количество\" FROM ranked r CROSS JOIN tail t GROUP BY CASE WHEN r.rn <= 8 THEN r.err_lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END ORDER BY 2 DESC",
           "template-tags": {
             "dwh_date": {
               "widget-type": "date/all-options",
@@ -604,7 +605,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT COALESCE( ( SELECT LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 72) FROM jsonb_array_elements(COALESCE(\"Ошибки JSON\", '[]'::jsonb)) AS e(err) WHERE NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL LIMIT 1 ), '(ошибка без деталей)' ) AS \"Тип ошибки\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ORDER BY 2 DESC LIMIT 25",
+          "query": "SELECT COALESCE( ( SELECT LEFT(public.egisz_error_interpretation_type(err->>'code', err->>'message'), 72) FROM jsonb_array_elements(COALESCE(\"Ошибки JSON\", '[]'::jsonb)) AS e(err) WHERE NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL LIMIT 1 ), '(ошибка без деталей)' ) AS \"Тип ошибки\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ORDER BY 2 DESC LIMIT 25",
           "template-tags": {
             "dwh_date": {
               "widget-type": "date/all-options",
@@ -771,11 +772,11 @@
     },
     {
       "name": "04 · Матрица: тип СЭМД × тип ошибки",
-      "description": "Pivot-таблица: по оси Y — подпись СЭМД (как в рейтингах), по оси X — нормализованный текст ошибки (`egisz_friendly_error_item` по **каждому** значимому элементу «Ошибки JSON», не только первому). **Документов** — число уникальных «Связанное сообщение» в ячейке по **всем клиникам**; один документ с несколькими разными ошибками попадает в несколько ячеек. Пустой/бессодержательный массив — строка «(ошибка без деталей)».",
+      "description": "Pivot-таблица: по оси Y — подпись СЭМД (как в рейтингах), по оси X — нормализованный тип ошибки (`egisz_error_interpretation_type` по **каждому** значимому элементу «Ошибки JSON», не только первому). **Документов** — число уникальных «Связанное сообщение» в ячейке по **всем клиникам**; один документ с несколькими разными ошибками попадает в несколько ячеек. Пустой/бессодержательный массив — строка «(ошибка без деталей)».",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH raw AS ( SELECT v.\"Связанное сообщение\", LEFT( CASE WHEN NULLIF(TRIM(v.\"Код СЭМД\"), '') IS NOT NULL THEN TRIM(v.\"Код СЭМД\") || COALESCE(' · ' || NULLIF(LEFT(TRIM(v.\"Наименование СЭМД\"), 40), ''), '') WHEN NULLIF(TRIM(v.\"Наименование СЭМД\"), '') IS NOT NULL THEN LEFT(TRIM(v.\"Наименование СЭМД\"), 72) ELSE '(неизвестно)' END, 80 ) AS semd_lbl, v.\"Ошибки JSON\" FROM public.v_egisz_transactions_enriched_ui v WHERE v.\"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] ), expanded AS ( SELECT r.\"Связанное сообщение\", r.semd_lbl, LEFT(public.egisz_friendly_error_item(elem->>'code', elem->>'message'), 120) AS err_lbl FROM raw r CROSS JOIN LATERAL jsonb_array_elements(COALESCE(r.\"Ошибки JSON\", '[]'::jsonb)) AS je(elem) WHERE NULLIF(elem->>'message', '') IS NOT NULL OR NULLIF(elem->>'code', '') IS NOT NULL UNION ALL SELECT r.\"Связанное сообщение\", r.semd_lbl, '(ошибка без деталей)'::text FROM raw r WHERE NOT EXISTS ( SELECT 1 FROM jsonb_array_elements(COALESCE(r.\"Ошибки JSON\", '[]'::jsonb)) AS je2(elem2) WHERE NULLIF(elem2->>'message', '') IS NOT NULL OR NULLIF(elem2->>'code', '') IS NOT NULL ) ) SELECT semd_lbl AS \"Тип СЭМД\", err_lbl AS \"Тип ошибки\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM expanded GROUP BY 1, 2 ORDER BY 3 DESC, 1, 2",
+          "query": "WITH raw AS ( SELECT v.\"Связанное сообщение\", LEFT( CASE WHEN NULLIF(TRIM(v.\"Код СЭМД\"), '') IS NOT NULL THEN TRIM(v.\"Код СЭМД\") || COALESCE(' · ' || NULLIF(LEFT(TRIM(v.\"Наименование СЭМД\"), 40), ''), '') WHEN NULLIF(TRIM(v.\"Наименование СЭМД\"), '') IS NOT NULL THEN LEFT(TRIM(v.\"Наименование СЭМД\"), 72) ELSE '(неизвестно)' END, 80 ) AS semd_lbl, v.\"Ошибки JSON\" FROM public.v_egisz_transactions_enriched_ui v WHERE v.\"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] ), expanded AS ( SELECT r.\"Связанное сообщение\", r.semd_lbl, LEFT(public.egisz_error_interpretation_type(elem->>'code', elem->>'message'), 120) AS err_lbl FROM raw r CROSS JOIN LATERAL jsonb_array_elements(COALESCE(r.\"Ошибки JSON\", '[]'::jsonb)) AS je(elem) WHERE NULLIF(elem->>'message', '') IS NOT NULL OR NULLIF(elem->>'code', '') IS NOT NULL UNION ALL SELECT r.\"Связанное сообщение\", r.semd_lbl, '(ошибка без деталей)'::text FROM raw r WHERE NOT EXISTS ( SELECT 1 FROM jsonb_array_elements(COALESCE(r.\"Ошибки JSON\", '[]'::jsonb)) AS je2(elem2) WHERE NULLIF(elem2->>'message', '') IS NOT NULL OR NULLIF(elem2->>'code', '') IS NOT NULL ) ) SELECT semd_lbl AS \"Тип СЭМД\", err_lbl AS \"Тип ошибки\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM expanded GROUP BY 1, 2 ORDER BY 3 DESC, 1, 2",
           "template-tags": {
             "dwh_date": {
               "widget-type": "date/all-options",
@@ -843,7 +844,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH base AS ( SELECT *, ( SELECT LEFT(public.egisz_friendly_error_item(err->>'code', err->>'message'), 100) FROM jsonb_array_elements(\"Ошибки JSON\") AS e(err) WHERE (NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL) LIMIT 1 ) AS err_text FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] ) SELECT COALESCE(err_text, '(без детализации)') AS \"Тип ошибки\", LEFT(CASE WHEN NULLIF(TRIM(\"Код СЭМД\"), '') IS NOT NULL THEN TRIM(\"Код СЭМД\") || COALESCE(' · ' || NULLIF(LEFT(TRIM(\"Наименование СЭМД\"), 28), ''), '') WHEN NULLIF(TRIM(\"Наименование СЭМД\"), '') IS NOT NULL THEN LEFT(TRIM(\"Наименование СЭМД\"), 64) ELSE '(неизвестно)' END, 72) AS \"Код СЭМД\", \"JID клиники\"::text AS \"JID клиники\", LEFT(COALESCE(NULLIF(TRIM(\"Наименование клиники\"), ''), ''), 40) AS \"Клиника\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM base GROUP BY 1, 2, 3, 4 ORDER BY 5 DESC NULLS LAST LIMIT 400",
+          "query": "WITH base AS ( SELECT *, ( SELECT LEFT(public.egisz_error_interpretation_type(err->>'code', err->>'message'), 100) FROM jsonb_array_elements(\"Ошибки JSON\") AS e(err) WHERE (NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL) LIMIT 1 ) AS err_text FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] ) SELECT COALESCE(err_text, '(без детализации)') AS \"Тип ошибки\", LEFT(CASE WHEN NULLIF(TRIM(\"Код СЭМД\"), '') IS NOT NULL THEN TRIM(\"Код СЭМД\") || COALESCE(' · ' || NULLIF(LEFT(TRIM(\"Наименование СЭМД\"), 28), ''), '') WHEN NULLIF(TRIM(\"Наименование СЭМД\"), '') IS NOT NULL THEN LEFT(TRIM(\"Наименование СЭМД\"), 64) ELSE '(неизвестно)' END, 72) AS \"Код СЭМД\", \"JID клиники\"::text AS \"JID клиники\", LEFT(COALESCE(NULLIF(TRIM(\"Наименование клиники\"), ''), ''), 40) AS \"Клиника\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM base GROUP BY 1, 2, 3, 4 ORDER BY 5 DESC NULLS LAST LIMIT 400",
           "template-tags": {
             "dwh_date": {
               "widget-type": "date/all-options",

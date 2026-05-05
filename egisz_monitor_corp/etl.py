@@ -28,6 +28,7 @@ from typing import Any, Callable, Mapping, Sequence, TypedDict
 
 from egisz_monitor_corp.config_loader import CorpAppConfig, load_corp_config
 from egisz_monitor_corp.fb_client import fetch_all
+from egisz_monitor_corp.error_model import classify_staging_error_code
 from egisz_monitor_corp.parser import EgiszMonitorParser, StagingParseError, extract_parse_hints
 from egisz_monitor_corp.pg_warehouse import (
     PipelineLockBusyError,
@@ -36,6 +37,7 @@ from egisz_monitor_corp.pg_warehouse import (
     ensure_etl_state_table,
     fetch_journal_messages_by_msgids,
     fetch_license_rows_for_enrichment,
+    fact_journal_msgids_present_in_facts,
     journal_msgids_present_in_staging,
     get_last_egmid,
     get_last_log_id,
@@ -573,6 +575,7 @@ class EtlProgressPayload(TypedDict, total=False):
     documents_emdrid_unique: int
     outbound_total_docs: int
     outbound_loaded_docs: int
+    skipped_existing: int
 
 
 def _to_int(v: Any) -> int | None:
@@ -710,6 +713,7 @@ class _PageStats:
     fetched: int = 0
     facts: int = 0
     staging_n: int = 0
+    skipped_existing: int = 0
     max_log_id: int = 0
     last_id: int = 0
     max_egmid_seen: int = 0
@@ -762,10 +766,16 @@ def _ingest_exchangelog_rows_chunk(
 
     def _d(payload: EtlProgressPayload) -> None:
         pl = dict(payload)
-        pl["cursor_log_id"] = stats.last_id
+        # В середине пакета stats.last_id ещё не обновлён (он фиксируется после commit в конце пакета).
+        # Для UX показываем текущий максимум LOGID, который уже встретили в этом пакете.
+        cur = stats.last_id
+        if stats.max_log_id > cur:
+            cur = stats.max_log_id
+        pl["cursor_log_id"] = cur
         pl["documents_unique"] = stats.documents_unique()
         pl["documents_localuid_unique"] = stats.documents_localuid_unique()
         pl["documents_emdrid_unique"] = stats.documents_emdrid_unique()
+        pl["skipped_existing"] = stats.skipped_existing
         detail(pl)  # type: ignore[arg-type]
 
     def on_stage(err: StagingParseError) -> None:
@@ -777,6 +787,18 @@ def _ingest_exchangelog_rows_chunk(
             staging_buffer.clear()
 
     msg_by_msgid = _build_msg_cache_for_journal_page(cfg, pg, rows, log, cancel_check=cancel_check)
+    # Полный пересъём (sync_window_days < 0): если факт по journal_msgid уже есть,
+    # ранние строки журнала по тому же MSGID без SOAP/relatesToMessage не должны раздувать stg_parse_errors.
+    existing_fact_msgids: set[str] = set()
+    if pg is not None and _full_sync_from_start(cfg):
+        page_msgids: list[str] = []
+        seen_mid: set[str] = set()
+        for r in rows:
+            mk = _norm_msgid_key(r.get("msgid"))
+            if mk and mk not in seen_mid:
+                seen_mid.add(mk)
+                page_msgids.append(mk)
+        existing_fact_msgids = fact_journal_msgids_present_in_facts(pg, page_msgids)
 
     best_map = best_lic_by_jid or {}
     mo_map = mo_uid_to_jid or {}
@@ -848,11 +870,15 @@ def _ingest_exchangelog_rows_chunk(
                     (combined_ex[:cap] + "…") if len(combined_ex) > cap else (combined_ex or None)
                 )
                 rth, luh, emh = extract_parse_hints(msgtext)
+                c = classify_staging_error_code("MSGTEXT_TOO_LARGE")
                 on_stage(
                     StagingParseError(
                         relates_to_id=None,
                         error_code="MSGTEXT_TOO_LARGE",
                         message=f"MSGTEXT UTF-8 size {nbytes} exceeds max_msgtext_bytes={lim}",
+                        error_top_type=c.top_type.value,
+                        error_group=c.group.value,
+                        error_subtype=c.subtype,
                         log_excerpt=excerpt,
                         exchangelog_log_id=row_log_id,
                         egisz_messages_egmid=row_msg_egmid,
@@ -862,6 +888,17 @@ def _ingest_exchangelog_rows_chunk(
                         emdr_id_hint=emh,
                     )
                 )
+                continue
+
+        # Полная синхронизация "с нуля": пропустить строки журнала по MSGID,
+        # если факт по этому MSGID уже собран, а текущая строка не содержит SOAP/relatesToMessage.
+        if mk and mk in existing_fact_msgids:
+            # msgtext здесь может быть не XML (ранние строки журнала), поэтому даём parse_xml самому
+            # решить, есть ли в MSGTEXT пригодный SOAP-фрагмент.
+            parsed_probe = parser.parse_xml(msgtext)
+            no_relates = (parsed_probe is None) or (parsed_probe.get("relates_to_id") is None)
+            if no_relates:
+                stats.skipped_existing += 1
                 continue
 
         rec = parser.build_record(

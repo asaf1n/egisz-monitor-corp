@@ -19,6 +19,7 @@ from typing import Any, Callable, Mapping
 from defusedxml.ElementTree import fromstring as _xml_fromstring
 from defusedxml.common import DefusedXmlException
 
+from egisz_monitor_corp.error_model import classify_staging_error_code
 from egisz_monitor_corp.semd_dictionary import get_semd_name
 
 # Primary id from callback (async link to outbound request).
@@ -176,6 +177,9 @@ class StagingParseError:
     relates_to_id: str | None
     error_code: str
     message: str
+    error_top_type: str | None = None
+    error_group: str | None = None
+    error_subtype: str | None = None
     log_excerpt: str | None = None
     exchangelog_log_id: int | None = None
     egisz_messages_egmid: int | None = None
@@ -197,6 +201,9 @@ class StagingParseError:
         str | None,
         str | None,
         str | None,
+        str | None,
+        str | None,
+        str | None,
     ]:
         return (
             self.relates_to_id,
@@ -206,6 +213,9 @@ class StagingParseError:
             self.exchangelog_log_id,
             self.egisz_messages_egmid,
             self.journal_msgid,
+            self.error_top_type,
+            self.error_group,
+            self.error_subtype,
             self.relates_to_hint,
             self.local_uid_hint,
             self.emdr_id_hint,
@@ -610,18 +620,16 @@ class EgiszMonitorParser:
             if on_staging_error:
                 on_staging_error(err)
 
-        # LOGSTATE=3: network errors are stored in EXCHANGELOG.LOGTEXT (no SOAP). Keep them in staging for reporting.
-        try:
-            ls = int(log_state) if log_state is not None else None
-        except (TypeError, ValueError):
-            ls = None
-        if ls == 3:
-            net_text = _normalize_network_error_text(log_text) or "Сетевая ошибка (LOGSTATE=3)"
+        def _stage_code(*, code: str, message: str, relates_to: str | None) -> None:
+            c = classify_staging_error_code(code)
             _stage(
                 StagingParseError(
-                    relates_to_id=None,
-                    error_code="NETWORK_ERROR",
-                    message=net_text,
+                    relates_to_id=relates_to,
+                    error_code=code,
+                    message=message,
+                    error_top_type=c.top_type.value,
+                    error_group=c.group.value,
+                    error_subtype=c.subtype,
                     log_excerpt=excerpt or None,
                     exchangelog_log_id=exchangelog_log_id,
                     egisz_messages_egmid=egisz_messages_egmid,
@@ -631,60 +639,53 @@ class EgiszMonitorParser:
                     emdr_id_hint=hint_emdr,
                 )
             )
+
+        # LOGSTATE=3: network errors are stored in EXCHANGELOG.LOGTEXT (no SOAP). Keep them in staging for reporting.
+        try:
+            ls = int(log_state) if log_state is not None else None
+        except (TypeError, ValueError):
+            ls = None
+        if ls == 3:
+            net_text = _normalize_network_error_text(log_text) or "Сетевая ошибка (LOGSTATE=3)"
+            _stage_code(code="NETWORK_ERROR", message=net_text, relates_to=None)
             return None
 
         if not relates_to_id:
             if parsed and parsed.get("_xml_ok") and parsed.get("relates_to_id") is None:
-                _stage(
-                    StagingParseError(
-                        relates_to_id=None,
-                        error_code="MISSING_RELATES_TO",
-                        message="SOAP fragment without relatesToMessage",
-                        log_excerpt=excerpt or None,
-                        exchangelog_log_id=exchangelog_log_id,
-                        egisz_messages_egmid=egisz_messages_egmid,
-                        journal_msgid=journal_msgid,
-                        relates_to_hint=hint_relates,
-                        local_uid_hint=hint_local,
-                        emdr_id_hint=hint_emdr,
-                    )
+                # Шумоподавление: не каждый SOAP/XML фрагмент в журнале — callback РЭМД.
+                # Пишем ошибку только если фрагмент похож на callback (registerDocumentResult / hints),
+                # иначе пропускаем без записи в stg_parse_errors.
+                blob = (soap_src or "").lower()
+                callback_like = (
+                    ("registerdocumentresult" in blob)
+                    or ("relatestomessage" in blob)
+                    or ("egisz.rosminzdrav.ru/iehr/emdr/callback" in blob)
+                    or (hint_relates is not None and hint_relates.strip() != "")
                 )
-            elif parsed is None and "relatesToMessage" in (msg_text or ""):
-                _stage(
-                    StagingParseError(
-                        relates_to_id=None,
-                        error_code="XML_BROKEN",
-                        message="relatesToMessage hinted in text but XML not parseable",
-                        log_excerpt=excerpt or None,
-                        exchangelog_log_id=exchangelog_log_id,
-                        egisz_messages_egmid=egisz_messages_egmid,
-                        journal_msgid=journal_msgid,
-                        relates_to_hint=hint_relates,
-                        local_uid_hint=hint_local,
-                        emdr_id_hint=hint_emdr,
+                if callback_like:
+                    _stage_code(
+                        code="MISSING_RELATES_TO",
+                        message="SOAP fragment without relatesToMessage",
+                        relates_to=None,
                     )
+            elif parsed is None and "relatesToMessage" in (msg_text or ""):
+                _stage_code(
+                    code="XML_BROKEN",
+                    message="relatesToMessage hinted in text but XML not parseable",
+                    relates_to=None,
                 )
             return None
 
         lu_eff = _norm_ws(local_uid_semd)
         em_eff = _norm_ws(emdr_id)
         if not lu_eff and not em_eff:
-            _stage(
-                StagingParseError(
-                    relates_to_id=relates_to_id,
-                    error_code="MISSING_DOCUMENT_IDENTIFIERS",
-                    message=(
-                        "В колбэке есть relatesToMessage, но нет идентификатора документа: "
-                        "пусты localUid, DOCUMENTID (EGISZ_MESSAGES) и emdrId — строку в fact_egisz_transactions не создаём"
-                    ),
-                    log_excerpt=excerpt or None,
-                    exchangelog_log_id=exchangelog_log_id,
-                    egisz_messages_egmid=egisz_messages_egmid,
-                    journal_msgid=journal_msgid,
-                    relates_to_hint=hint_relates,
-                    local_uid_hint=hint_local,
-                    emdr_id_hint=hint_emdr,
-                )
+            _stage_code(
+                code="MISSING_DOCUMENT_IDENTIFIERS",
+                message=(
+                    "В колбэке есть relatesToMessage, но нет идентификатора документа: "
+                    "пусты localUid, DOCUMENTID (EGISZ_MESSAGES) и emdrId — строку в fact_egisz_transactions не создаём"
+                ),
+                relates_to=relates_to_id,
             )
             return None
 

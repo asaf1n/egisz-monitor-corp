@@ -130,11 +130,11 @@ Parameters:
 Generated each deploy/apply (under k8s\):
   Postgres: database egisz_reports, user egisz, password egisz
   Metabase: admin@egisz.local / egisz  (MB_PASSWORD_COMPLEXITY=weak in k8s/metabase.yaml); дашборды 01–06 из metabase_dashboards в Personal collection (импорт может догружаться в фоне)
-  Web config file: k8s\local\egisz_monitor.yaml (Firebird: host.docker.internal)
+  Web config file: k8s\egisz_monitor.local.yaml (Firebird: host.docker.internal)
 
   Ручной port-forward (если LB не отвечает): kubectl -n egisz-monitor port-forward svc/conf-ui 8080:8080 и svc/metabase 3000:3000
 
-Edit k8s\local\egisz_monitor.yaml for your Firebird alias and credentials on Windows.
+Edit k8s\egisz_monitor.local.yaml for your Firebird alias and credentials on Windows.
 '@
 }
 
@@ -469,6 +469,55 @@ function Wait-CorpMetabaseRollout {
     }
 }
 
+function Wait-CorpMetabaseProvisioning {
+    <#
+      Ожидание завершения provisioning внутри pod'а Metabase.
+      Под не обязан быть Ready == provision завершён: entrypoint запускает provision.sh параллельно JVM.
+
+      Триггеры без привязки к именам дашбордов:
+      - Файл-штамп набора JSON (corp-metabase-dashboards-manifest.sha256) записывается provision.sh
+        после успешного импорта setup-dashboards.sh.
+      - При успехе также появляется public UUID (main-dashboard-public-uuid), но он опционален;
+        используем оба как «любой из».
+    #>
+    param(
+        [int]$TimeoutSec = 600
+    )
+
+    $ns = "egisz-monitor"
+    kubectl -n $ns get deploy metabase -o name 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { return }
+
+    $kubectlExe = 'kubectl'
+    $kExe = Get-Command kubectl.exe -ErrorAction SilentlyContinue
+    if ($kExe -and $kExe.Path) {
+        $kubectlExe = $kExe.Path
+    } else {
+        try {
+            $cmdInfo = Get-Command kubectl -ErrorAction Stop
+            if ($cmdInfo.Path) { $kubectlExe = $cmdInfo.Path }
+        } catch { }
+    }
+
+    Write-Host ("`[kubectl] Waiting for Metabase provisioning markers (up to {0}s)..." -f $TimeoutSec) -ForegroundColor Cyan
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ((Get-Date) -lt $deadline) {
+        # Любой маркер: штамп JSON (успешный импорт) или public UUID.
+        $sh = "test -s /shared/corp-metabase-dashboards-manifest.sha256 -o -s /shared/main-dashboard-public-uuid"
+        $args = @('-n', $ns, 'exec', 'deployment/metabase', '-c', 'metabase', '--', 'bash', '-lc', $sh)
+        $p = Start-Process -FilePath $kubectlExe -ArgumentList $args -Wait -PassThru -NoNewWindow
+        $code = if ($null -ne $p -and $null -ne $p.ExitCode) { [int]$p.ExitCode } else { -1 }
+        if ($code -eq 0) {
+            Write-Host "`[kubectl] Metabase provisioning markers detected." -ForegroundColor Green
+            return
+        }
+        Start-Sleep -Seconds 5
+    }
+
+    Write-Host "`[kubectl] WARN: provisioning markers were not detected in time. Metabase can be Ready, but dashboards/import may still be in progress or failed." -ForegroundColor Yellow
+    Write-Host "  Check logs: kubectl -n egisz-monitor logs deploy/metabase --tail=200" -ForegroundColor DarkGray
+}
+
 function Wait-CorpConfUiRollout {
     Write-Host "`[kubectl] Waiting for conf-ui (up to 3m)..." -ForegroundColor Cyan
     kubectl -n egisz-monitor rollout status deployment/conf-ui --timeout=180s
@@ -597,12 +646,12 @@ function Invoke-PostgresAirflowDbInit {
 }
 
 function Invoke-WebConfigSecret {
-    $cfg = Join-Path $Root "k8s\local\egisz_monitor.yaml"
+    $cfg = Join-Path $Root "k8s\egisz_monitor.local.yaml"
     if (-not (Test-Path $cfg)) {
         Write-Host "ERROR: Missing $cfg" -ForegroundColor Red
         exit 1
     }
-    Write-Host "`[kubectl] Secret egisz-monitor-conf-ui-config from k8s\local\egisz_monitor.yaml..." -ForegroundColor Cyan
+    Write-Host "`[kubectl] Secret egisz-monitor-conf-ui-config from k8s\egisz_monitor.local.yaml..." -ForegroundColor Cyan
     kubectl -n egisz-monitor create secret generic egisz-monitor-conf-ui-config `
         --from-file="egisz_monitor.yaml=$cfg" `
         --dry-run=client -o yaml | kubectl apply -f -
@@ -732,7 +781,7 @@ function Invoke-KubectlApply {
     if (Test-Path $cronYaml) {
         kubectl apply -f $cronYaml
         if ($LASTEXITCODE -ne 0) { exit 1 }
-        $k8sCfg = Join-Path $Root "k8s\local\egisz_monitor.yaml"
+        $k8sCfg = Join-Path $Root "k8s\egisz_monitor.local.yaml"
         Invoke-ReconcileEtlCronjobFromLocalYaml -ConfigPath $k8sCfg
     }
 
@@ -821,7 +870,7 @@ function Invoke-ConfUiFirebirdDriverSelfTest {
         }
         return
     }
-    Write-Host "`[verify] conf-ui Firebird driver OK (libfbclient loaded; sync uses k8s/local/egisz_monitor.yaml in Secret)." -ForegroundColor Green
+    Write-Host "`[verify] conf-ui Firebird driver OK (libfbclient loaded; sync uses k8s/egisz_monitor.local.yaml in Secret)." -ForegroundColor Green
 }
 
 function Invoke-K8sSmokeTests {
@@ -1076,7 +1125,7 @@ function Show-DeployInfo {
     Write-Host "  Postgres: db=egisz_reports user=egisz pass=egisz (in cluster: postgres:5432)" -ForegroundColor White
     Write-Host "  Metabase: admin@egisz.local / egisz — дашборды 01–06 в Personal collection (импорт из образа)" -ForegroundColor White
     Write-Host "  Config UI + sync: образ egisz-conf-ui; apply / restart-web. Образ Metabase: deploy / restart-metabase" -ForegroundColor White
-    Write-Host "  Firebird: host.docker.internal:3050 — k8s\local\egisz_monitor.yaml" -ForegroundColor White
+    Write-Host "  Firebird: host.docker.internal:3050 — k8s\egisz_monitor.local.yaml" -ForegroundColor White
     Write-Host "  Порты: apply/start/deploy поднимают port-forward 8080/3000 (см. .egisz-monitor-port-forward.pids)" -ForegroundColor White
     Write-Host ""
     Write-Host "ETL: kubectl -n egisz-monitor exec -it deploy/conf-ui -- egisz-monitor sync" -ForegroundColor Yellow
@@ -1157,6 +1206,7 @@ switch ($Action) {
         Invoke-ConfUiApplyReportsSchema
         Show-DeployInfo
         Invoke-CorpPortForwardIfRequestedAfterK8s -BackgroundSwitchPresent:$PSBoundParameters.ContainsKey('BackgroundPortForward') -BackgroundEnabled:$BackgroundPortForward -ConfAndMetabaseOnly:$(-not $IncludePostgresPortForward)
+        Wait-CorpMetabaseProvisioning -TimeoutSec 900
         Invoke-K8sSmokeTests
         Show-ServicesLaunchReady
     }
@@ -1170,6 +1220,7 @@ switch ($Action) {
         Invoke-ConfUiApplyReportsSchema
         Show-DeployInfo
         Invoke-CorpPortForwardIfRequestedAfterK8s -BackgroundSwitchPresent:$PSBoundParameters.ContainsKey('BackgroundPortForward') -BackgroundEnabled:$BackgroundPortForward -ConfAndMetabaseOnly:$(-not $IncludePostgresPortForward)
+        Wait-CorpMetabaseProvisioning -TimeoutSec 900
         Invoke-K8sSmokeTests
         Show-ServicesLaunchReady
     }

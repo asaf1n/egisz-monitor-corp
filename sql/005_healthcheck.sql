@@ -8,13 +8,6 @@ CREATE INDEX IF NOT EXISTS idx_fact_egisz_processed_at ON fact_egisz_transaction
 CREATE INDEX IF NOT EXISTS idx_stg_parse_errors_created_at ON stg_parse_errors (created_at);
 CREATE INDEX IF NOT EXISTS idx_stg_outbound_sent_at ON stg_egisz_outbound_documents (sent_at);
 
-DROP VIEW IF EXISTS v_health_by_clinic_ui;
-DROP VIEW IF EXISTS v_health_signals_ui;
-DROP VIEW IF EXISTS v_health_proxy_db_ui;
-DROP VIEW IF EXISTS v_health_by_clinic;
-DROP VIEW IF EXISTS v_health_signals;
-DROP VIEW IF EXISTS v_health_proxy_db;
-
 -- Агрегат по клиникам за последние 24 часа + текущая очередь без ответа.
 -- Используется UI вкладкой Healthcheck (топ-3 проблемные клиники) и дашбордом Metabase 11.
 CREATE OR REPLACE VIEW v_health_by_clinic AS
@@ -61,7 +54,7 @@ LEFT JOIN queue q ON q.jid = f.jid;
 
 COMMENT ON VIEW v_health_by_clinic IS 'Healthcheck по клиникам: объём за 24ч по уникальным relates_to_id (документ/callback), error/unknown rate, очередь без ответа по уникальным local_uid_semd, health_level.';
 
--- 5 строк-сигналов по всему сервису. Пороги задокументированы в docs/BI_EGISZ_INFOKLINIKA_AUDIT.md §3.3.
+-- 5 строк-сигналов по всему сервису. Пороги задокументированы рядом с кодом (см. CTE params ниже и README/AGENTS).
 -- Каждая строка имеет фиксированный code и текущий level (green/yellow/red).
 CREATE OR REPLACE VIEW v_health_signals AS
 WITH params AS (

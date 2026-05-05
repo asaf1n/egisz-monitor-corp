@@ -7,6 +7,7 @@
       "name": "Период по дате обработки (витрина)",
       "slug": "dwh_date_filter",
       "type": "date/all-options",
+      "default": "past90days",
       "sectionId": "date"
     },
     {
@@ -28,6 +29,7 @@
       "name": "Период парсинга (staging: created_at)",
       "slug": "parse_created_filter",
       "type": "date/all-options",
+      "default": "past30days",
       "sectionId": "date"
     },
     {
@@ -730,6 +732,43 @@
       "sizeX": 24,
       "sizeY": 10,
       "row": 38,
+      "col": 0
+    },
+    {
+      "name": "02 · Сетевые ошибки (LOGSTATE=3)",
+      "description": "Документы, попавшие в staging как NETWORK_ERROR (LOGSTATE=3). Счёт — уникальные документы (DISTINCT document_group_key), чтобы разные строки журнала не раздували статистику.",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT LEFT(message, 140) AS \"Сетевая ошибка\", COUNT(DISTINCT document_group_key)::bigint AS \"Уникальных документов\" FROM public.v_stg_parse_errors_by_document WHERE error_top_type = 'network' [[AND {{parse_created}}]] GROUP BY 1 ORDER BY 2 DESC LIMIT 50",
+          "template-tags": {
+            "parse_created": {
+              "widget-type": "date/all-options",
+              "id": "f3parse0-0002-4002-8002-000000099001",
+              "name": "parse_created",
+              "display-name": "По дате created_at (staging)",
+              "type": "dimension"
+            }
+          }
+        },
+        "database": 1
+      },
+      "display": "table",
+      "visualization_settings": {
+        "column_settings": {
+          "[\"name\",\"Сетевая ошибка\"]": {
+            "column_title": "Сетевая ошибка"
+          },
+          "[\"name\",\"Уникальных документов\"]": {
+            "column_title": "Уникальных документов",
+            "number_separators": ".",
+            "decimals": 0
+          }
+        }
+      },
+      "sizeX": 12,
+      "sizeY": 6,
+      "row": 48,
       "col": 0
     }
   ]

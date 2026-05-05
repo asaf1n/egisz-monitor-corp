@@ -20,6 +20,29 @@ die() {
   exit 1
 }
 
+get_json() {
+  local url="$1"
+  local out code
+  out="$(mktemp)"
+  code="$(curl -sS -o "${out}" -w '%{http_code}' "${url}" "${HDR[@]}" || true)"
+  if [[ ! "${code}" =~ ^2 ]]; then
+    echo "[smoke-ui] HTTP ${code} for ${url}" >&2
+    head -c 400 "${out}" >&2 || true
+    echo >&2
+    rm -f "${out}" || true
+    return 1
+  fi
+  if ! jq -e . "${out}" >/dev/null 2>&1; then
+    echo "[smoke-ui] Non-JSON response for ${url} (HTTP ${code})" >&2
+    head -c 400 "${out}" >&2 || true
+    echo >&2
+    rm -f "${out}" || true
+    return 1
+  fi
+  cat "${out}"
+  rm -f "${out}" || true
+}
+
 step 1 "GET /api/health"
 code="$(curl -sS -o /dev/null -w '%{http_code}' "${MB_URL}/api/health")"
 [[ "${code}" == "200" ]] || die "health HTTP ${code}"
@@ -59,7 +82,8 @@ DASHBOARDS="$(mb_all_dashboards_json "${MB_URL}" "${TOKEN}" \
 ND="$(echo "${DASHBOARDS}" | jq 'length')"
 [[ "${ND:-0}" -ge 1 ]] || die "no dashboards in any personal collection"
 
-EXEC_ID="$(echo "${DASHBOARDS}" | jq -r '.[] | select(.name=="05 Управление СЭМД") | .id' | head -n1)"
+EXEC_ID="$(echo "${DASHBOARDS}" | jq -r '.[] | select(.name=="05 Сводная статистика сервиса интеграции") | .id' | head -n1)"
+[[ -z "${EXEC_ID}" || "${EXEC_ID}" == "null" ]] && EXEC_ID="$(echo "${DASHBOARDS}" | jq -r '.[] | select(.name=="05 Управление СЭМД") | .id' | head -n1)"
 [[ -z "${EXEC_ID}" || "${EXEC_ID}" == "null" ]] && EXEC_ID="$(echo "${DASHBOARDS}" | jq -r '.[] | select(.name=="05 Управление и архив СЭМД") | .id' | head -n1)"
 ARCHIVE_ID="$(echo "${DASHBOARDS}" | jq -r '.[] | select(.name=="06 Архив СЭМД") | .id' | head -n1)"
 OP_ID="$(echo "${DASHBOARDS}" | jq -r '.[] | select(.name=="01 Оперативный мониторинг и динамика") | .id' | head -n1)"
@@ -69,7 +93,7 @@ OP_ID="$(echo "${DASHBOARDS}" | jq -r '.[] | select(.name=="01 Оператив�
 [[ -n "${OP_ID}" && "${OP_ID}" != "null" ]] || die "dashboard 01 not found"
 
 step 5 "GET /api/dashboard/:id — Управление (parameters, auto_apply, mappings)"
-DEX="$(curl -sS "${MB_URL}/api/dashboard/${EXEC_ID}" "${HDR[@]}")"
+DEX="$(get_json "${MB_URL}/api/dashboard/${EXEC_ID}")" || die "05: failed to fetch dashboard JSON"
 echo "${DEX}" | jq -e '.auto_apply_filters == true' >/dev/null || die "05: auto_apply_filters is not true"
 NP="$(echo "${DEX}" | jq '.parameters | length')"
 [[ "${NP}" -ge 1 ]] || die "05: expected dashboard parameters, got ${NP}"
@@ -78,7 +102,7 @@ MAPS="$(echo "${DC09}" | jq '[.[] | select(.card != null or .card_id != null) | 
 [[ "${MAPS}" -gt 0 ]] || die "05: no parameter_mappings on any dashcard (filters will not work)"
 
 step 6 "GET /api/dashboard/:id — Оперативный и динамика (filters wired)"
-DOP="$(curl -sS "${MB_URL}/api/dashboard/${OP_ID}" "${HDR[@]}")"
+DOP="$(get_json "${MB_URL}/api/dashboard/${OP_ID}")" || die "01: failed to fetch dashboard JSON"
 echo "${DOP}" | jq -e '.auto_apply_filters == true' >/dev/null || die "01: auto_apply_filters is not true"
 echo "${DOP}" | jq -e '(.parameters // []) | map(.slug) | index("top_semd_filter") != null and index("top_clinic_filter") != null' >/dev/null \
   || die "01: expected dashboard parameter slugs top_semd_filter and top_clinic_filter (URL/bookmarks)"

@@ -11,7 +11,7 @@ CLI: выгрузка дашбордов Metabase в JSON (каталог как
 
 В поде Metabase:  PYTHONPATH=/app python3 -m egisz_monitor_corp.metabase_export
 
-Не перезаписывайте репозиторий «вслепую» после правок только в UI: сверьте field filters (dwh_date) с docs/BI_EGISZ_INFOKLINIKA_AUDIT.md §4.9.
+Не перезаписывайте репозиторий «вслепую» после правок только в UI: сверьте field filters (dwh_date) с `metabase_dashboards/field_filter_defaults.yaml`.
 """
 from __future__ import annotations
 

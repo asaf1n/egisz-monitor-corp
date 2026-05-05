@@ -1,6 +1,6 @@
 # Периодический sync Firebird → Postgres. Образ и Secret — как у Deployment conf-ui.
 # spec.suspend и schedule/timeZone синхронизируются с `auto_sync` в YAML: POST /save в Config UI,
-# `egisz-monitor k8s-reconcile-cronjob`, либо шаг start.ps1 после apply (см. k8s/local/egisz_monitor.yaml).
+# `egisz-monitor k8s-reconcile-cronjob`, либо шаг start.ps1 после apply (см. k8s/egisz_monitor.local.yaml).
 apiVersion: batch/v1
 kind: CronJob
 metadata:

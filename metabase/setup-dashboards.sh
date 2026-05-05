@@ -458,10 +458,13 @@ create_card() {
           end
         );
       def infer_table_ref($q):
+        # Некоторые запросы объединяют факты + staging (например UNION ALL с v_stg_parse_errors_by_document).
+        # Для dwh_date_filter и большинства фильтров базовая витрина — v_egisz_transactions_enriched_ui, поэтому
+        # при наличии выбираем её приоритетно.
         if ($q | test("v_rpt_documents_no_response_ui")) then "v_rpt_documents_no_response_ui"
         elif ($q | test("v_rpt_semd_archive_ui")) then "v_rpt_semd_archive_ui"
-        elif ($q | test("v_stg_parse_errors_by_document")) then "v_stg_parse_errors_by_document"
         elif ($q | test("v_egisz_transactions_enriched_ui")) then "v_egisz_transactions_enriched_ui"
+        elif ($q | test("v_stg_parse_errors_by_document")) then "v_stg_parse_errors_by_document"
         else null end;
       def infer_field_name($tr; $q; $tagKey):
         if $tagKey == "parse_created" then "created_at"
@@ -510,7 +513,8 @@ create_card() {
   )"
   local table_ref="$(echo "$parsed_json" | jq -r '.table_ref // empty')"
   local table_id=""
-  local visualization_settings="$(echo "$parsed_json" | jq -c \
+  local visualization_settings
+  visualization_settings="$(echo "$parsed_json" | jq -c \
     --arg display "$display" \
     --arg query "$query" '
     (.visualization_settings // {}) as $vs
@@ -540,33 +544,40 @@ create_card() {
     table_id="$(resolve_table_id "${table_ref}")"
   fi
 
+  # Большие JSON (особенно visualization_settings у таблиц) могут выбить Linux ARG_MAX, если передавать их через
+  # `jq --arg ...` (командная строка). Пишем их во временные файлы и читаем через --rawfile.
+  local tmp_tags="/tmp/mb_template_tags.$$.$RANDOM.json"
+  local tmp_vs="/tmp/mb_visualization_settings.$$.$RANDOM.json"
+  printf '%s' "${template_tags}" > "${tmp_tags}"
+  printf '%s' "${visualization_settings}" > "${tmp_vs}"
+
   local payload
   payload="$(jq -n \
-    --arg name "${name}" \
-    --arg description "${description}" \
-    --arg query "${query}" \
-    --arg display "${display}" \
-    --arg templateTags "${template_tags}" \
-    --arg visualizationSettings "${visualization_settings}" \
+    --slurpfile card "${file_json}" \
+    --rawfile templateTags "${tmp_tags}" \
+    --rawfile visualizationSettings "${tmp_vs}" \
     --arg collectionId "${collection_id}" \
     --arg databaseId "${APP_DB_ID}" \
     --arg tableId "${table_id}" \
-    '{
-      name: $name,
-      description: $description,
-      collection_id: ($collectionId | tonumber),
-      dataset_query: {
-        type: "native",
-        native: {
-          query: $query,
-          "template-tags": ($templateTags | fromjson)
+    '($card[0] // {}) as $c
+     | {
+        name: ($c.name // ""),
+        description: ($c.description // ""),
+        collection_id: ($collectionId | tonumber),
+        dataset_query: {
+          type: "native",
+          native: {
+            query: ($c.dataset_query.native.query // ""),
+            "template-tags": ($templateTags | fromjson)
+          },
+          database: ($databaseId | tonumber)
         },
-        database: ($databaseId | tonumber)
-      },
-      table_id: (if ($tableId | length) > 0 then ($tableId | tonumber) else null end),
-      display: $display,
-      visualization_settings: ($visualizationSettings | fromjson)
-    }')"
+        table_id: (if ($tableId | length) > 0 then ($tableId | tonumber) else null end),
+        display: ($c.display // ""),
+        visualization_settings: ($visualizationSettings | fromjson)
+      }')"
+
+  rm -f "${tmp_tags}" "${tmp_vs}" >/dev/null 2>&1 || true
 
   api_request POST "/api/card" "${payload}" | jq -r '.id'
 }

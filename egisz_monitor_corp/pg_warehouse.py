@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import random
+import time
 from pathlib import Path
 from typing import Any
 
@@ -146,16 +148,60 @@ def apply_reports_schema(con) -> None:  # type: ignore[no-untyped-def]
     apply_sql_files(con, *reports_schema_sql_filenames())
 
 
+def _pg_is_transient_lock_error(e: Exception) -> bool:
+    """Ошибки, после которых можно безопасно повторить запрос (deadlock/lock-timeout)."""
+    if not isinstance(e, psycopg2.Error):
+        return False
+    code = getattr(e, "pgcode", None)
+    # 40P01: deadlock_detected; 55P03: lock_not_available; 57014: query_canceled (lock/statement timeout)
+    return code in {"40P01", "55P03", "57014"}
+
+
+def _with_pg_retries(
+    con,
+    *,
+    what: str,
+    fn,  # type: ignore[no-untyped-def]
+    attempts: int = 4,
+    base_sleep_sec: float = 0.35,
+) -> None:
+    """Повторить транзакционный блок на transient lock/deadlock ошибках."""
+    last_err: Exception | None = None
+    for i in range(1, max(1, int(attempts)) + 1):
+        try:
+            fn()
+            return
+        except Exception as e:  # pragma: no cover - зависит от конкуренции в PG
+            last_err = e
+            try:
+                con.rollback()
+            except Exception:
+                pass
+            if not _pg_is_transient_lock_error(e) or i >= attempts:
+                raise
+            sleep_for = (base_sleep_sec * (2 ** (i - 1))) + (random.random() * 0.15)
+            time.sleep(min(3.0, sleep_for))
+    if last_err is not None:  # pragma: no cover - defensive
+        raise last_err
+
+
 def apply_sql_files(con, *names: str) -> None:  # type: ignore[no-untyped-def]
     """Execute bundled .sql files in order (idempotent DDL)."""
     root = sql_dir()
-    with con.cursor() as cur:
-        for name in names:
-            path = root / name
-            if not path.is_file():
-                raise FileNotFoundError(f"SQL file missing: {path}")
-            cur.execute(path.read_text(encoding="utf-8"))
-    con.commit()
+    for name in names:
+        path = root / name
+        if not path.is_file():
+            raise FileNotFoundError(f"SQL file missing: {path}")
+        sql_text = path.read_text(encoding="utf-8")
+
+        def _one_file() -> None:
+            with con.cursor() as cur:
+                # DDL может конфликтовать с параллельными SELECT (Metabase/Config UI).
+                cur.execute("SET LOCAL lock_timeout = '5s'")
+                cur.execute(sql_text)
+            con.commit()
+
+        _with_pg_retries(con, what=f"apply_sql_files:{name}", fn=_one_file)
 
 
 def ensure_etl_state_table(con) -> None:  # type: ignore[no-untyped-def]
@@ -554,6 +600,40 @@ def fetch_journal_messages_by_msgids(con, msgids: list[str]) -> list[dict[str, A
     return out
 
 
+def fact_journal_msgids_present_in_facts(con, msgids: list[str]) -> set[str]:  # type: ignore[no-untyped-def]
+    """Множество EXCHANGELOG.MSGID, которые уже представлены в fact_egisz_transactions.journal_msgid.
+
+    Используется в режиме полного пересъёма (sync_window_days < 0), чтобы не раздувать `stg_parse_errors`
+    ранними строками журнала без SOAP/relatesToMessage, если по этому MSGID факт уже собран из более поздней записи.
+    """
+    if not msgids:
+        return set()
+    uniq: list[str] = []
+    seen: set[str] = set()
+    for x in msgids:
+        s = str(x).strip() if x is not None else ""
+        if not s:
+            continue
+        s = s[:512]
+        if s not in seen:
+            seen.add(s)
+            uniq.append(s)
+    if not uniq:
+        return set()
+    with con.cursor() as cur:
+        cur.execute(
+            """
+            SELECT journal_msgid
+            FROM fact_egisz_transactions
+            WHERE journal_msgid IS NOT NULL
+              AND journal_msgid <> ''
+              AND journal_msgid = ANY(%s)
+            """,
+            (uniq,),
+        )
+        return {str(row[0]).strip() for row in cur.fetchall() if row and row[0] is not None}
+
+
 def refresh_licenses_import_staging(con, rows: list[dict[str, Any]]) -> None:  # type: ignore[no-untyped-def]
     """Обратная совместимость: снимок уже сшитый (JNAME на строках лицензий). Предпочтительно `refresh_license_staging_from_firebird_exports`."""
     with con.cursor() as cur:
@@ -642,35 +722,41 @@ def fetch_license_rows_for_enrichment(con) -> list[dict[str, Any]]:  # type: ign
 
 def refresh_outbound_documents_staging(con, rows: list[dict[str, Any]]) -> None:  # type: ignore[no-untyped-def]
     """Полная перезапись stg_egisz_outbound_documents снимком (порядок строк как во входном iterable — типично EGMID DESC)."""
-    with con.cursor() as cur:
-        cur.execute("DELETE FROM stg_egisz_outbound_documents")
-    if not rows:
-        return
-    tuples: list[tuple[Any, ...]] = []
-    for r in rows:
-        tuples.append(
-            (
-                r["document_id"],
-                r.get("sent_at"),
-                r.get("reply_to"),
-                r.get("gost_jid_token"),
-                r.get("kind_code"),
-                r.get("jid"),
-                r.get("egmid"),
-            )
-        )
-    template = "(%s, %s, %s, %s, %s, %s, %s, NOW())"
-    with con.cursor() as cur:
-        execute_values(
-            cur,
-            """
-            INSERT INTO stg_egisz_outbound_documents (
-                document_id, sent_at, reply_to, gost_jid_token, kind_code, jid, egmid, synced_at
-            ) VALUES %s
-            """,
-            tuples,
-            template=template,
-        )
+    def _do_refresh() -> None:
+        with con.cursor() as cur:
+            cur.execute("SET LOCAL lock_timeout = '5s'")
+            cur.execute("DELETE FROM stg_egisz_outbound_documents")
+
+        if rows:
+            tuples: list[tuple[Any, ...]] = []
+            for r in rows:
+                tuples.append(
+                    (
+                        r["document_id"],
+                        r.get("sent_at"),
+                        r.get("reply_to"),
+                        r.get("gost_jid_token"),
+                        r.get("kind_code"),
+                        r.get("jid"),
+                        r.get("egmid"),
+                    )
+                )
+            template = "(%s, %s, %s, %s, %s, %s, %s, NOW())"
+            with con.cursor() as cur2:
+                cur2.execute("SET LOCAL lock_timeout = '5s'")
+                execute_values(
+                    cur2,
+                    """
+                    INSERT INTO stg_egisz_outbound_documents (
+                        document_id, sent_at, reply_to, gost_jid_token, kind_code, jid, egmid, synced_at
+                    ) VALUES %s
+                    """,
+                    tuples,
+                    template=template,
+                )
+        con.commit()
+
+    _with_pg_retries(con, what="refresh_outbound_documents_staging", fn=_do_refresh)
 
 
 def fetch_healthcheck_snapshot(con, *, top_clinics: int = 5) -> dict[str, Any]:  # type: ignore[no-untyped-def]
@@ -864,7 +950,12 @@ def fetch_healthcheck_snapshot(con, *, top_clinics: int = 5) -> dict[str, Any]: 
 
 
 def fetch_pg_sync_snapshot(con, pipeline: str) -> dict[str, Any]:  # type: ignore[no-untyped-def]
-    """Показатели из etl_state (курсоры) + max EGMID из витрины как подсказка, если курсор ещё нулевой."""
+    """Показатели из etl_state (курсоры) + fallbacks из витрины.
+
+    Важно: при аварийном прерывании *после* сброса курсоров (режим full sync) UI может временно видеть
+    last_log_id=0/last_egmid=0. Для диагностики показываем подсказки из витрины: max EGMID и max LOGID,
+    даже если курсор в etl_state ещё нулевой.
+    """
     with con.cursor() as cur:
         cur.execute(
             """
@@ -881,6 +972,7 @@ def fetch_pg_sync_snapshot(con, pipeline: str) -> dict[str, Any]:  # type: ignor
         row = cur.fetchone()
     if not row:
         facts_only = 0
+        facts_log_only = 0
         try:
             with con.cursor() as cur2:
                 cur2.execute("SET LOCAL statement_timeout = '5s'")
@@ -894,11 +986,24 @@ def fetch_pg_sync_snapshot(con, pipeline: str) -> dict[str, Any]:  # type: ignor
                 mx0 = cur2.fetchone()
                 if mx0 and mx0[0] is not None:
                     facts_only = int(mx0[0])
+                cur2.execute(
+                    """
+                    SELECT GREATEST(
+                      COALESCE((SELECT MAX(exchangelog_log_id) FROM fact_egisz_transactions), 0),
+                      COALESCE((SELECT MAX(exchangelog_log_id) FROM stg_parse_errors), 0)
+                    )
+                    """
+                )
+                mxl0 = cur2.fetchone()
+                if mxl0 and mxl0[0] is not None:
+                    facts_log_only = int(mxl0[0])
         except Exception:
             facts_only = 0
+            facts_log_only = 0
         eg0 = facts_only if facts_only > 0 else None
+        lid0 = facts_log_only if facts_log_only > 0 else None
         return {
-            "log_id": None,
+            "log_id": lid0,
             "egmid": eg0,
             "etl_last_egmid": eg0,
             "licenses_modifydate": None,
@@ -908,6 +1013,7 @@ def fetch_pg_sync_snapshot(con, pipeline: str) -> dict[str, Any]:  # type: ignor
     last_eg = int(last_egmid_raw) if last_egmid_raw is not None else 0
     eg_display = last_eg
     facts_max_eg = 0
+    facts_max_log = 0
     try:
         with con.cursor() as cur:
             cur.execute("SET LOCAL statement_timeout = '5s'")
@@ -921,10 +1027,24 @@ def fetch_pg_sync_snapshot(con, pipeline: str) -> dict[str, Any]:  # type: ignor
             mx = cur.fetchone()
             if mx and mx[0] is not None:
                 facts_max_eg = int(mx[0])
+            cur.execute(
+                """
+                SELECT GREATEST(
+                  COALESCE((SELECT MAX(exchangelog_log_id) FROM fact_egisz_transactions), 0),
+                  COALESCE((SELECT MAX(exchangelog_log_id) FROM stg_parse_errors), 0)
+                )
+                """
+            )
+            mxl = cur.fetchone()
+            if mxl and mxl[0] is not None:
+                facts_max_log = int(mxl[0])
     except Exception:
         facts_max_eg = 0
+        facts_max_log = 0
     if eg_display <= 0 and facts_max_eg > 0:
         eg_display = facts_max_eg
+    if (log_id is None or log_id <= 0) and facts_max_log > 0:
+        log_id = facts_max_log
     lic_iso = lic_raw.isoformat() if lic_raw is not None else None
 
     return {
@@ -1037,7 +1157,24 @@ def upsert_facts_batch(
 
 
 def insert_staging_errors(
-    con, rows: list[tuple[str | None, str, str, str | None, int | None, int | None, str | None, str | None, str | None, str | None]]
+    con,
+    rows: list[
+        tuple[
+            str | None,
+            str,
+            str,
+            str | None,
+            int | None,
+            int | None,
+            str | None,
+            str | None,
+            str | None,
+            str | None,
+            str | None,
+            str | None,
+            str | None,
+        ]
+    ],
 ) -> None:  # type: ignore[no-untyped-def]
     if not rows:
         return
@@ -1048,9 +1185,10 @@ def insert_staging_errors(
             INSERT INTO stg_parse_errors (
                 relates_to_id, error_code, message, log_excerpt,
                 exchangelog_log_id, egisz_messages_egmid, journal_msgid,
+                error_top_type, error_group, error_subtype,
                 relates_to_hint, local_uid_hint, emdr_id_hint
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
             """,
             rows,
         )

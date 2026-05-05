@@ -99,6 +99,9 @@ CREATE TABLE IF NOT EXISTS stg_parse_errors (
 ALTER TABLE stg_parse_errors ADD COLUMN IF NOT EXISTS exchangelog_log_id BIGINT;
 ALTER TABLE stg_parse_errors ADD COLUMN IF NOT EXISTS egisz_messages_egmid BIGINT;
 ALTER TABLE stg_parse_errors ADD COLUMN IF NOT EXISTS journal_msgid VARCHAR(256);
+ALTER TABLE stg_parse_errors ADD COLUMN IF NOT EXISTS error_top_type VARCHAR(32);
+ALTER TABLE stg_parse_errors ADD COLUMN IF NOT EXISTS error_group VARCHAR(32);
+ALTER TABLE stg_parse_errors ADD COLUMN IF NOT EXISTS error_subtype VARCHAR(64);
 ALTER TABLE stg_parse_errors ADD COLUMN IF NOT EXISTS relates_to_hint VARCHAR(512);
 ALTER TABLE stg_parse_errors ADD COLUMN IF NOT EXISTS local_uid_hint VARCHAR(512);
 ALTER TABLE stg_parse_errors ADD COLUMN IF NOT EXISTS emdr_id_hint VARCHAR(512);
@@ -107,6 +110,9 @@ COMMENT ON TABLE stg_parse_errors IS 'Rows where MSGTEXT could not yield relates
 COMMENT ON COLUMN stg_parse_errors.exchangelog_log_id IS 'EXCHANGELOG.LOGID — исходная строка прокси-журнала (трассировка)';
 COMMENT ON COLUMN stg_parse_errors.egisz_messages_egmid IS 'EGISZ_MESSAGES.EGMID — идентификатор записи сообщения (трассировка)';
 COMMENT ON COLUMN stg_parse_errors.journal_msgid IS 'EXCHANGELOG.MSGID — идентификатор сообщения в контуре обмена (трассировка к EGISZ_MESSAGES.MSGID)';
+COMMENT ON COLUMN stg_parse_errors.error_top_type IS 'Унифицированный верхний тип ошибки: network | async_response';
+COMMENT ON COLUMN stg_parse_errors.error_group IS 'Внутренняя группировка ошибок парсинга (network/parse/linkage/identifiers/other)';
+COMMENT ON COLUMN stg_parse_errors.error_subtype IS 'Подтип внутри группировки (стабильный идентификатор для отчётов)';
 COMMENT ON COLUMN stg_parse_errors.relates_to_hint IS 'Регексп по тегу relatesToMessage в сыром MSGTEXT, если факт не построен';
 COMMENT ON COLUMN stg_parse_errors.local_uid_hint IS 'Регексп по localUid в сыром MSGTEXT (экземпляр СЭМД в МИС)';
 COMMENT ON COLUMN stg_parse_errors.emdr_id_hint IS 'Регексп по emdrId в сыром MSGTEXT (рег. номер в РЭМД, если уже фигурирует в теле)';
@@ -123,17 +129,19 @@ SELECT
         'id:' || s.id::text
     ) AS document_group_key,
     CASE
-        WHEN s.error_code = 'NETWORK_ERROR' THEN 'сетевые'
+        WHEN s.error_top_type = 'network' THEN 'сетевые'
+        WHEN s.error_top_type = 'async_response' THEN 'ошибка асинхронного ответа РЭМД'
+        WHEN s.error_code = 'NETWORK_ERROR' THEN 'сетевые' -- backward compatibility, если колонок top_type ещё нет
         ELSE NULL
     END AS error_global_subcategory
 FROM stg_parse_errors s;
 
 COMMENT ON VIEW v_stg_parse_errors_by_document IS 'stg_parse_errors + document_group_key: агрегация по уникальным документам (document_group_key), а не по числу строк EXCHANGELOG';
 
--- Агрегированная «человекочитаемая» сводка по errors_json: одна строка на факт, без перезаписи уже ясных сообщений (ГИП и т.п.).
+-- Агрегированная «интерпретация ошибок» по errors_json: одна строка на факт, без искажения сырого ответа.
 -- Разбор нескольких блоков Schematron в одном message: разделитель внутри элемента — " — ".
 
-CREATE OR REPLACE FUNCTION egisz_friendly_schematron_chunk(p_chunk text)
+CREATE OR REPLACE FUNCTION egisz_error_interpretation_schematron_chunk(p_chunk text)
 RETURNS text
 LANGUAGE plpgsql
 IMMUTABLE
@@ -173,7 +181,19 @@ BEGIN
 END;
 $c$;
 
-CREATE OR REPLACE FUNCTION egisz_friendly_error_item(p_code text, p_message text)
+COMMENT ON FUNCTION egisz_error_interpretation_schematron_chunk IS 'Интерпретация одного блока Schematron: сжатие длинного текста до короткой подсказки, без изменения исходного errors_json.';
+
+CREATE OR REPLACE FUNCTION egisz_friendly_schematron_chunk(p_chunk text)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+AS $wrap$
+  SELECT egisz_error_interpretation_schematron_chunk(p_chunk);
+$wrap$;
+
+COMMENT ON FUNCTION egisz_friendly_schematron_chunk IS 'DEPRECATED: используйте egisz_error_interpretation_schematron_chunk.';
+
+CREATE OR REPLACE FUNCTION egisz_error_interpretation_item(p_code text, p_message text)
 RETURNS text
 LANGUAGE plpgsql
 STABLE
@@ -198,8 +218,8 @@ BEGIN
     RETURN NULL;
   END IF;
 
-  -- Федеральная сторона / технические сбои РЭМД: типовые коды и формулировки.
-  -- Источники: публичные базы знаний/документации интеграторов РЭМД (коды и смысл "ошибка на стороне РЭМД").
+  -- Интерпретация кодов сообщений РЭМД: справочник НСИ Минздрава
+  -- 1.2.643.5.1.13.13.99.2.305 — «РЭМД. Классификатор кодов сообщений» (см. nsi.rosminzdrav.ru).
   IF c IN ('RUNTIME_ERROR', 'INTERNAL_ERROR') THEN
     RETURN 'Техническая ошибка на стороне РЭМД (федеральная): повторите отправку позже';
   END IF;
@@ -242,7 +262,7 @@ BEGIN
     IF chunk IS NULL THEN
       CONTINUE;
     END IF;
-    out_parts := array_append(out_parts, egisz_friendly_schematron_chunk(chunk));
+    out_parts := array_append(out_parts, egisz_error_interpretation_schematron_chunk(chunk));
   END LOOP;
 
   IF coalesce(array_length(out_parts, 1), 0) = 0 THEN
@@ -264,9 +284,106 @@ BEGIN
 END;
 $e$;
 
-COMMENT ON FUNCTION egisz_friendly_error_item IS 'Одна строка-подсказка по code+message; Schematron с несколькими блоками склеивает " — "; исходный текст, если нет schematron/схематрона.';
+COMMENT ON FUNCTION egisz_error_interpretation_item IS 'Одна строка интерпретации по code+message; Schematron с несколькими блоками склеивает " — "; исходный текст, если нет schematron/схематрона.';
 
-CREATE OR REPLACE FUNCTION egisz_friendly_errors_row(p_errors jsonb)
+CREATE OR REPLACE FUNCTION egisz_friendly_error_item(p_code text, p_message text)
+RETURNS text
+LANGUAGE sql
+STABLE
+AS $wrap$
+  SELECT egisz_error_interpretation_item(p_code, p_message);
+$wrap$;
+
+COMMENT ON FUNCTION egisz_friendly_error_item IS 'DEPRECATED: используйте egisz_error_interpretation_item.';
+
+-- Нормализованный "тип ошибки" для группировок в Metabase:
+-- объединяет сообщения, которые отличаются только переменными (ФИО/адрес/наименование/ID/URL/даты/числа).
+CREATE OR REPLACE FUNCTION egisz_error_interpretation_type(p_code text, p_message text)
+RETURNS text
+LANGUAGE plpgsql
+STABLE
+AS $t$
+DECLARE
+  s text;
+BEGIN
+  s := trim(COALESCE(egisz_error_interpretation_item(p_code, p_message), ''));
+  IF s = '' THEN
+    RETURN NULL;
+  END IF;
+
+  -- URL/host: чтобы разные endpoints не дробили тип ошибки.
+  s := regexp_replace(s, '\bhttps?://[^\s<>"\)]+', '<url>', 'gi');
+  s := regexp_replace(
+    s,
+    '\b(?:(?:gost-[a-z0-9_-]+\.infoclinica\.lan)|(?:\d{1,3}(?:\.\d{1,3}){3})(?::\d{1,5})?)\b',
+    '<host>',
+    'gi'
+  );
+
+  -- UUID / хэши / длинные числа.
+  s := regexp_replace(s, '\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b', '<uuid>', 'gi');
+  s := regexp_replace(s, '\b[0-9a-f]{16,}\b', '<hex>', 'gi');
+  s := regexp_replace(s, '\b\d{5,}\b', '<n>', 'g');
+
+  -- Даты/время в ISO-стиле.
+  s := regexp_replace(
+    s,
+    '\b\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?\b',
+    '<dt>',
+    'g'
+  );
+
+  -- Частый кейс РЭМД: "Указанное значение (Имя пациента) <ФИО> не соответствует ..."
+  s := regexp_replace(
+    s,
+    '(Указанное значение\s*\([^)]*\)\s*)(["«]?)\s*[^"»\r\n]{2,160}\s*\2(\s*не соотв[а-яё]*\b)',
+    '\1<значение>\3',
+    'gi'
+  );
+
+  -- ФИО в контексте пациента/персоны (не глобально по всему тексту).
+  s := regexp_replace(
+    s,
+    '(\b(?:имя пациента|фио пациента|пациент)\b[^:]{0,40}[:\s(]*)([А-ЯЁ][а-яё]+(?:\s+[А-ЯЁ][а-яё]+){1,3})',
+    '\1<ФИО>',
+    'gi'
+  );
+
+  -- Адрес (грубая нормализация по ключевому слову).
+  s := regexp_replace(
+    s,
+    '(\bадрес\b[^:]{0,40}[:\s(]*)([^;,\r\n]{4,160})',
+    '\1<адрес>',
+    'gi'
+  );
+
+  -- Наименование (организации/клиники/прочее) в частых формулировках.
+  s := regexp_replace(
+    s,
+    '(\bнаименовани[е-я]+\b[^:]{0,40}[:\s(]*)([^;,\r\n]{2,160})',
+    '\1<наименование>',
+    'gi'
+  );
+
+  -- Финальная нормализация пробелов.
+  s := regexp_replace(s, '\s+', ' ', 'g');
+  RETURN trim(s);
+END;
+$t$;
+
+COMMENT ON FUNCTION egisz_error_interpretation_type IS 'Нормализованный тип ошибки для группировок: egisz_error_interpretation_item + замена переменных (ФИО/адрес/ID/URL/даты/числа) на плейсхолдеры.';
+
+CREATE OR REPLACE FUNCTION egisz_friendly_error_type(p_code text, p_message text)
+RETURNS text
+LANGUAGE sql
+STABLE
+AS $wrap$
+  SELECT egisz_error_interpretation_type(p_code, p_message);
+$wrap$;
+
+COMMENT ON FUNCTION egisz_friendly_error_type IS 'DEPRECATED: используйте egisz_error_interpretation_type.';
+
+CREATE OR REPLACE FUNCTION egisz_error_interpretation_row(p_errors jsonb)
 RETURNS text
 LANGUAGE sql
 STABLE
@@ -274,7 +391,7 @@ AS $r$
   WITH items AS (
     SELECT
       o,
-      NULLIF(trim(egisz_friendly_error_item(e->>'code', e->>'message')), '') AS t
+      NULLIF(trim(egisz_error_interpretation_item(e->>'code', e->>'message')), '') AS t
     FROM jsonb_array_elements(COALESCE(p_errors, '[]'::jsonb)) WITH ORDINALITY AS x(e, o)
   ),
   first_pos AS (
@@ -287,7 +404,17 @@ AS $r$
   FROM first_pos;
 $r$;
 
-COMMENT ON FUNCTION egisz_friendly_errors_row IS 'Сводка по массиву errors_json: элементы разделены " · " (средняя точка).';
+COMMENT ON FUNCTION egisz_error_interpretation_row IS 'Интерпретация по массиву errors_json: элементы разделены " · " (средняя точка).';
+
+CREATE OR REPLACE FUNCTION egisz_friendly_errors_row(p_errors jsonb)
+RETURNS text
+LANGUAGE sql
+STABLE
+AS $r$
+  SELECT egisz_error_interpretation_row(p_errors);
+$r$;
+
+COMMENT ON FUNCTION egisz_friendly_errors_row IS 'DEPRECATED: используйте egisz_error_interpretation_row.';
 
 -- REPLACE VIEW нельзя использовать для смены имён/набора колонок в базовой витрине (ломаются зависимости и ETL).
 -- Человекочитаемые имена — в отдельных *_ui представлениях и в dim_column_display_labels.
@@ -337,7 +464,8 @@ SELECT
     f.status,
     f.emdr_id,
     f.errors_json,
-    egisz_friendly_errors_row(f.errors_json) AS errors_friendly,
+    egisz_error_interpretation_row(f.errors_json) AS errors_interpretation,
+    egisz_error_interpretation_row(f.errors_json) AS errors_friendly,
     f.registration_date,
     f.semd_creation_at,
     f.processed_at,
@@ -500,8 +628,13 @@ INSERT INTO dim_column_display_labels (source_object, source_column, display_lab
     ('v_egisz_transactions_enriched', 'errors_json', 'Ошибки JSON'),
     (
         'v_egisz_transactions_enriched',
+        'errors_interpretation',
+        'Интерпретация ошибок: одна строка; внутри одного сообщения Schematron блоки — «—», несколько item в JSON — «·»'
+    ),
+    (
+        'v_egisz_transactions_enriched',
         'errors_friendly',
-        'Сводка ошибок: одна строка; внутри одного сообщения Schematron блоки — «—», несколько item в JSON — «·»'
+        'Интерпретация ошибок (устар.): используйте errors_interpretation'
     ),
     (
         'v_egisz_transactions_enriched',
@@ -532,73 +665,39 @@ ON CONFLICT (source_object, source_column) DO UPDATE SET display_label_ru = EXCL
 
 -- Metabase / отчёты: те же данные, что v_egisz_transactions_enriched, с русскими именами колонок (ResultSet / «Спросить данные»).
 CREATE OR REPLACE VIEW v_egisz_transactions_enriched_ui AS
-SELECT *
-FROM (
-    SELECT
-        local_uid_semd AS "localUid СЭМД",
-        exchangelog_log_id::text AS "LOGID журнала EXCHANGELOG",
-        egisz_messages_egmid::text AS "EGISZ_MESSAGES.EGMID (ключ записи, РЭМД)",
-        jid::text AS "JID клиники",
-        gost_host AS "Хост клиники (VPN ГОСТ)",
-        org_oid AS "OID организации",
-        kind_code::text AS "Код СЭМД",
-        kind_name AS "Наименование СЭМД",
-        status AS "Статус",
-        error_global_subcategory AS "Подкатегория ошибки (глобально)",
-        emdr_id AS "Рег. номер РЭМД (emdrid)",
-        errors_json AS "Ошибки JSON",
-        errors_friendly AS "Сводка ошибок",
-        registration_date AS "Зарегистрирован в ЕГИСЗ РЭМД",
-        semd_creation_at AS "Создание СЭМД",
-        processed_at AS "Обработано IPS",
-        chart_day AS "День (тренд)",
-        clinic_name AS "Наименование клиники",
-        clinic_inn AS "ИНН клиники",
-        clinic_mo_oid AS "OID клиники",
-        jid_from_license::text AS "JID (EGISZ_LICENSES)",
-        jid_from_gost_log::text AS "JID из gost в LOGTEXT",
-        jid_from_gost_reply::text AS "JID из gost в REPLYTO",
-        gost_token_logtext AS "Токен gost (LOGTEXT)",
-        gost_token_replyto AS "Токен gost (REPLYTO)",
-        jid_sources_mismatch AS "Расхождение источников JID",
-        journal_msgid AS "MSGID обмена (EXCHANGELOG)",
-        relates_to_id AS "Связанное сообщение"
-    FROM v_egisz_transactions_enriched
-    UNION ALL
-    SELECT
-        NULL::text AS "localUid СЭМД",
-        s.exchangelog_log_id::text AS "LOGID журнала EXCHANGELOG",
-        s.egisz_messages_egmid::text AS "EGISZ_MESSAGES.EGMID (ключ записи, РЭМД)",
-        NULL::text AS "JID клиники",
-        NULL::text AS "Хост клиники (VPN ГОСТ)",
-        NULL::text AS "OID организации",
-        NULL::text AS "Код СЭМД",
-        NULL::text AS "Наименование СЭМД",
-        'error'::text AS "Статус",
-        'сетевые'::text AS "Подкатегория ошибки (глобально)",
-        NULL::text AS "Рег. номер РЭМД (emdrid)",
-        jsonb_build_array(jsonb_build_object('code', 'NETWORK_ERROR', 'message', s.message)) AS "Ошибки JSON",
-        s.message AS "Сводка ошибок",
-        NULL::timestamptz AS "Зарегистрирован в ЕГИСЗ РЭМД",
-        NULL::timestamptz AS "Создание СЭМД",
-        s.created_at AS "Обработано IPS",
-        DATE(s.created_at) AS "День (тренд)",
-        'Сетевые ошибки (LOGSTATE=3)'::text AS "Наименование клиники",
-        NULL::text AS "ИНН клиники",
-        NULL::text AS "OID клиники",
-        NULL::text AS "JID (EGISZ_LICENSES)",
-        NULL::text AS "JID из gost в LOGTEXT",
-        NULL::text AS "JID из gost в REPLYTO",
-        NULL::text AS "Токен gost (LOGTEXT)",
-        NULL::text AS "Токен gost (REPLYTO)",
-        false AS "Расхождение источников JID",
-        s.journal_msgid::text AS "MSGID обмена (EXCHANGELOG)",
-        ('net:' || s.document_group_key)::text AS "Связанное сообщение"
-    FROM v_stg_parse_errors_by_document s
-    WHERE s.error_global_subcategory = 'сетевые'
-) u;
+SELECT
+    local_uid_semd AS "localUid СЭМД",
+    exchangelog_log_id::text AS "LOGID журнала EXCHANGELOG",
+    egisz_messages_egmid::text AS "EGISZ_MESSAGES.EGMID (ключ записи, РЭМД)",
+    jid::text AS "JID клиники",
+    gost_host AS "Хост клиники (VPN ГОСТ)",
+    org_oid AS "OID организации",
+    kind_code::text AS "Код СЭМД",
+    kind_name AS "Наименование СЭМД",
+    status AS "Статус",
+    error_global_subcategory AS "Подкатегория ошибки (глобально)",
+    emdr_id AS "Рег. номер РЭМД (emdrid)",
+    errors_json AS "Ошибки JSON",
+    errors_interpretation AS "Интерпретация ошибок",
+    errors_friendly AS "Сводка ошибок",
+    registration_date AS "Зарегистрирован в ЕГИСЗ РЭМД",
+    semd_creation_at AS "Создание СЭМД",
+    processed_at AS "Обработано IPS",
+    chart_day AS "День (тренд)",
+    clinic_name AS "Наименование клиники",
+    clinic_inn AS "ИНН клиники",
+    clinic_mo_oid AS "OID клиники",
+    jid_from_license::text AS "JID (EGISZ_LICENSES)",
+    jid_from_gost_log::text AS "JID из gost в LOGTEXT",
+    jid_from_gost_reply::text AS "JID из gost в REPLYTO",
+    gost_token_logtext AS "Токен gost (LOGTEXT)",
+    gost_token_replyto AS "Токен gost (REPLYTO)",
+    jid_sources_mismatch AS "Расхождение источников JID",
+    journal_msgid AS "MSGID обмена (EXCHANGELOG)",
+    relates_to_id AS "Связанное сообщение"
+FROM v_egisz_transactions_enriched;
 
-COMMENT ON VIEW v_egisz_transactions_enriched_ui IS 'Обёртка над v_egisz_transactions_enriched с подписями колонок для отчётов; см. dim_column_display_labels. JID клиники, Код СЭМД, LOGID/EGMID — TEXT (идентификаторы: без разделителей тысяч и суммирования в Metabase). «Сводка ошибок» — errors_friendly: агрегация подсказок по errors_json, исходные «Ошибки JSON» не меняются. Колонка «Связанное сообщение» (relates_to_id) — последняя для удобства витрин и Metabase.';
+COMMENT ON VIEW v_egisz_transactions_enriched_ui IS 'Обёртка над v_egisz_transactions_enriched с подписями колонок для отчётов; см. dim_column_display_labels. JID клиники, Код СЭМД, LOGID/EGMID — TEXT (идентификаторы: без разделителей тысяч и суммирования в Metabase). «Интерпретация ошибок» — errors_interpretation: агрегация интерпретаций по errors_json, исходные «Ошибки JSON» не меняются. «Сводка ошибок» оставлена как устаревший алиас. Колонка «Связанное сообщение» (relates_to_id) — последняя для удобства витрин и Metabase.';
 
 -- Архив СЭМД: колбэки (fact) + исходящие без ответа из staging (ожидание колбэка по EXCHANGELOG).
 CREATE OR REPLACE VIEW v_rpt_semd_archive_ui AS
@@ -620,6 +719,7 @@ SELECT
     e.local_uid_semd AS "localUid СЭМД",
     e.emdr_id AS "Рег. номер РЭМД",
     e.status::text AS "Статус",
+    e.errors_interpretation AS "Интерпретация ошибок",
     e.errors_friendly AS "Сводка ошибок",
     e.errors_json AS "Ошибки JSON",
     e.registration_date AS "Зарегистрирован в ЕГИСЗ РЭМД",
@@ -661,6 +761,7 @@ SELECT
     o.document_id AS "localUid СЭМД",
     NULL::varchar(256) AS "Рег. номер РЭМД",
     'ожидание ответа'::text AS "Статус",
+    NULL::text AS "Интерпретация ошибок",
     NULL::text AS "Сводка ошибок",
     '[]'::jsonb AS "Ошибки JSON",
     NULL::timestamptz AS "Зарегистрирован в ЕГИСЗ РЭМД",
@@ -709,6 +810,7 @@ SELECT
     TRIM(j.documentid) AS "localUid СЭМД",
     NULL::varchar(256) AS "Рег. номер РЭМД",
     'ожидание ответа'::text AS "Статус",
+    NULL::text AS "Интерпретация ошибок",
     NULL::text AS "Сводка ошибок",
     '[]'::jsonb AS "Ошибки JSON",
     NULL::timestamptz AS "Зарегистрирован в ЕГИСЗ РЭМД",

@@ -3,13 +3,13 @@
 #
 # Источник истины для карточек: JSON в этом каталоге (*.json).
 # Провижининг: metabase/setup-dashboards.sh подставляет dimension ["field", id, null]
-# из объекта metabase-field-filters у каждой карточки (см. docs/BI_EGISZ_INFOKLINIKA_AUDIT.md §4.9).
+# из объекта metabase-field-filters у каждой карточки (см. README и комментарии в этом файле).
 
 version: 1
 
 meta:
   provisioning_script: metabase/setup-dashboards.sh
-  documentation: docs/BI_EGISZ_INFOKLINIKA_AUDIT.md
+  documentation: README.md
   notes:
     - Переменная dwh_date — тип dimension (native field filter по дате); для каждой карточки физическое поле задаётся отдельно в metabase-field-filters.
     - Переменные top_semd, top_clinic, err_parse_code — тип text в SQL; явное равенство колонке в запросе. В экспорт из API (metabase/export_dashboards_from_api.py) они не попадают в metabase-field-filters.

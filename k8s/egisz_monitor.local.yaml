@@ -23,9 +23,9 @@ postgres:
   schema: "public"
 
 etl:
-  batch_size: 300
+  batch_size: 1000
   pipeline_name: "firebird_exchangelog"
-  sync_window_days: 10
+  sync_window_days: 0
   source_query: null
   # Таймаут SELECT к Firebird (сек.); в Config UI не редактируется — только YAML/Secret (см. config/egisz_monitor.example.yaml).
   firebird_query_timeout_sec: 900
@@ -38,3 +38,4 @@ auto_sync:
 metabase:
   # С ПК при port-forward Metabase на localhost:3000 (kubectl port-forward svc/metabase 3000:3000 или после .\start.ps1). Вход в Metabase: admin@egisz.local / egisz.
   site_url: "http://127.0.0.1:3000"
+

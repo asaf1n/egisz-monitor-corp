@@ -1,5 +1,5 @@
 # Уменьшаем build context для docker/web/Dockerfile и metabase/Dockerfile.
-# Файлы конфига (k8s/local/, *.example.yaml) и SQL остаются — Dockerfile их COPY-ит явно.
+# Файлы конфига (k8s/egisz_monitor.local.yaml, *.example.yaml) и SQL остаются — Dockerfile их COPY-ит явно.
 .git/
 .github/
 .gitignore
@@ -37,7 +37,7 @@ dist/
 
 # Локальные секреты / стейт start.ps1.
 .egisz-monitor-port-forward.pids
-k8s/local/
+k8s/egisz_monitor.local.yaml
 k8s/postgres/postgres-credentials.yaml
 k8s/metabase-admin-secret.yaml
 .sync-err.log

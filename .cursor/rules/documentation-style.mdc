@@ -5,7 +5,7 @@ alwaysApply: true
 
 # Стиль документации
 
-При правках `README.md`, `docs/BI_EGISZ_INFOKLINIKA_AUDIT.md`, `AGENTS.md`, `.cursorrules` и прочих текстов для внешних читателей следуй разделу **«Стиль документации»** в [`AGENTS.md`](../AGENTS.md#doc-style).
+При правках `README.md`, `AGENTS.md`, `.cursorrules` и прочих текстов для внешних читателей следуй разделу **«Стиль документации»** в [`AGENTS.md`](../AGENTS.md#doc-style).
 
 Кратко:
 
