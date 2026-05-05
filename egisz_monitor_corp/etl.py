@@ -831,6 +831,11 @@ def _ingest_exchangelog_rows_chunk(
         jid_from_row = _to_int(lic_r.get("jid")) if lic_r else None
 
         log_created = _sent_at_utc(r.get("log_created_at"))
+        raw_ls = r.get("logstate")
+        try:
+            log_state = int(raw_ls) if raw_ls is not None else None
+        except (TypeError, ValueError):
+            log_state = None
         lim = cfg.etl.max_msgtext_bytes
         if lim is not None and lim > 0 and msgtext:
             nbytes = len(msgtext.encode("utf-8", errors="replace"))
@@ -862,6 +867,7 @@ def _ingest_exchangelog_rows_chunk(
         rec = parser.build_record(
             logtext,
             msg_text=msgtext,
+            log_state=log_state,
             kind_from_egisz_licenses=kind_from,
             mo_uid_from_egisz_licenses=mo_uid_from,
             jid_from_egisz_licenses_row=jid_from_row,

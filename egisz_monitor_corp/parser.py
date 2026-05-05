@@ -40,6 +40,13 @@ _KIND_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+# Heuristic extraction: host/token in network error texts should not split error types.
+_URL_LIKE_RE = re.compile(r"\bhttps?://[^\s<>\"]+\b", re.IGNORECASE)
+_HOSTLIKE_RE = re.compile(
+    r"\b(?:(?:gost-[a-zA-Z0-9_-]+\.infoclinica\.lan)|(?:\d{1,3}(?:\.\d{1,3}){3})(?::\d{1,5})?)\b",
+    re.IGNORECASE,
+)
+
 # Max bytes scanned for hint regexes (very large MSGTEXT: first embedded SOAP chunk only).
 _HINT_SCAN_MAX = 500_000
 
@@ -69,6 +76,25 @@ def _soap_xml_source(msg_text: str | None) -> str | None:
     if not blob or "<" not in blob:
         return None
     return blob
+
+
+def _normalize_network_error_text(log_text: str | None) -> str | None:
+    """
+    LOGSTATE=3: сетевые ошибки (нет связи с БД/клиникой/шлюзом).
+
+    В LOGTEXT может быть адрес хоста/URL клиники. Для отчётов важно, чтобы разные адреса
+    не создавали разные типы ошибок, поэтому:
+    - URL заменяем на "<url>"
+    - host/ip:port заменяем на "<host>"
+    - нормализуем пробелы
+    """
+    t = (log_text or "").strip()
+    if not t:
+        return None
+    t = _URL_LIKE_RE.sub("<url>", t)
+    t = _HOSTLIKE_RE.sub("<host>", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t or None
 
 
 def _extract_embedded_xml(raw: str) -> str:
@@ -338,12 +364,13 @@ class EgiszMonitorParser:
         reg_date: str | None = None
         reg_date_time: str | None = None
         cre_date: str | None = None
+        response_message: str | None = None
         errors: list[dict[str, str]] = []
 
         stack: list[str] = []
 
         def walk(el: ET.Element) -> None:
-            nonlocal relates, local_uid, status, kind, org_oid, emdr_id, reg_date, reg_date_time, cre_date, errors
+            nonlocal relates, local_uid, status, kind, org_oid, emdr_id, reg_date, reg_date_time, cre_date, response_message, errors
             stack.append(_local_tag(el.tag))
             path = stack
             text = _norm_ws(el.text)
@@ -369,6 +396,12 @@ class EgiszMonitorParser:
                 reg_date = text
             elif ln == "creationDateTime" and text:
                 cre_date = text
+            # In async callbacks, <status> may be error and the direct <message> under registerDocumentResult
+            # contains the error text. Do not confuse it with <errors><item><message>...</message></item>.
+            elif ln == "message" and "registerDocumentResult" in path and "errors" not in path and "item" not in path:
+                merged = _norm_ws("".join(el.itertext()))
+                if merged:
+                    response_message = merged
             elif ln == "item" and "errors" in path:
                 code = None
                 message = None
@@ -429,6 +462,15 @@ class EgiszMonitorParser:
         if st not in ("success", "error", "unknown"):
             st = "unknown"
 
+        # Async callback: when status=error, ns2:message holds the error text (can be large).
+        if st == "error" and response_message:
+            msg = response_message.strip()
+            if msg:
+                cap = 20_000
+                if len(msg) > cap:
+                    msg = msg[:cap] + "…"
+                errors.append({"code": "ASYNC_RESPONSE_MESSAGE", "message": msg})
+
         return {
             "relates_to_id": relates,
             "local_uid": _norm_ws(local_uid),
@@ -473,6 +515,7 @@ class EgiszMonitorParser:
         log_text: str | None,
         *,
         msg_text: str | None = None,
+        log_state: int | None = None,
         kind_from_egisz_licenses: str | int | None = None,
         mo_uid_from_egisz_licenses: str | None = None,
         jid_from_egisz_licenses_row: int | None = None,
@@ -566,6 +609,29 @@ class EgiszMonitorParser:
         def _stage(err: StagingParseError) -> None:
             if on_staging_error:
                 on_staging_error(err)
+
+        # LOGSTATE=3: network errors are stored in EXCHANGELOG.LOGTEXT (no SOAP). Keep them in staging for reporting.
+        try:
+            ls = int(log_state) if log_state is not None else None
+        except (TypeError, ValueError):
+            ls = None
+        if ls == 3:
+            net_text = _normalize_network_error_text(log_text) or "Сетевая ошибка (LOGSTATE=3)"
+            _stage(
+                StagingParseError(
+                    relates_to_id=None,
+                    error_code="NETWORK_ERROR",
+                    message=net_text,
+                    log_excerpt=excerpt or None,
+                    exchangelog_log_id=exchangelog_log_id,
+                    egisz_messages_egmid=egisz_messages_egmid,
+                    journal_msgid=journal_msgid,
+                    relates_to_hint=hint_relates,
+                    local_uid_hint=hint_local,
+                    emdr_id_hint=hint_emdr,
+                )
+            )
+            return None
 
         if not relates_to_id:
             if parsed and parsed.get("_xml_ok") and parsed.get("relates_to_id") is None:

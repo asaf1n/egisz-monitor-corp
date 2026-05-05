@@ -19,6 +19,7 @@ from egisz_monitor_corp.config_loader import (
 from egisz_monitor_corp.fb_client import fetch_all
 from egisz_monitor_corp.fb_client import fetch_firebird_max_license_modifydate
 from egisz_monitor_corp.k8s_cronjob import reconcile_egisz_monitor_sync_cronjob
+from egisz_monitor_corp.metabase_bundle import build_empty_metabase_bundle_zip_bytes
 from egisz_monitor_corp.metabase_export import build_export_zip_bytes
 from egisz_monitor_corp.pg_cli_backup import pg_dump_custom_bytes, restore_upload_to_temp_and_run
 from egisz_monitor_corp.pg_warehouse import (
@@ -383,6 +384,11 @@ PAGE = """
           <p class="truncate font-mono text-[10px] leading-snug text-[#6B7280]" title="Сначала выгрузка из Metabase (нужны Secret или api_key). Если API недоступен — в архиве эталон из каталога репозитория metabase_dashboards/">
             Источник: Metabase API или эталон <code class="text-[#9CA3AF]">metabase_dashboards/</code> в образе
           </p>
+          <div class="flex min-w-0 items-stretch gap-2 pt-2">
+            <button type="button" id="btnMbEmptyBundle" class="inline-flex min-h-10 min-w-0 flex-1 items-center justify-center rounded-md border border-[#2D3F5E] bg-[#0F1522] px-2 py-2 font-mono text-xs text-[#D1D5DB] transition hover:border-[#509EE3] hover:bg-[#1B2940] hover:text-white sm:text-sm" title="Скачать ZIP для загрузки в пустой Metabase: дашборды + фильтры/настройки для импорта">
+              ZIP для пустого Metabase
+            </button>
+          </div>
         </div>
         <input type="file" id="pgRestoreFile" accept=".dump,.backup,application/octet-stream" class="sr-only" tabindex="-1" aria-hidden="true"/>
         <div class="flex flex-col gap-2">
@@ -1465,6 +1471,67 @@ PAGE = """
       { strip: 'Metabase', logBody: 'ZIP: ' + name + (fromBundled ? ' (bundled)' : ' (live)') },
     );
   });
+  bindClick('btnMbEmptyBundle', async function () {
+    let r;
+    try {
+      const fd = new FormData(document.getElementById('configForm'));
+      r = await fetch('/api/metabase/export-empty-bundle', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { Accept: 'application/zip' },
+        body: fd,
+      });
+    } catch (e) {
+      showCfgMessage(false, String(e), { strip: 'Metabase', logBody: String(e) });
+      return;
+    }
+    if (!r.ok) {
+      const raw = await r.text();
+      let j;
+      try {
+        j = JSON.parse(raw);
+      } catch (e2) {
+        showCfgMessage(false, 'Metabase bundle: код ' + r.status + '. ' + raw.slice(0, 400), { strip: 'Ошибка', logBody: raw });
+        return;
+      }
+      const errMsg = (j && (j.message || j.error)) || raw.slice(0, 400);
+      showCfgMessage(false, errMsg, { strip: 'Metabase bundle', logBody: errMsg });
+      return;
+    }
+    const blob = await r.blob();
+    const cd = r.headers.get('Content-Disposition') || '';
+    let name = 'egisz_metabase_empty_bundle.zip';
+    const m = cd.match(/filename="([^"]+)"/i);
+    if (m && m[1]) {
+      try {
+        name = decodeURIComponent(m[1].replace(/\"/g, '').trim());
+      } catch (e3) {
+        name = m[1].replace(/\"/g, '').trim() || name;
+      }
+    }
+    if (mbExportDirHandle && typeof mbExportDirHandle.getFileHandle === 'function') {
+      try {
+        const fh = await mbExportDirHandle.getFileHandle(name, { create: true });
+        const w = await fh.createWritable();
+        await w.write(blob);
+        await w.close();
+        showCfgMessage(true, 'Пакет для пустого Metabase записан в выбранную папку.', { strip: 'Metabase', logBody: 'ZIP: ' + name });
+        return;
+      } catch (e) {
+        showCfgMessage(false, String(e && e.message ? e.message : e), { strip: 'Metabase', logBody: String(e) });
+        return;
+      }
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showCfgMessage(true, 'Пакет для пустого Metabase скачан.', { strip: 'Metabase', logBody: 'ZIP: ' + name });
+  });
   bindClick('btnPgBackup', async function () {
     const fd = new FormData(document.getElementById('configForm'));
     let r;
@@ -1913,6 +1980,21 @@ def create_app() -> Flask:
                 "Content-Disposition": f'attachment; filename="{fn}"',
                 "X-Egisz-Metabase-Export-Source": source,
             },
+        )
+
+    @app.post("/api/metabase/export-empty-bundle")
+    def api_metabase_export_empty_bundle():  # type: ignore[no-untyped-def]
+        """ZIP для импорта в пустой Metabase: дашборды + набор данных/фильтры/настройки bootstrap."""
+        try:
+            blob, fn = build_empty_metabase_bundle_zip_bytes(request.form)
+        except RuntimeError as e:
+            return jsonify({"ok": False, "message": str(e)}), 400
+        except Exception as e:  # pragma: no cover
+            return jsonify({"ok": False, "message": f"Metabase bundle: {e}"}), 502
+        return Response(
+            blob,
+            mimetype="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{fn}"'},
         )
 
     @app.post("/api/pg/backup")

@@ -121,7 +121,11 @@ SELECT
         NULLIF(TRIM(s.emdr_id_hint), ''),
         NULLIF(TRIM(s.relates_to_id), ''),
         'id:' || s.id::text
-    ) AS document_group_key
+    ) AS document_group_key,
+    CASE
+        WHEN s.error_code = 'NETWORK_ERROR' THEN 'сетевые'
+        ELSE NULL
+    END AS error_global_subcategory
 FROM stg_parse_errors s;
 
 COMMENT ON VIEW v_stg_parse_errors_by_document IS 'stg_parse_errors + document_group_key: агрегация по уникальным документам (document_group_key), а не по числу строк EXCHANGELOG';
@@ -172,10 +176,11 @@ $c$;
 CREATE OR REPLACE FUNCTION egisz_friendly_error_item(p_code text, p_message text)
 RETURNS text
 LANGUAGE plpgsql
-IMMUTABLE
+STABLE
 AS $e$
 DECLARE
   m text;
+  c text;
   parts text[];
   chunk text;
   out_parts text[] := ARRAY[]::text[];
@@ -184,12 +189,30 @@ DECLARE
   n int;
   i int;
 BEGIN
+  c := upper(trim(COALESCE(p_code, '')));
   m := trim(COALESCE(p_message, ''));
   IF m = '' THEN
-    IF nullif(trim(COALESCE(p_code, '')), '') IS NOT NULL THEN
-      RETURN 'Код: ' || p_code;
+    IF nullif(c, '') IS NOT NULL THEN
+      RETURN 'Код: ' || c;
     END IF;
     RETURN NULL;
+  END IF;
+
+  -- Федеральная сторона / технические сбои РЭМД: типовые коды и формулировки.
+  -- Источники: публичные базы знаний/документации интеграторов РЭМД (коды и смысл "ошибка на стороне РЭМД").
+  IF c IN ('RUNTIME_ERROR', 'INTERNAL_ERROR') THEN
+    RETURN 'Техническая ошибка на стороне РЭМД (федеральная): повторите отправку позже';
+  END IF;
+  IF c IN ('CA_INACCESSIBILITY', 'CA_UNAVAILABLE') THEN
+    RETURN 'Недоступен сервис проверки подписи/УЦ на стороне РЭМД: повторите отправку позже';
+  END IF;
+  IF c IN ('ASYNC_RESPONSE_TIMEOUT', 'TIMEOUT') THEN
+    RETURN 'Таймаут асинхронной обработки на стороне РЭМД: повторите отправку позже';
+  END IF;
+
+  -- Ошибки XSD/cvc валидации: короткая подсказка без раздувания.
+  IF m ~* '\bcvc-' OR m ~* 'XML_VALIDATION_ERROR' OR m ~* 'xsd' THEN
+    RETURN 'Ошибка XSD-валидации XML (cvc-): проверьте обязательные поля/формат в СЭМД';
   END IF;
 
   -- Уже сформулировано в терминах бизнес-логики: не трогаем
@@ -246,13 +269,22 @@ COMMENT ON FUNCTION egisz_friendly_error_item IS 'Одна строка-подс
 CREATE OR REPLACE FUNCTION egisz_friendly_errors_row(p_errors jsonb)
 RETURNS text
 LANGUAGE sql
-IMMUTABLE
+STABLE
 AS $r$
-  SELECT NULLIF(
-    string_agg(egisz_friendly_error_item(e->>'code', e->>'message'), ' · ' ORDER BY o),
-    ''
+  WITH items AS (
+    SELECT
+      o,
+      NULLIF(trim(egisz_friendly_error_item(e->>'code', e->>'message')), '') AS t
+    FROM jsonb_array_elements(COALESCE(p_errors, '[]'::jsonb)) WITH ORDINALITY AS x(e, o)
+  ),
+  first_pos AS (
+    SELECT t, MIN(o) AS first_o
+    FROM items
+    WHERE t IS NOT NULL
+    GROUP BY t
   )
-  FROM jsonb_array_elements(COALESCE(p_errors, '[]'::jsonb)) WITH ORDINALITY AS t(e, o);
+  SELECT NULLIF(string_agg(t, ' · ' ORDER BY first_o), '')
+  FROM first_pos;
 $r$;
 
 COMMENT ON FUNCTION egisz_friendly_errors_row IS 'Сводка по массиву errors_json: элементы разделены " · " (средняя точка).';
@@ -281,6 +313,10 @@ SELECT
     f.local_uid_semd,
     f.jid,
     f.gost_jid_token,
+    CASE
+        WHEN f.status = 'error' THEN 'ошибка асинхронного ответа РЭМД'
+        ELSE NULL
+    END AS error_global_subcategory,
     COALESCE(
         CASE
             WHEN f.gost_token_logtext IS NOT NULL AND TRIM(f.gost_token_logtext) <> ''
@@ -454,6 +490,7 @@ INSERT INTO dim_column_display_labels (source_object, source_column, display_lab
     ('v_egisz_transactions_enriched', 'local_uid_semd', 'localUid СЭМД'),
     ('v_egisz_transactions_enriched', 'jid', 'JID клиники'),
     ('v_egisz_transactions_enriched', 'gost_jid_token', 'Токен gost (нецифр., для отображения)'),
+    ('v_egisz_transactions_enriched', 'error_global_subcategory', 'Подкатегория ошибки (глобально)'),
     ('v_egisz_transactions_enriched', 'gost_host', 'Хост клиники (VPN ГОСТ)'),
     ('v_egisz_transactions_enriched', 'org_oid', 'OID организации'),
     ('v_egisz_transactions_enriched', 'kind_code', 'Код СЭМД'),
@@ -505,6 +542,7 @@ SELECT
     kind_code::text AS "Код СЭМД",
     kind_name AS "Наименование СЭМД",
     status AS "Статус",
+    error_global_subcategory AS "Подкатегория ошибки (глобально)",
     emdr_id AS "Рег. номер РЭМД (emdrid)",
     errors_json AS "Ошибки JSON",
     errors_friendly AS "Сводка ошибок",
