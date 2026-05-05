@@ -209,6 +209,7 @@ class NormalizedRecord:
     processed_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     exchangelog_log_id: int | None = None
     egisz_messages_egmid: int | None = None
+    journal_msgid: str | None = None  # EXCHANGELOG.MSGID при успешном разборе
     jid_from_license: int | None = None
     jid_from_gost_log: int | None = None
     jid_from_gost_reply: int | None = None
@@ -232,6 +233,7 @@ class NormalizedRecord:
             "processed_at": self.processed_at,
             "exchangelog_log_id": self.exchangelog_log_id,
             "egisz_messages_egmid": self.egisz_messages_egmid,
+            "journal_msgid": self.journal_msgid,
             "jid_from_license": self.jid_from_license,
             "jid_from_gost_log": self.jid_from_gost_log,
             "jid_from_gost_reply": self.jid_from_gost_reply,
@@ -307,8 +309,15 @@ class EgiszMonitorParser:
         if not xml_string or "<" not in xml_string:
             return None
 
-        # Без полного .lower() по крупному BLOB: один проход регистронезависимого поиска.
-        if re.search(r"registerdocumentresult|relatestomessage", xml_string, re.IGNORECASE) is None:
+        blob = xml_string
+        # Ранние строки журнала могут быть без колбэка; позже по тому же MSGID приходит полный SOAP.
+        # Не отсекаем BLOB, если уже видим идентификаторы колбэка / конверт (иначе «поздний» ответ не разберётся).
+        if (
+            re.search(r"registerdocumentresult|relatestomessage", blob, re.IGNORECASE) is None
+            and _RELATES_RE.search(blob) is None
+            and _LOCALUID_RE.search(blob) is None
+            and re.search(r":Envelope|registerDocumentResult", blob, re.IGNORECASE) is None
+        ):
             return None
 
         payload = _extract_embedded_xml(xml_string)
@@ -388,6 +397,14 @@ class EgiszMonitorParser:
             m = _RELATES_RE.search(payload)
             if m:
                 relates = _norm_ws(m.group(1))
+        if not relates:
+            m_attr = re.search(
+                r'relatesToMessage\s*=\s*"([^"]+)"',
+                payload,
+                re.IGNORECASE,
+            )
+            if m_attr:
+                relates = _norm_ws(m_attr.group(1))
 
         reg_dt_raw = _norm_ws(reg_date_time) or _norm_ws(reg_date)
         reg_dt = _parse_iso_datetime(reg_dt_raw) if reg_dt_raw else None
@@ -621,6 +638,7 @@ class EgiszMonitorParser:
             processed_at=processed_at,
             exchangelog_log_id=exchangelog_log_id,
             egisz_messages_egmid=egisz_messages_egmid,
+            journal_msgid=_norm_ws(journal_msgid),
             jid_from_license=lic_jid,
             jid_from_gost_log=j_log if j_log is not None and j_log > 0 else None,
             jid_from_gost_reply=j_rep if j_rep is not None and j_rep > 0 else None,

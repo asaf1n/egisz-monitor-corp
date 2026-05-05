@@ -84,6 +84,39 @@ def connect_pg(cfg: PostgresConfig):  # type: ignore[no-untyped-def]
     return con
 
 
+def terminate_other_sessions_with_advisory_locks(con) -> list[dict[str, Any]]:
+    """Завершить другие сессии, удержавшие granted advisory lock на текущей БД (зависший ETL / UI).
+
+    ``pg_terminate_backend`` на чужие PID обычно требует суперпользователя PostgreSQL либо роли
+    с правом сигналить бэкенды; иначе в ответе будет ``terminated: false`` с текстом ошибки.
+    """
+    out: list[dict[str, Any]] = []
+    with con.cursor() as cur:
+        cur.execute(
+            """
+            SELECT DISTINCT a.pid, a.usename, a.application_name, a.state
+            FROM pg_locks l
+            JOIN pg_stat_activity a ON a.pid = l.pid
+            WHERE l.locktype = 'advisory'
+              AND l.granted
+              AND a.datname = current_database()
+              AND a.pid <> pg_backend_pid()
+            """
+        )
+        meta = {row[0]: {"usename": row[1], "application_name": row[2], "state": row[3]} for row in cur.fetchall()}
+    for pid, m in meta.items():
+        try:
+            with con.cursor() as cur2:
+                cur2.execute("SELECT pg_terminate_backend(%s)", (pid,))
+                row = cur2.fetchone()
+                ok = bool(row and row[0])
+            entry: dict[str, Any] = {"pid": pid, "terminated": ok, **m}
+            out.append(entry)
+        except Exception as e:  # pragma: no cover - privilege
+            out.append({"pid": pid, "terminated": False, "error": str(e), **m})
+    return out
+
+
 def sql_dir() -> Path:
     """Репозиторий: <root>/sql. Wheel в контейнере: задайте EGISZ_MONITOR_SQL_DIR (см. docker/web/Dockerfile)."""
     override = (os.environ.get("EGISZ_MONITOR_SQL_DIR") or "").strip()
@@ -918,7 +951,7 @@ def upsert_facts_batch(
         dedup[r["relates_to_id"]] = r
     rows = list(dedup.values())
     cs = max(50, min(int(chunk_size), 10_000))
-    template = "(%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+    template = "(%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
     n = len(rows)
     multi = n > cs
     for start in range(0, n, cs):
@@ -944,6 +977,7 @@ def upsert_facts_batch(
                     r["processed_at"],
                     r.get("exchangelog_log_id"),
                     r.get("egisz_messages_egmid"),
+                    r.get("journal_msgid"),
                     r.get("jid_from_license"),
                     r.get("jid_from_gost_log"),
                     r.get("jid_from_gost_reply"),
@@ -964,7 +998,7 @@ def upsert_facts_batch(
                 INSERT INTO fact_egisz_transactions (
                     relates_to_id, local_uid_semd, jid, gost_jid_token, org_oid, kind_code, status,
                     emdr_id, errors_json, registration_date, semd_creation_at, processed_at,
-                    exchangelog_log_id, egisz_messages_egmid,
+                    exchangelog_log_id, egisz_messages_egmid, journal_msgid,
                     jid_from_license, jid_from_gost_log, jid_from_gost_reply,
                     gost_token_logtext, gost_token_replyto, jid_sources_mismatch
                 ) VALUES %s
@@ -982,12 +1016,18 @@ def upsert_facts_batch(
                     processed_at = EXCLUDED.processed_at,
                     exchangelog_log_id = EXCLUDED.exchangelog_log_id,
                     egisz_messages_egmid = EXCLUDED.egisz_messages_egmid,
+                    journal_msgid = EXCLUDED.journal_msgid,
                     jid_from_license = EXCLUDED.jid_from_license,
                     jid_from_gost_log = EXCLUDED.jid_from_gost_log,
                     jid_from_gost_reply = EXCLUDED.jid_from_gost_reply,
                     gost_token_logtext = EXCLUDED.gost_token_logtext,
                     gost_token_replyto = EXCLUDED.gost_token_replyto,
                     jid_sources_mismatch = EXCLUDED.jid_sources_mismatch
+                WHERE EXCLUDED.exchangelog_log_id IS NOT NULL
+                  AND (
+                    fact_egisz_transactions.exchangelog_log_id IS NULL
+                    OR EXCLUDED.exchangelog_log_id >= fact_egisz_transactions.exchangelog_log_id
+                  )
                 """,
                 tuples,
                 template=template,

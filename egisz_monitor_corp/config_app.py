@@ -333,7 +333,7 @@ PAGE = """
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="12" height="14" rx="2" ry="2"/></svg>
               </button>
             </div>
-            <pre id="syncStatus" data-raw="" class="max-h-48 min-h-[6rem] flex-1 overflow-y-auto whitespace-pre-wrap font-mono text-xs leading-relaxed text-[#D1D5DB] sm:max-h-56 lg:max-h-none lg:min-h-[8rem] lg:text-[11px]"></pre>
+            <pre id="syncStatus" data-raw="" class="max-h-48 min-h-[6rem] flex-1 overflow-y-auto whitespace-pre-wrap rounded-md border border-transparent bg-transparent px-2 py-1.5 font-mono text-xs leading-relaxed text-[#D1D5DB] transition-colors sm:max-h-56 lg:max-h-none lg:min-h-[8rem] lg:text-[11px]"></pre>
           </div>
         </div>
       </form>
@@ -413,6 +413,75 @@ PAGE = """
   let lastSyncJson = { running: false, error: null, message: '', last_stats: null, sync_attempted: false };
   let wasSyncRunning = false;
   let lastUiMessage = { ok: true, strip: '', logBody: '' };
+  const SYNC_STICKY_KEY = 'egisz_conf_ui_sync_last_ok';
+  /** Последний зафиксированный итог синка (в памяти + sessionStorage): серверный _state не переживает рестарт воркера, а UI должен показывать «завершена» до следующего запуска с кнопки. */
+  let lastStickySuccess = null;
+  (function initSyncStickyFromSession() {
+    try {
+      const raw = sessionStorage.getItem(SYNC_STICKY_KEY);
+      if (!raw) return;
+      const o = JSON.parse(raw);
+      if (o && o.last_stats && typeof o.last_stats === 'object') {
+        lastStickySuccess = { last_stats: o.last_stats, message: o.message != null ? String(o.message) : '' };
+      }
+    } catch (e) {}
+  })();
+  function clearStickySuccess() {
+    lastStickySuccess = null;
+    try {
+      sessionStorage.removeItem(SYNC_STICKY_KEY);
+    } catch (e) {}
+  }
+  function persistStickySuccess() {
+    if (!lastStickySuccess || !lastStickySuccess.last_stats) {
+      try {
+        sessionStorage.removeItem(SYNC_STICKY_KEY);
+      } catch (e) {}
+      return;
+    }
+    try {
+      sessionStorage.setItem(
+        SYNC_STICKY_KEY,
+        JSON.stringify({
+          last_stats: lastStickySuccess.last_stats,
+          message: lastStickySuccess.message != null ? String(lastStickySuccess.message) : '',
+        }),
+      );
+    } catch (e) {}
+  }
+  function updateStickyFromServer(j) {
+    if (!j || typeof j !== 'object') return;
+    if (j.error) {
+      clearStickySuccess();
+      return;
+    }
+    if (j.running) {
+      clearStickySuccess();
+      return;
+    }
+    if (j.last_stats && typeof j.last_stats === 'object') {
+      lastStickySuccess = { last_stats: j.last_stats, message: j.message != null ? String(j.message) : '' };
+      persistStickySuccess();
+    }
+  }
+  function mergeSyncJsonForUi(j) {
+    if (!j || typeof j !== 'object') return j;
+    if (j.running || j.error) return j;
+    if (j.last_stats) return j;
+    if (lastStickySuccess && lastStickySuccess.last_stats) {
+      const out = Object.assign({}, j);
+      out.last_stats = lastStickySuccess.last_stats;
+      const sm = lastStickySuccess.message != null ? String(lastStickySuccess.message).trim() : '';
+      if (!out.message || !String(out.message).trim()) {
+        out.message = sm;
+      }
+      return out;
+    }
+    return j;
+  }
+  function displaySyncJson() {
+    return mergeSyncJsonForUi(lastSyncJson);
+  }
   let pgBackupDirHandle = null;
   let mbExportDirHandle = null;
   const STRIP_BASE =
@@ -676,6 +745,14 @@ PAGE = """
         : { key: 'db_err', title: statusLinePhrase(m, 40) || 'Ошибка', hint: logHint, classBar: 'border-rose-800/80 bg-rose-900/30 text-rose-200' };
     }
     if (j && j.last_stats) {
+      if (j.last_stats.stopped_by_user) {
+        return {
+          key: 'sync_done',
+          title: 'Синхронизация остановлена',
+          hint: logHint,
+          classBar: 'border-amber-800/80 bg-amber-900/25 text-amber-200',
+        };
+      }
       return { key: 'sync_done', title: 'Синхронизация завершена', hint: logHint, classBar: 'border-emerald-800/80 bg-emerald-900/25 text-emerald-300' };
     }
     return { key: 'idle', title: 'Готов к работе', hint: logHint, classBar: 'border-transparent bg-transparent text-[#9CA3AF]' };
@@ -713,13 +790,35 @@ PAGE = """
     if (msg && (/Предупреждение/i.test(msg) || !p)) lines.push(msg);
     return lines.filter(Boolean).join(String.fromCharCode(10));
   }
+  const SYNC_STATUS_PRE_BASE =
+    'max-h-48 min-h-[6rem] flex-1 overflow-y-auto whitespace-pre-wrap rounded-md border px-2 py-1.5 font-mono text-xs leading-relaxed transition-colors sm:max-h-56 lg:max-h-none lg:min-h-[8rem] lg:text-[11px]';
+  function applySyncStatusPreStyle(el, j) {
+    if (!el) return;
+    if (j && j.running) {
+      el.className = SYNC_STATUS_PRE_BASE + ' text-[#D1D5DB] border-[#2D3F5E]/50 bg-[#0B1120]/90';
+      return;
+    }
+    if (j && j.error) {
+      el.className = SYNC_STATUS_PRE_BASE + ' border-rose-800/60 bg-rose-950/40 text-rose-100';
+      return;
+    }
+    if (j && j.last_stats && !j.error) {
+      if (j.last_stats.stopped_by_user) {
+        el.className = SYNC_STATUS_PRE_BASE + ' border-amber-700/55 bg-amber-900/35 text-amber-50';
+      } else {
+        el.className = SYNC_STATUS_PRE_BASE + ' border-emerald-700/70 bg-emerald-900/40 text-emerald-50';
+      }
+      return;
+    }
+    el.className = SYNC_STATUS_PRE_BASE + ' border-transparent bg-transparent text-[#D1D5DB]';
+  }
   function refreshConnStatusStrip() {
     const wrap = document.getElementById('connStatusStrip');
     const textEl = document.getElementById('connStatusText');
     const fill = document.getElementById('connStatusProgressFill');
     const pctEl = document.getElementById('connStatusPct');
     if (!wrap || !textEl || !fill || !pctEl) return;
-    const j = lastSyncJson;
+    const j = displaySyncJson();
     const ui = lastUiMessage;
     const st = connStatusStripState(j, ui);
     wrap.className = STRIP_BASE;
@@ -807,9 +906,16 @@ PAGE = """
         const errStr = String(j.error);
         if (!msg || msg.indexOf(errStr) < 0) lines.push('Ошибка: ' + errStr);
       } else if (j.last_stats) {
-        if (msg) lines.push(msg);
-        else if (!j.last_stats.stopped_by_user) {
-          lines.push('Синхронизация завершена успешно: полный проход конвейера Firebird → PostgreSQL.');
+        if (j.last_stats.stopped_by_user) {
+          lines.push('Синхронизация остановлена по запросу');
+        } else {
+          lines.push('Синхронизация завершена');
+        }
+        if (msg) {
+          const headRu = j.last_stats.stopped_by_user ? 'остановлена' : 'завершена';
+          if (String(msg).toLowerCase().indexOf(headRu) < 0) lines.push(msg);
+        } else if (!j.last_stats.stopped_by_user) {
+          lines.push('Полный проход конвейера Firebird → PostgreSQL выполнен.');
         }
         if (j.last_stats.stopped_by_user) {
           lines.push(
@@ -837,9 +943,11 @@ PAGE = """
   }
   function applySyncStatusFromPoll(j, el) {
     if (!el || syncStartInFlight) return;
-    const display = buildSystemLogText(j);
+    const merged = mergeSyncJsonForUi(j);
+    const display = buildSystemLogText(merged);
     el.textContent = display;
     el.setAttribute('data-raw', display);
+    applySyncStatusPreStyle(el, merged);
   }
   async function loadPgSyncSnapshotOnce() {
     const logEl = document.getElementById('pgSnapLogId');
@@ -1096,6 +1204,7 @@ PAGE = """
       if (prevRun && !wasSyncRunning) {
         loadPgSyncSnapshotOnce();
       }
+      updateStickyFromServer(j);
       lastSyncJson = j;
       refreshConnStatusStrip();
       syncActionButtonsFromPoll(j);
@@ -1461,6 +1570,9 @@ PAGE = """
       return;
     }
     if (btnSyncEl && btnSyncEl.disabled) return;
+    clearStickySuccess();
+    lastSyncJson = Object.assign({}, lastSyncJson, { last_stats: null });
+    refreshConnStatusStrip();
     lastUiMessage = { ok: true, strip: '', logBody: '' };
     syncStartInFlight = true;
     if (btnSyncEl) {
@@ -1574,6 +1686,11 @@ PAGE = """
     if (slowTimer != null) { clearInterval(slowTimer); slowTimer = null; }
   }
   startPolling();
+  (function paintSyncLogBeforeFirstPoll() {
+    const el = document.getElementById('syncStatus');
+    if (!el || syncStartInFlight) return;
+    applySyncStatusFromPoll(lastSyncJson, el);
+  })();
   pollSync();
   refreshConnStatusStrip();
   syncActionButtonsFromPoll(lastSyncJson);

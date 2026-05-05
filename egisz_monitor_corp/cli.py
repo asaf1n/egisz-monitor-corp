@@ -14,6 +14,7 @@ from egisz_monitor_corp.pg_warehouse import (
     PipelineLockBusyError,
     apply_reports_schema,
     connect_pg,
+    terminate_other_sessions_with_advisory_locks,
     test_pg_connection,
 )
 
@@ -32,6 +33,11 @@ def main(argv: list[str] | None = None) -> int:
     a = sub.add_parser(
         "apply-schema",
         help="Применить DDL витрины (файлы из sql/schema_apply_order.txt, по умолчанию 001+002+005)",
+    )
+
+    sub.add_parser(
+        "reset-etl-locks",
+        help="Завершить сессии с advisory lock на текущей БД (зависший sync/UI; нужны права на pg_terminate_backend)",
     )
 
     sub.add_parser("config-ui", help="Run Flask config editor on FLASK_RUN_HOST:FLASK_RUN_PORT")
@@ -85,6 +91,21 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             pg.close()
         print("schema_applied")
+        return 0
+
+    if args.cmd == "reset-etl-locks":
+        cfg = load_corp_config()
+        pg = connect_pg(cfg.postgres)
+        pg.autocommit = True
+        try:
+            rows = terminate_other_sessions_with_advisory_locks(pg)
+        finally:
+            pg.close()
+        if not rows:
+            print("no_advisory_lock_sessions")
+            return 0
+        for r in rows:
+            print(r)
         return 0
 
     if args.cmd == "config-ui":

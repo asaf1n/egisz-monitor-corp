@@ -404,6 +404,49 @@ def test_build_record_passes_exchangelog_log_id_and_message_egmid() -> None:
     assert row["egisz_messages_egmid"] == 42
 
 
+def test_build_record_stores_journal_msgid() -> None:
+    p = EgiszMonitorParser()
+    xml = _soap("SRC-2", "success", kind="<ns2:kind>62</ns2:kind>")
+    rec = p.build_record(
+        "http://gost-1.infoclinica.lan/",
+        msg_text=xml,
+        document_id="D1",
+        journal_msgid="92F20A635181473996FD142B0603CA04",
+    )
+    assert rec is not None
+    assert rec.as_fact_row()["journal_msgid"] == "92F20A635181473996FD142B0603CA04"
+
+
+def test_parse_xml_relates_from_attribute_when_element_empty() -> None:
+    p = EgiszMonitorParser()
+    xml = f"""<?xml version="1.0"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ns2="{NS}">
+  <soap:Body>
+    <ns2:registerDocumentResult relatesToMessage="ATTR-REL-1">
+      <ns2:status>success</ns2:status>
+      <ns2:kind>62</ns2:kind>
+    </ns2:registerDocumentResult>
+  </soap:Body>
+</soap:Envelope>"""
+    out = p.parse_xml(xml)
+    assert out is not None
+    assert out.get("relates_to_id") == "ATTR-REL-1"
+
+
+def test_parse_xml_opens_without_registerdocumentresult_literal_when_relates_present() -> None:
+    """Поздние/укороченные ответы: без подстроки registerDocumentResult, но с тегом relatesToMessage."""
+    p = EgiszMonitorParser()
+    xml = f"""<?xml version="1.0"?>
+<Outer xmlns:ns2="{NS}">
+  <ns2:relatesToMessage>LATE-MSG-1</ns2:relatesToMessage>
+  <ns2:status>success</ns2:status>
+  <ns2:kind>62</ns2:kind>
+</Outer>"""
+    out = p.parse_xml(xml)
+    assert out is not None
+    assert out.get("relates_to_id") == "LATE-MSG-1"
+
+
 def test_parse_xml_rejects_doctype_with_internal_entity() -> None:
     """defusedxml forbids DTD/entity expansion (Gordon-2 baseline)."""
     p = EgiszMonitorParser()

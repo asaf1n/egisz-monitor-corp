@@ -81,6 +81,12 @@ COMMENT ON COLUMN fact_egisz_transactions.egisz_messages_egmid IS 'EGISZ_MESSAGE
 CREATE INDEX IF NOT EXISTS idx_fact_egisz_exchangelog_log_id ON fact_egisz_transactions (exchangelog_log_id);
 CREATE INDEX IF NOT EXISTS idx_fact_egisz_egisz_messages_egmid ON fact_egisz_transactions (egisz_messages_egmid);
 
+ALTER TABLE fact_egisz_transactions ADD COLUMN IF NOT EXISTS journal_msgid VARCHAR(256);
+
+COMMENT ON COLUMN fact_egisz_transactions.journal_msgid IS 'EXCHANGELOG.MSGID (= EGISZ_MESSAGES.MSGID) строки журнала, по которой построен факт; для поиска в Metabase по идентификатору обмена';
+
+CREATE INDEX IF NOT EXISTS idx_fact_journal_msgid ON fact_egisz_transactions (journal_msgid) WHERE journal_msgid IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS stg_parse_errors (
     id BIGSERIAL PRIMARY KEY,
     relates_to_id VARCHAR(256),
@@ -308,7 +314,8 @@ SELECT
     f.jid_from_gost_reply,
     f.gost_token_logtext,
     f.gost_token_replyto,
-    f.jid_sources_mismatch
+    f.jid_sources_mismatch,
+    f.journal_msgid
 FROM fact_egisz_transactions f
 LEFT JOIN dim_semd_types dt ON dt.kind_code = f.kind_code
 LEFT JOIN dim_clinics dc ON dc.jid = f.jid;
@@ -402,9 +409,33 @@ WHERE o.document_id IS NOT NULL
     FROM fact_egisz_transactions f
     WHERE f.local_uid_semd IS NOT NULL
       AND TRIM(f.local_uid_semd) = TRIM(o.document_id)
+  )
+UNION ALL
+SELECT
+    TRIM(j.documentid) AS local_uid_semd,
+    NULL::varchar(16) AS kind_code,
+    NULL::varchar AS kind_name,
+    NULL::bigint AS jid,
+    'Клиника JID: неизвестен'::varchar(512) AS clinic_name,
+    LEFT(TRIM(j.replyto), 512) AS gost_host,
+    j.msg_created_at AS sent_at
+FROM stg_egisz_messages_journal j
+WHERE j.documentid IS NOT NULL
+  AND TRIM(j.documentid) <> ''
+  AND NOT EXISTS (
+    SELECT 1
+    FROM fact_egisz_transactions f
+    WHERE f.local_uid_semd IS NOT NULL
+      AND TRIM(f.local_uid_semd) = TRIM(j.documentid)
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM stg_egisz_outbound_documents o
+    WHERE o.document_id IS NOT NULL
+      AND TRIM(o.document_id) = TRIM(j.documentid)
   );
 
-COMMENT ON VIEW v_rpt_documents_no_response IS 'Outbound EGISZ_MESSAGES (DOCUMENTID): no fact row with same local_uid_semd. Columns align with v_egisz_transactions_enriched (local_uid_semd, kind_code, kind_name, jid, clinic_name); gost_host = gost-*.infoclinica.lan or reply_to excerpt; sent_at = message row created at source (CREATEDATE).';
+COMMENT ON VIEW v_rpt_documents_no_response IS 'Документы без колбэка в fact: строки из stg_egisz_outbound_documents (снимок Firebird) минус факты; UNION ALL — строки только из stg_egisz_messages_journal (ещё не попали в outbound-снимок). gost_host / клиника для журнала — упрощённо по replyto.';
 
 -- Сопоставление имён колонок витрины (snake_case) с подписями в отчётах. Синхронизировано с представлениями *_ui.
 CREATE TABLE IF NOT EXISTS dim_column_display_labels (
@@ -452,6 +483,7 @@ INSERT INTO dim_column_display_labels (source_object, source_column, display_lab
     ('v_egisz_transactions_enriched', 'gost_token_logtext', 'Сегмент токена gost (LOGTEXT)'),
     ('v_egisz_transactions_enriched', 'gost_token_replyto', 'Сегмент токена gost (REPLYTO)'),
     ('v_egisz_transactions_enriched', 'jid_sources_mismatch', 'Расхождение источников JID'),
+    ('v_egisz_transactions_enriched', 'journal_msgid', 'MSGID обмена (EXCHANGELOG)'),
     ('v_rpt_documents_no_response', 'local_uid_semd', 'localUid СЭМД'),
     ('v_rpt_documents_no_response', 'kind_code', 'Код СЭМД'),
     ('v_rpt_documents_no_response', 'kind_name', 'Наименование СЭМД'),
@@ -489,12 +521,13 @@ SELECT
     gost_token_logtext AS "Токен gost (LOGTEXT)",
     gost_token_replyto AS "Токен gost (REPLYTO)",
     jid_sources_mismatch AS "Расхождение источников JID",
+    journal_msgid AS "MSGID обмена (EXCHANGELOG)",
     relates_to_id AS "Связанное сообщение"
 FROM v_egisz_transactions_enriched;
 
 COMMENT ON VIEW v_egisz_transactions_enriched_ui IS 'Обёртка над v_egisz_transactions_enriched с подписями колонок для отчётов; см. dim_column_display_labels. JID клиники, Код СЭМД, LOGID/EGMID — TEXT (идентификаторы: без разделителей тысяч и суммирования в Metabase). «Сводка ошибок» — errors_friendly: агрегация подсказок по errors_json, исходные «Ошибки JSON» не меняются. Колонка «Связанное сообщение» (relates_to_id) — последняя для удобства витрин и Metabase.';
 
--- Архив обработанных СЭМД (колбэки): максимальный набор полей; порядок колонок под отчёт «Архив СЭМД» в Metabase.
+-- Архив СЭМД: колбэки (fact) + исходящие без ответа из staging (ожидание колбэка по EXCHANGELOG).
 CREATE OR REPLACE VIEW v_rpt_semd_archive_ui AS
 SELECT
     e.processed_at AS "Дата обработки",
@@ -513,7 +546,7 @@ SELECT
     e.kind_name AS "Наименование СЭМД",
     e.local_uid_semd AS "localUid СЭМД",
     e.emdr_id AS "Рег. номер РЭМД",
-    e.status AS "Статус",
+    e.status::text AS "Статус",
     e.errors_friendly AS "Сводка ошибок",
     e.errors_json AS "Ошибки JSON",
     e.registration_date AS "Зарегистрирован в ЕГИСЗ РЭМД",
@@ -533,10 +566,114 @@ SELECT
     e.gost_token_logtext AS "Токен gost (LOGTEXT)",
     e.gost_token_replyto AS "Токен gost (REPLYTO)",
     e.jid_sources_mismatch AS "Расхождение источников JID",
+    e.journal_msgid::text AS "MSGID обмена (EXCHANGELOG)",
     e.relates_to_id AS "Связанное сообщение"
-FROM v_egisz_transactions_enriched e;
+FROM v_egisz_transactions_enriched e
+UNION ALL
+SELECT
+    o.sent_at AS "Дата обработки",
+    o.jid::text AS "JID",
+    NULLIF(
+        TRIM(
+            CONCAT_WS(
+                ' — ',
+                NULLIF(TRIM(o.kind_code::text), ''),
+                NULLIF(TRIM(dt.kind_name), '')
+            )
+        ),
+        ''
+    ) AS "Тип и наименование СЭМД",
+    o.kind_code::text AS "Код СЭМД",
+    COALESCE(dt.kind_name, o.kind_code::varchar) AS "Наименование СЭМД",
+    o.document_id AS "localUid СЭМД",
+    NULL::varchar(256) AS "Рег. номер РЭМД",
+    'ожидание ответа'::text AS "Статус",
+    NULL::text AS "Сводка ошибок",
+    '[]'::jsonb AS "Ошибки JSON",
+    NULL::timestamptz AS "Зарегистрирован в ЕГИСЗ РЭМД",
+    NULL::timestamptz AS "Создание СЭМД",
+    DATE(o.sent_at) AS "День (тренд)",
+    COALESCE(NULLIF(TRIM(dc.jname), ''), 'Клиника JID: ' || COALESCE(o.jid::varchar, 'неизвестен')) AS "Наименование клиники",
+    dc.jinn AS "ИНН клиники",
+    dc.fir_oid AS "OID клиники",
+    NULL::text AS "LOGID журнала EXCHANGELOG",
+    o.egmid::text AS "EGISZ_MESSAGES.EGMID (ключ записи, РЭМД)",
+    COALESCE(
+        CASE
+            WHEN o.gost_jid_token IS NOT NULL AND TRIM(o.gost_jid_token) <> ''
+                THEN 'gost-' || o.gost_jid_token || '.infoclinica.lan'
+        END,
+        LEFT(o.reply_to, 512)
+    ) AS "Хост клиники (VPN ГОСТ)",
+    NULL::varchar(256) AS "OID организации",
+    o.gost_jid_token AS "Токен gost (нецифр., для отображения)",
+    NULL::text AS "JID (EGISZ_LICENSES)",
+    NULL::text AS "JID из gost в LOGTEXT",
+    NULL::text AS "JID из gost в REPLYTO",
+    NULL::text AS "Токен gost (LOGTEXT)",
+    NULL::text AS "Токен gost (REPLYTO)",
+    false AS "Расхождение источников JID",
+    NULL::text AS "MSGID обмена (EXCHANGELOG)",
+    NULL::varchar(256) AS "Связанное сообщение"
+FROM stg_egisz_outbound_documents o
+LEFT JOIN dim_semd_types dt ON dt.kind_code = o.kind_code
+LEFT JOIN dim_clinics dc ON dc.jid = o.jid
+WHERE o.document_id IS NOT NULL
+  AND TRIM(o.document_id) <> ''
+  AND NOT EXISTS (
+    SELECT 1
+    FROM fact_egisz_transactions f
+    WHERE f.local_uid_semd IS NOT NULL
+      AND TRIM(f.local_uid_semd) = TRIM(o.document_id)
+  )
+UNION ALL
+SELECT
+    j.msg_created_at AS "Дата обработки",
+    NULL::text AS "JID",
+    NULL::text AS "Тип и наименование СЭМД",
+    NULL::text AS "Код СЭМД",
+    NULL::varchar AS "Наименование СЭМД",
+    TRIM(j.documentid) AS "localUid СЭМД",
+    NULL::varchar(256) AS "Рег. номер РЭМД",
+    'ожидание ответа'::text AS "Статус",
+    NULL::text AS "Сводка ошибок",
+    '[]'::jsonb AS "Ошибки JSON",
+    NULL::timestamptz AS "Зарегистрирован в ЕГИСЗ РЭМД",
+    NULL::timestamptz AS "Создание СЭМД",
+    DATE(j.msg_created_at) AS "День (тренд)",
+    'Клиника JID: неизвестен'::varchar(512) AS "Наименование клиники",
+    NULL::varchar(12) AS "ИНН клиники",
+    NULL::varchar(255) AS "OID клиники",
+    NULL::text AS "LOGID журнала EXCHANGELOG",
+    j.egmid::text AS "EGISZ_MESSAGES.EGMID (ключ записи, РЭМД)",
+    LEFT(TRIM(j.replyto), 512) AS "Хост клиники (VPN ГОСТ)",
+    NULL::varchar(256) AS "OID организации",
+    NULL::text AS "Токен gost (нецифр., для отображения)",
+    NULL::text AS "JID (EGISZ_LICENSES)",
+    NULL::text AS "JID из gost в LOGTEXT",
+    NULL::text AS "JID из gost в REPLYTO",
+    NULL::text AS "Токен gost (LOGTEXT)",
+    NULL::text AS "Токен gost (REPLYTO)",
+    false AS "Расхождение источников JID",
+    j.msgid::text AS "MSGID обмена (EXCHANGELOG)",
+    NULL::varchar(256) AS "Связанное сообщение"
+FROM stg_egisz_messages_journal j
+WHERE j.documentid IS NOT NULL
+  AND TRIM(j.documentid) <> ''
+  AND NOT EXISTS (
+    SELECT 1
+    FROM fact_egisz_transactions f
+    WHERE f.local_uid_semd IS NOT NULL
+      AND TRIM(f.local_uid_semd) = TRIM(j.documentid)
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM stg_egisz_outbound_documents o
+    WHERE o.document_id IS NOT NULL
+      AND TRIM(o.document_id) = TRIM(j.documentid)
+  );
 
-COMMENT ON VIEW v_rpt_semd_archive_ui IS 'Полный список обработанных документов (факт колбэка); сортировка в отчётах — по «Дата обработки» DESC.';
+COMMENT ON VIEW v_rpt_semd_archive_ui IS 'Все СЭМД по localUid: обработанные колбэки (fact) UNION ALL исходящие без факта из outbound-снимка UNION ALL строки только из журнала сообщений (ещё не в outbound). Статус «ожидание ответа» — нет строки в fact_egisz_transactions.';
 
 CREATE OR REPLACE VIEW v_rpt_documents_no_response_ui AS
 SELECT
