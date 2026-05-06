@@ -50,10 +50,11 @@ spec:
           type: RuntimeDefault
       containers:
         - name: metabase
-          # Сборка: docker build -f metabase/Dockerfile -t egisz-monitor-metabase:latest . && docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:local
-          # IfNotPresent: Docker Desktop подставляет образ из локального Docker Engine (см. docs.docker.com/desktop/kubernetes).
-          # Тег :k8s-v23 (не :local): bump при изменении Dockerfile/скриптов/дашбордов — иначе kubelet Docker Desktop держит старый digest для имени тега.
-          image: egisz-monitor-metabase:k8s-v23
+          # Сборка из корня репозитория (пересборка после правок JSON/скриптов):
+          #   docker rmi egisz-monitor-metabase:latest 2>nul
+          #   docker build -f metabase/Dockerfile -t egisz-monitor-metabase:latest .
+          # start.ps1 (deploy / restart-metabase) дополнительно ставит уникальный тег latest-<utc> на kind/docker-desktop, чтобы под точно взял свежий слой.
+          image: egisz-monitor-metabase:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000

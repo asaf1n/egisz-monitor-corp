@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from egisz_monitor_corp.parser import EgiszMonitorParser, coerce_exchangelog_log_state, extract_parse_hints
+from egisz_monitor_corp.parser import (
+    EgiszMonitorParser,
+    canonical_semd_document_uid,
+    coerce_exchangelog_log_state,
+    extract_parse_hints,
+)
 
 
 NS = "http://egisz.rosminzdrav.ru/iehr/emdr/callback/"
@@ -156,6 +161,26 @@ def test_build_record_jid_mismatch_license_vs_gost_log() -> None:
     assert rec.jid_from_license == 99
     assert rec.jid_from_gost_log == 10
     assert rec.jid_sources_mismatch is True
+
+
+def test_canonical_semd_document_uid_lowercases_rfc4122() -> None:
+    u = "45725E0E-EB6F-467F-BA36-3321E7DB520D"
+    assert canonical_semd_document_uid(u) == "45725e0e-eb6f-467f-ba36-3321e7db520d"
+    assert canonical_semd_document_uid("  " + u + "  ") == "45725e0e-eb6f-467f-ba36-3321e7db520d"
+    assert canonical_semd_document_uid("DOC-99") == "DOC-99"
+    assert canonical_semd_document_uid(None) is None
+
+
+def test_build_record_lowercases_uuid_local_uid_from_document_id() -> None:
+    p = EgiszMonitorParser()
+    uid_mixed = "45725E0E-EB6F-467F-BA36-3321E7DB520D"
+    uid_lower = "45725e0e-eb6f-467f-ba36-3321e7db520d"
+    xml = _soap("MSG-UUID-LOCAL", "success", kind="<ns2:kind>62</ns2:kind>")
+    log = "http://gost-1.infoclinica.lan/"
+    rec = p.build_record(log, msg_text=xml, document_id=uid_mixed, kind_from_egisz_licenses="62")
+    assert rec is not None
+    assert rec.relates_to_id == "MSG-UUID-LOCAL"
+    assert rec.local_uid_semd == uid_lower
 
 
 def test_local_uid_from_xml_overrides_document_id() -> None:

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from egisz_monitor_corp.config_loader import PostgresConfig
+from egisz_monitor_corp.parser import canonical_semd_document_uid
 
 try:
     import psycopg2
@@ -199,7 +200,7 @@ def apply_sql_files(con, *names: str) -> None:  # type: ignore[no-untyped-def]
                 # DDL может конфликтовать с параллельными SELECT (Metabase/Config UI).
                 # 5 секунд часто недостаточно при активных дашбордах (Metabase держит соединения/транзакции).
                 # DDL применяется редко и идемпотентно, поэтому допускаем больше ожидания.
-                cur.execute("SET LOCAL lock_timeout = '60s'")
+                cur.execute("SET LOCAL lock_timeout = '300s'")
                 cur.execute(sql_text)
             con.commit()
 
@@ -526,12 +527,16 @@ def insert_journal_messages_staging_rows(con, rows: list[dict[str, Any]]) -> Non
         mid = str(msgid_raw).strip()
         if not mid:
             continue
+        doc_raw = r.get("documentid")
+        doc_cell = canonical_semd_document_uid(
+            str(doc_raw).strip() if doc_raw is not None else None
+        )
         tuples.append(
             (
                 mid[:512],
                 r.get("egmid"),
                 r.get("replyto"),
-                r.get("documentid"),
+                doc_cell,
                 r.get("msg_created_at"),
             )
         )
@@ -730,7 +735,7 @@ def refresh_outbound_documents_staging(con, rows: list[dict[str, Any]]) -> None:
         with con.cursor() as cur:
             # Удаление/перезапись staging допускает ожидание: оно совместимо с SELECT,
             # но может конфликтовать с редкими DDL/maintenance операциями.
-            cur.execute("SET LOCAL lock_timeout = '60s'")
+            cur.execute("SET LOCAL lock_timeout = '300s'")
             cur.execute("DELETE FROM stg_egisz_outbound_documents")
 
         if rows:
@@ -749,7 +754,7 @@ def refresh_outbound_documents_staging(con, rows: list[dict[str, Any]]) -> None:
                 )
             template = "(%s, %s, %s, %s, %s, %s, %s, NOW())"
             with con.cursor() as cur2:
-                cur2.execute("SET LOCAL lock_timeout = '60s'")
+                cur2.execute("SET LOCAL lock_timeout = '300s'")
                 execute_values(
                     cur2,
                     """

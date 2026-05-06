@@ -1,5 +1,5 @@
 #!/bin/bash
-# ~10 запросов к Metabase API: здоровье, сессия, коллекция, два ключевых дашборда (фильтры + auto_apply),
+# ~10 запросов к Metabase API: здоровье, сессия, коллекция, два ключевых дашборда (фильтры; auto_apply по умолчанию вкл. в setup-dashboards.sh),
 # главная страница UI, БД DWH. Запуск из пода Metabase (MB_URL=http://localhost:3000) или с хоста после port-forward.
 set -euo pipefail
 
@@ -94,7 +94,7 @@ OP_ID="$(echo "${DASHBOARDS}" | jq -r '.[] | select(.name=="01 Оператив�
 
 step 5 "GET /api/dashboard/:id — Управление (parameters, auto_apply, mappings)"
 DEX="$(get_json "${MB_URL}/api/dashboard/${EXEC_ID}")" || die "05: failed to fetch dashboard JSON"
-echo "${DEX}" | jq -e '.auto_apply_filters == true' >/dev/null || die "05: auto_apply_filters is not true"
+echo "${DEX}" | jq -e '.auto_apply_filters == true' >/dev/null || die "05: expected auto_apply_filters true (см. METABASE_AUTO_APPLY_FILTERS в setup-dashboards.sh)"
 NP="$(echo "${DEX}" | jq '.parameters | length')"
 [[ "${NP}" -ge 1 ]] || die "05: expected dashboard parameters, got ${NP}"
 DC09="$(echo "${DEX}" | jq '.dashcards // .ordered_cards // []')"
@@ -103,7 +103,7 @@ MAPS="$(echo "${DC09}" | jq '[.[] | select(.card != null or .card_id != null) | 
 
 step 6 "GET /api/dashboard/:id — Оперативный и динамика (filters wired)"
 DOP="$(get_json "${MB_URL}/api/dashboard/${OP_ID}")" || die "01: failed to fetch dashboard JSON"
-echo "${DOP}" | jq -e '.auto_apply_filters == true' >/dev/null || die "01: auto_apply_filters is not true"
+echo "${DOP}" | jq -e '.auto_apply_filters == true' >/dev/null || die "01: expected auto_apply_filters true"
 echo "${DOP}" | jq -e '(.parameters // []) | map(.slug) | index("top_semd_filter") != null and index("top_clinic_filter") != null' >/dev/null \
   || die "01: expected dashboard parameter slugs top_semd_filter and top_clinic_filter (URL/bookmarks)"
 DC01="$(echo "${DOP}" | jq '.dashcards // .ordered_cards // []')"
@@ -137,8 +137,8 @@ if jq -e '.status == "failed"' /tmp/smoke_card_query.json >/dev/null 2>&1; then
 fi
 
 ARCH_JSON="$(curl -sS "${MB_URL}/api/dashboard/${ARCHIVE_ID}" "${HDR[@]}")"
-echo "${ARCH_JSON}" | jq -e '.auto_apply_filters == true' >/dev/null || die "06: auto_apply_filters is not true"
+echo "${ARCH_JSON}" | jq -e '.auto_apply_filters == true' >/dev/null || die "06: expected auto_apply_filters true"
 NPA="$(echo "${ARCH_JSON}" | jq '.parameters | length')"
 [[ "${NPA}" -ge 3 ]] || die "06: expected >=3 dashboard parameters (date + СЭМД + JID), got ${NPA}"
 
-echo "[smoke-ui] OK — 10 шагов, фильтры привязаны (parameter_mappings>0), auto_apply включён, карточка выполнила запрос."
+echo "[smoke-ui] OK — 10 шагов, фильтры привязаны (parameter_mappings>0), auto_apply включён по умолчанию, карточка выполнила запрос."

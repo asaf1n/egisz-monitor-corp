@@ -1,0 +1,410 @@
+Актуальный идентификатор и наименование вида ЭМД — по паспорту НСИ 1.2.643.5.1.13.13.11.1520: https://nsi.rosminzdrav.ru/dictionaries/1.2.643.5.1.13.13.11.1520/passport/12.33
+
+Перечень видов ЭМД, регистрируемых в РЭМД - Документация «ТрастМед:МИС SaaS» - Confluence
+
+- [Page History](https://confluence.softrust.ru/pages/viewpreviousversions.action?pageId=53282870)
+- [Attachments (0)](https://confluence.softrust.ru/pages/viewpageattachments.action?pageId=53282870)
+
+- [Export to Word](https://confluence.softrust.ru/exportword?pageId=53282870)
+- [Export to PDF](https://confluence.softrust.ru/spaces/flyingpdf/pdfpageexport.action?pageId=53282870&atl_token=ef5a50d7a902dddcf2a47eca4fa67172b7a831ba)
+- [View Source](https://confluence.softrust.ru/plugins/viewsource/viewpagesrc.action?pageId=53282870)
+- [View in Hierarchy](https://confluence.softrust.ru/pages/reorderpages.action?key=docEMIAS&openId=53282870#selectedPageInHierarchy)
+- Resolved comments
+- [Page Information](https://confluence.softrust.ru/pages/viewinfo.action?pageId=53282870)
+
+# Перечень видов ЭМД, регистрируемых в РЭМД
+
+Created by
+
+- , last updated by [Ивасив Сергей Вячеславович](https://confluence.softrust.ru/display/~sivasiv) on [Jul 21, 2024](https://confluence.softrust.ru/pages/diffpagesbyversion.action?pageId=53282870&selectedPageVersions=93&selectedPageVersions=94) 20 minute read
+
+Справочник федеральных видов ЭМД, регистрируемых в РЭМД - [https://nsi.rosminzdrav.ru/#!/refbook/1.2.643.5.1.13.13.11.1520](https://nsi.rosminzdrav.ru/#!/refbook/1.2.643.5.1.13.13.11.1520)
+
+Справочник руководств по реализации СЭМД - [https://nsi.rosminzdrav.ru/#!/refbook/1.2.643.5.1.13.13.99.2.638](https://nsi.rosminzdrav.ru/#!/refbook/1.2.643.5.1.13.13.99.2.638)
+
+Направление на госпитализацию, восстановительное лечение, консультацию
+
+Направление на обследование (лабораторное, инструментальное)
+
+–
+
+–
+
+Запланирован
+
+Дата начала регистрации в РЭМД 31.12.2025
+
+[https://portal.egisz.rosminzdrav.ru/materials/4329](https://portal.egisz.rosminzdrav.ru/materials/4329)
+
+Случай лечения в блоке закрытия ТАП
+
+МКСБ/ История родов
+
+Запланирован
+
+Запланирован
+
+Направление на госпитализацию, восстановительное лечение, консультацию
+
+Направление на обследование (лабораторное, инструментальное)
+
+Не реализован, дата начала регистрации в РЭМД 27.10.2023
+
+| № п/п | Код ЭМД | Тип СЭМД (тег docType в теле SOAP пакета) | Наименование вида ЭМД | Формат ЭМД | Источник отправки данного вида ЭМД | Документ в МИС, на основании которого формируется данный ЭМД | Статус реализации в МИС | Срок реализации | Ссылка на руководство по реализации СЭМД |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 4 | Медицинская справка о допуске к управлению транспортными средствами (CDA) Редакция 1 | CDA | МИС | Карта мероприятий на получение водительской справки | Реализован | – | [http://portal.egisz.rosminzdrav.ru/materials/2927](http://portal.egisz.rosminzdrav.ru/materials/2927) |
+| 2 | 5 | Протокол инструментального исследования (PDF/A-1) | PDF | МИС | Направление на исследование+протокол исследования | Реализован | – | – |
+| 3 | 6 | Протокол консультации (PDF/A-1) | PDF | МИС | Медицинская запись | Реализован | – | – |
+| 4 | 7 | Протокол лабораторного исследования (PDF/A-1) | PDF | МИС | Направление на исследование | Реализован | – | – |
+| 5 | 8 | Протокол телемедицинской консультации (PDF/A-1) | PDF | МИС | ТАП+медицинская запись | Устаревшая редакция ЭМД (нецелесообразно, реализован ЭМД в формате CDA) | – | – |
+| 6 | 13 | 13 | Медицинское свидетельство о смерти (CDA) Редакция 2 | CDA | МИС | Медицинское свидетельство о смерти | Устаревшая редакция ЭМД | – | [http://portal.egisz.rosminzdrav.ru/materials/2931](http://portal.egisz.rosminzdrav.ru/materials/2931) |
+| 7 | 15 | Протокол инструментального исследования (CDA) Редакция 1 | CDA | МИС | Направление на исследование+протокол исследования | Устаревшая редакция ЭМД | – | [http://portal.egisz.rosminzdrav.ru/materials/3291](http://portal.egisz.rosminzdrav.ru/materials/3291) |
+| 8 | 16 | Протокол консультации (CDA) Редакция 2 | CDA | МИС | Медицинская запись | Устаревшая редакция ЭМД | – | [http://portal.egisz.rosminzdrav.ru/materials/2937](http://portal.egisz.rosminzdrav.ru/materials/2937) |
+| 9 | 17 | Протокол лабораторного исследования (CDA) Редакция 2 | CDA | ЛИС | Направление на лабораторное исследование+результаты лабораторного исследования | Устаревшая редакция ЭМД | – | [http://portal.egisz.rosminzdrav.ru/materials/2939](http://portal.egisz.rosminzdrav.ru/materials/2939) |
+| 10 | 33 | Медицинское свидетельство о рождении (CDA) Редакция 3 | CDA | МИС | Медицинское свидетельство о рождении | Устаревшая редакция ЭМД | – | [http://portal.egisz.rosminzdrav.ru/materials/2929](http://portal.egisz.rosminzdrav.ru/materials/2929) |
+| 11 | 34 | Направление на медико-социальную экспертизу медицинской организацией (CDA) Редакция 4 | CDA | МИС | Направление на МСЭ | Устаревшая редакция ЭМД | – | [http://portal.egisz.rosminzdrav.ru/materials/2947](http://portal.egisz.rosminzdrav.ru/materials/2947) |
+| 12 | 35 | Сведения о результатах проведенной медико-социальной экспертизы (CDA) Редакция 2 | CDA | Бюро МСЭ | – | Реализован | – | [http://portal.egisz.rosminzdrav.ru/materials/3477](http://portal.egisz.rosminzdrav.ru/materials/3477) |
+| 13 | 37 | Льготный рецепт на лекарственный препарат и специальное питание (CDA) Редакция 1 | CDA | МИС | Назначение и рецепт | Устаревшая редакция ЭМД | – | [https://portal.egisz.rosminzdrav.ru/materials/3741](https://portal.egisz.rosminzdrav.ru/materials/3741) |
+| 14 | 38 | Отпуск по рецепту на лекарственный препарат и специальное питание (CDA) Редакция 1 | CDA | МИС | Сведения об отпуске рецепта | Устаревшая редакция ЭМД | – | [https://portal.egisz.rosminzdrav.ru/materials/3739](https://portal.egisz.rosminzdrav.ru/materials/3739) |
+| 15 | 40 | Протокол телемедицинской консультации (CDA) Редакция 1 | CDA | МИС | ТАП+Медзапись | Реализован | – | [http://portal.egisz.rosminzdrav.ru/materials/3479](http://portal.egisz.rosminzdrav.ru/materials/3479) |
+| 16 | 41 | Эпикриз в стационаре выписной (CDA) Редакция 3 | CDA | МИС | МКСБ | Реализован | – | [http://portal.egisz.rosminzdrav.ru/materials/2943](http://portal.egisz.rosminzdrav.ru/materials/2943) |
+| 17 | 42 | Эпикриз по законченному случаю амбулаторный (CDA) Редакция 3 | CDA | МИС | ТАП | Реализован | – | [http://portal.egisz.rosminzdrav.ru/materials/2945](http://portal.egisz.rosminzdrav.ru/materials/2945) |
+| 18 | 43 | 1 | Направление на госпитализацию, восстановительное лечение, обследование, консультацию (CDA) Редакция 2 | CDA | МИС | Реализован | – | [http://portal.egisz.rosminzdrav.ru/materials/2933](http://portal.egisz.rosminzdrav.ru/materials/2933) |
+| 19 | 44 | Выписной эпикриз из родильного дома (CDA) Редакция 2 | CDA | МИС | МКСБ (История родов) | Устаревшая редакция ЭМД | – | [http://portal.egisz.rosminzdrav.ru/materials/2925](http://portal.egisz.rosminzdrav.ru/materials/2925) |
+| 20 | 45 | Протокол гемотрансфузии (CDA) Редакция 2 | CDA | МИС | ??? | Устаревшая редакция ЭМД | – | [http://portal.egisz.rosminzdrav.ru/materials/2935](http://portal.egisz.rosminzdrav.ru/materials/2935) |
+| 21 | 46 | Протокол прижизненного патологоанатомического исследования (CDA) Редакция 1 | CDA | МИС | Протокол прижизненного патологоанатомического исследования | Устаревшая редакция ЭМД | – | [http://portal.egisz.rosminzdrav.ru/materials/2941](http://portal.egisz.rosminzdrav.ru/materials/2941) |
+| 22 | 47 | 19 | Медицинское свидетельство о перинатальной смерти (CDA) Редакция 1 | CDA | МИС | Медицинское свидетельство о перинатальной смерти | Устаревшая редакция ЭМД | – | [http://portal.egisz.rosminzdrav.ru/materials/3605](http://portal.egisz.rosminzdrav.ru/materials/3605) |
+| 23 | 50 | Медицинская справка (врачебное профессионально-консультативное заключение) (CDA) Редакция 1 | CDA | МИС | Карта профилактического осмотра по форме 086/у | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3757](https://portal.egisz.rosminzdrav.ru/materials/3757) |
+| 24 | 51 | Карта профилактического медицинского осмотра несовершеннолетнего (PDF/A-1) | PDF | МИС | Карта профилактического осмотра несовершеннолетнего | Реализован | – | – |
+| 25 | 52 | Медицинская карта пациента, получающего медицинскую помощь в амбулаторных условиях (PDF/A-1) | PDF | МИС | МКАБ | Реализован | – | – |
+| 26 | 53 | Контрольная карта диспансерного наблюдения (PDF/A-1) | PDF | МИС | Карта ДН | Реализован | – | – |
+| 27 | 54 | Контрольная карта диспансеризации (профилактических медицинских осмотров) (PDF/A-1) | PDF | МИС | Карта диспансеризации | Реализован | – | – |
+| 28 | 55 | Медицинское заключение об отсутствии медицинских противопоказаний к владению оружием (PDF/A-1) | PDF | МИС | Карта осмотра на получение справки к владению оружием | Реализован | – | – |
+| 29 | 56 | Медицинское заключение об отсутствии в организме человека наркотических средств, психотропных веществ и их метаболитов (PDF/A-1) | PDF | МИС | Карта осмотра на получение справки к владению оружием | Реализован | – | – |
+| 30 | 57 | 13 | Медицинское свидетельство о смерти (CDA) Редакция 4 | CDA | МИС | Медицинское свидетельство о смерти | Устаревшая редакция ЭМД | – | [https://](https://portal.egisz.rosminzdrav.ru/materials/3817) [portal.egisz.rosminzdrav.ru/materials/3753](http://portal.egisz.rosminzdrav.ru/materials/3753) |
+| 31 | 58 | 13 | Медицинское свидетельство о смерти (CDA) Редакция 5 | CDA | МИС | Медицинское свидетельство о смерти | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3815](https://portal.egisz.rosminzdrav.ru/materials/3815) |
+| 32 | 59 | Медицинское свидетельство о перинатальной смерти (CDA) Редакция 2 | CDA | МИС | Медицинское свидетельство о перинатальной смерти | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3817](https://portal.egisz.rosminzdrav.ru/materials/3817) |
+| 33 | 60 | Отпуск по рецепту на лекарственный препарат, изделие медицинского назначения и специализированный продукт лечебного питания (CDA) Редакция 2 | CDA | Аптека | Сведения об отпуске рецепта | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3819](https://portal.egisz.rosminzdrav.ru/materials/3819) |
+| 34 | 61 | Льготный рецепт на лекарственный препарат, изделие медицинского назначения и специализированный продукт лечебного питания (CDA) Редакция 2 | CDA | МИС | Назначение и рецепт | Реализован | [https://portal.egisz.rosminzdrav.ru/materials/3821](https://portal.egisz.rosminzdrav.ru/materials/3821) |
+| 35 | 62 | Рецепт на лекарственный препарат (CDA) Редакция 1 | CDA | МИС | Назначение и рецепт | Реализован | [https://portal.egisz.rosminzdrav.ru/materials/3823](https://portal.egisz.rosminzdrav.ru/materials/3823) |
+| 36 | 63 | Медицинское заключение об отсутствии медицинских противопоказаний к владению оружием (CDA) Редакция 1 | CDA | МИС | Карта осмотра на получение справки к владению оружием | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3827](https://portal.egisz.rosminzdrav.ru/materials/3827) |
+| 37 | 64 | Медицинское заключение об отсутствии в организме человека наркотических средств, психотропных веществ и их метаболитов (CDA) Редакция 1 | CDA | МИС | Карта осмотра на получение справки к владению оружием | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3829](https://portal.egisz.rosminzdrav.ru/materials/3829) |
+| 38 | 65 | Справка для получения путевки на санаторно-курортное лечение (CDA) Редакция 1 | CDA | МИС | Направление на санаторно-курортное лечение | Устаревшая редакция ЭМД | – | [https://portal.egisz.rosminzdrav.ru/materials/3831](https://portal.egisz.rosminzdrav.ru/materials/3831) |
+| 39 | 66 | Протокол хирургической операции (PDF/A-1) | PDF | МИС | Сведения об операции в МКСБ+медицинская запись | Реализован | – | – |
+| 40 | 67 | Протокол медицинской манипуляции (PDF/A-1) | PDF | МИС | ??? | Не реализован | – | – |
+| 41 | 68 | 20 | Протокол консультации (CDA) Редакция 3 | CDA | МИС | Медицинская запись | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3845](https://portal.egisz.rosminzdrav.ru/materials/3845) |
+| 42 | 69 | Протокол гемотрансфузии (CDA) Редакция 3 | CDA | МИС | ??? | Не реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3847](https://portal.egisz.rosminzdrav.ru/materials/3847) |
+| 43 | 70 | Справка о результатах химико-токсикологических исследований (CDA) Редакция 1 | CDA | МИС | Результат исследования | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3837](https://portal.egisz.rosminzdrav.ru/materials/3837) |
+| 44 | 71 | Медицинское заключение об отсутствии противопоказаний к занятию определенными видами спорта или посещению бассейна (CDA) Редакция 1 | CDA | МИС | Справка в случае лечения | Устаревшая редакция ЭМД | – | [https://portal.egisz.rosminzdrav.ru/materials/3839](https://portal.egisz.rosminzdrav.ru/materials/3839) |
+| 45 | 72 | Справка об отсутствии контактов с инфекционными больными (CDA) Редакция 1 | CDA | МИС | Справка в случае лечения | Устаревшая редакция ЭМД | – | [https://portal.egisz.rosminzdrav.ru/materials/3841](https://portal.egisz.rosminzdrav.ru/materials/3841) |
+| 46 | 73 | Справка о состоянии на учете в диспансере (CDA) Редакция 1 | CDA | МИС | Справка в случае лечения | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3843](https://portal.egisz.rosminzdrav.ru/materials/3843) |
+| 47 | 74 | Протокол прижизненного патологоанатомического исследования (CDA) Редакция 2 | CDA | МИС | Протокол прижизненного патологоанатомического исследования | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3833](https://portal.egisz.rosminzdrav.ru/materials/3833) |
+| 48 | 75 | 3 | Протокол лабораторного исследования (CDA) Редакция 4 | CDA | ЛИС | Направление на лабораторное исследование+результаты лабораторного исследования | Должен формироваться внешней ИС | – | [https://portal.egisz.rosminzdrav.ru/materials/3835](https://portal.egisz.rosminzdrav.ru/materials/3835) |
+| 49 | 76 | Медицинское свидетельство о рождении (CDA) Редакция 4 | CDA | МИС | Медицинское свидетельство о рождении | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3849](https://portal.egisz.rosminzdrav.ru/materials/3849) |
+| 50 | 77 | 8 | Эпикриз в стационаре выписной (CDA) Редакция 4 | CDA | МИС | МКСБ | Запланирован | 31.12.2022 | [https://portal.egisz.rosminzdrav.ru/materials/3903](https://portal.egisz.rosminzdrav.ru/materials/3903) |
+| 51 | 78 | Талон № 2 на получение специальных талонов (именных направлений) на проезд к месту лечения для получения медицинской помощи (CDA) Редакция 1 | CDA | МИС | Направления на плановую госпитализацию | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3905](https://portal.egisz.rosminzdrav.ru/materials/3905) |
+| 52 | 79 | Справка о прохождении медицинского освидетельствования в психоневрологическом диспансере (CDA) Редакция 1 | CDA | МИС | Справка в случае лечения | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3907](https://portal.egisz.rosminzdrav.ru/materials/3907) |
+| 53 | 80 | Справка об отсутствии контактов с инфекционными больными (CDA) Редакция 2 | CDA | МИС | Справка в случае лечения | Устаревшая редакций | - | [https://portal.egisz.rosminzdrav.ru/materials/3909](https://portal.egisz.rosminzdrav.ru/materials/3909) |
+| 54 | 81 | Справка о временной нетрудоспособности студента, учащегося техникума, профессионально-технического училища, о болезни, карантине и прочих причинах отсутствия ребенка, посещающего школу, детское дошкольное учреждение (CDA) Редакция 2 | CDA | МИС | Справка в случае лечения | Устаревшая редакция ЭМД | – | [https://portal.egisz.rosminzdrav.ru/materials/3909](https://portal.egisz.rosminzdrav.ru/materials/3909) |
+| 55 | 82 | Медицинское заключение о принадлежности несовершеннолетнего к медицинской группе для занятий физической культурой (CDA) Редакция 2 | CDA | МИС | Справка в случае лечения | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3911](https://portal.egisz.rosminzdrav.ru/materials/3911) |
+| 56 | 83 | Медицинское заключение об отсутствии противопоказаний к занятию определенными видами спорта (CDA) Редакция 2 | CDA | МИС | Справка в случае лечения | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3911](https://portal.egisz.rosminzdrav.ru/materials/3911) |
+| 57 | 84 | Медицинская справка в бассейн (CDA) Редакция 2 | CDA | МИС | Справка в случае лечения | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3911](https://portal.egisz.rosminzdrav.ru/materials/3911) |
+| 58 | 85 | Направление на консультацию и во вспомогательные кабинеты (CDA) Редакция 1 | CDA | МИС | Направление на консультацию | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3913](https://portal.egisz.rosminzdrav.ru/materials/3913) |
+| 59 | 86 | Направление к месту лечения для получения медицинской помощи (CDA) Редакция 1 | CDA | МИС | Направление на плановую госпитализацию | Устаревшая редакция ЭМД | – | [https://portal.egisz.rosminzdrav.ru/materials/3915](https://portal.egisz.rosminzdrav.ru/materials/3915) |
+| 60 | 87 | Медицинская справка о состоянии здоровья ребенка, отъезжающего в организацию отдыха детей и их оздоровления (CDA) Редакция 1 | CDA | МИС | Справка в случае лечения | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3917](https://portal.egisz.rosminzdrav.ru/materials/3917) |
+| 61 | 88 | Медицинская справка (для выезжающего за границу) (CDA) Редакция 1 | CDA | МИС | Справка в случае лечения | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3919](https://portal.egisz.rosminzdrav.ru/materials/3919) |
+| 62 | 89 | Выписной эпикриз из родильного дома (CDA) Редакция 3 | CDA | МИС | МКСБ (История родов) | Реализован | - | [https://portal.egisz.rosminzdrav.ru/materials/3921](https://portal.egisz.rosminzdrav.ru/materials/3921) |
+| 63 | 90 | 2 | Протокол инструментального исследования (CDA) Редакция 2 | CDA | МИС | Направление на исследование+протокол исследования | Устаревшая редакция ЭМД | - | [https://portal.egisz.rosminzdrav.ru/materials/3923](https://portal.egisz.rosminzdrav.ru/materials/3923) |
+| 64 | 91 | 18 | Карта вызова скорой медицинской помощи (CDA) Редакция 1 | CDA | Внешняя ИС | Устаревшая редакция ЭМД | – | [https://portal.egisz.rosminzdrav.ru/materials/3925](https://portal.egisz.rosminzdrav.ru/materials/3925) |
+| 65 | 92 | Эпикриз по законченному случаю амбулаторный (CDA) Редакция 4 | CDA | МИС | ТАП | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3927](https://portal.egisz.rosminzdrav.ru/materials/3927) |
+| 66 | 93 | 9 | Протокол цитологического исследования (CDA) Редакция 1 | CDA | Внешняя ИС | Должен формироваться внешней ИС | – | [https://portal.egisz.rosminzdrav.ru/materials/3929](https://portal.egisz.rosminzdrav.ru/materials/3929) |
+| 67 | 94 | 21 | Протокол консультации в рамках диспансерного наблюдения (CDA) Редакция 3 | CDA | МИС | Устаревшая редакция | – | [https://portal.egisz.rosminzdrav.ru/materials/3845](https://portal.egisz.rosminzdrav.ru/materials/3845) |
+| 68 | 95 | Медицинская справка в бассейн (CDA) Редакция 1 | CDA | МИС | Справка в случае лечения | Устаревшая редакция ЭМД | – | [https://portal.egisz.rosminzdrav.ru/materials/3839](https://portal.egisz.rosminzdrav.ru/materials/3839) |
+| 69 | 96 | Сведения о результатах диспансеризации или профилактического медицинского осмотра (CDA) Редакция 1 | CDA | МИС | Карта диспансеризации | Устаревшая редакция ЭМД | – | [https://portal.egisz.rosminzdrav.ru/materials/3901](https://portal.egisz.rosminzdrav.ru/materials/3901) |
+| 70 | 97 | Направление на госпитализацию для оказания высокотехнологичной медицинской помощи (CDA) Редакция 1 | CDA | МИС | Направление на госпитализацию | Устаревшая редакция ЭМД | – | [https://portal.egisz.rosminzdrav.ru/materials/3973](https://portal.egisz.rosminzdrav.ru/materials/3973) |
+| 71 | 98 | Направление на госпитализацию для оказания специализированной медицинской помощи (CDA) Редакция 1 | CDA | МИС | Направление на госпитализацию | Устаревшая редакция ЭМД | – | [https://portal.egisz.rosminzdrav.ru/materials/3973](https://portal.egisz.rosminzdrav.ru/materials/3973) |
+| 72 | 99 | Выписка из протокола врачебной комиссии (CDA) Редакция 1 | CDA | МИС | Решение ВК | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3993](https://portal.egisz.rosminzdrav.ru/materials/3993) |
+| 73 | 100 | Справка об оплате медицинских услуг для предоставления в налоговые органы Российской Федерации (CDA) Редакция 1 | CDA | МИС | Договор платных услуг | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3991](https://portal.egisz.rosminzdrav.ru/materials/3991) |
+| 74 | 101 | Медицинское заключение о допуске к выполнению работ на высоте, верхолазных работ, работ, связанных с подъемом на высоту, а также по обслуживанию подъемных сооружений (CDA) Редакция 1 | CDA | МИС | Карта диспансеризации (предварительного/периодического осмотра) | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3989](https://portal.egisz.rosminzdrav.ru/materials/3989) |
+| 75 | 102 | Справка об отказе в направлении на медико-социальную экспертизу (CDA) Редакция 1 | CDA | МИС | Решение ВК | Реализован, прекращена регистрация | – | [https://portal.egisz.rosminzdrav.ru/materials/3987](https://portal.egisz.rosminzdrav.ru/materials/3987) |
+| 76 | 103 | Медицинское заключение по результатам предварительного (периодического) медицинского осмотра (обследования) (CDA) Редакция 1 | CDA | МИС | Карта диспансеризации (предварительного/периодического осмотра) | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3985](https://portal.egisz.rosminzdrav.ru/materials/3985) |
+| 77 | 104 | Экстренное извещение об инфекционном заболевании, пищевом, остром профессиональном отравлении, необычной реакции на прививку (CDA) Редакция 1 | CDA | МИС | Случай лечения, экстренное извещение | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3983](https://portal.egisz.rosminzdrav.ru/materials/3983) |
+| 78 | 105 | Сертификат профилактических прививок (Редакция 1) | CDA | МИС | Конкретная прививка в карте вакцинации | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3981](https://portal.egisz.rosminzdrav.ru/materials/3981) |
+| 79 | 106 | Справка о постановке на учет по беременности (CDA) Редакция 1 | CDA | МИС | Справка в случае лечения | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3979](https://portal.egisz.rosminzdrav.ru/materials/3979) |
+| 80 | 107 | Справка донору об освобождении от работы в день кроводачи и предоставлении ему дополнительного дня отдыха (CDA) Редакция 1 | CDA | Внешняя ИС | Справка в случае лечения | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3977](https://portal.egisz.rosminzdrav.ru/materials/3977) |
+| 81 | 108 | Уведомление о причинах возврата направления на медико-социальную экспертизу в медицинскую организацию (CDA) Редакция 1 | CDA | Бюро МСЭ | – | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4017](https://portal.egisz.rosminzdrav.ru/materials/4017) |
+| 82 | 109 | Направление на медико-социальную экспертизу (редакция 5) | CDA | МИС | Направление на МСЭ | Устаревшая редакция ЭМД | – | [https://portal.egisz.rosminzdrav.ru/materials/4011](https://portal.egisz.rosminzdrav.ru/materials/4011) |
+| 83 | 110 | Протокол инструментального исследования (CDA) Редакция 3 | CDA | МИС | Направление на исследование+протокол исследования | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4021](https://portal.egisz.rosminzdrav.ru/materials/4021) |
+| 84 | 111 | Протокол консультации в рамках диспансерного наблюдения (CDA) Редакция 4 | CDA | МИС | Медицинская запись с типом "Протокол консультации (РЭМД)" | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4023](https://portal.egisz.rosminzdrav.ru/materials/4023) |
+| 85 | 112 | Льготный рецепт на лекарственный препарат, изделие медицинского назначения и специализированный продукт лечебного питания (CDA) Редакция 3 | CDA | МИС | Назначение и рецепт | Устаревшая редакция ЭМД | – | [https://portal.egisz.rosminzdrav.ru/materials/4025](https://portal.egisz.rosminzdrav.ru/materials/4025) |
+| 86 | 113 | Документ, содержащий сведения медицинского свидетельства о смерти в бумажной форме (CDA) Редакция 5 | CDA | МИС | Медицинское свидетельство о смерти | Реализован | - | [https://portal.egisz.rosminzdrav.ru/materials/3815](https://portal.egisz.rosminzdrav.ru/materials/3815) |
+| 87 | 114 | Документ, содержащий сведения медицинского свидетельства о перинатальной смерти в бумажной форме (CDA) Редакция 2 | CDA | МИС | Медицинское свидетельство о перинатальной смерти | Реализован | - | [https://portal.egisz.rosminzdrav.ru/materials/3817](https://portal.egisz.rosminzdrav.ru/materials/3817) |
+| 88 | 115 | Карта вызова скорой медицинской помощи (CDA) Редакция 2 | CDA | Внешняя ИС | Должен формироваться внешней ИС | – | [https://portal.egisz.rosminzdrav.ru/materials/4043](https://portal.egisz.rosminzdrav.ru/materials/4043) |
+| 89 | 116 | Уведомление о выявлении противопоказаний или аннулировании медицинских заключений к владению оружием (CDA) Редакция 1 | CDA | МИС | Карта осмотра на получение справки к владению оружием | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4049](https://portal.egisz.rosminzdrav.ru/materials/4049) |
+| 90 | 117 | Медицинское заключение об отсутствии медицинских противопоказаний к владению оружием (CDA) Редакция 2 | CDA | МИС | Карта осмотра на получение справки к владению оружием | 31.12.2022 | [https://portal.egisz.rosminzdrav.ru/materials/4055](https://portal.egisz.rosminzdrav.ru/materials/4055) |
+| 91 | 118 | Документ, содержащий сведения медицинского свидетельства о рождении в бумажной форме (CDA) Редакция 4 | CDA | МИС | Медицинское свидетельство о рождении | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3849](https://portal.egisz.rosminzdrav.ru/materials/3849) |
+| 92 | 119 | Протокол консультации (CDA) Редакция 4 | CDA | МИС | ТАП/МКСБ + медицинская запись с типом «Протокол консультации РЭМД» | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4023](https://portal.egisz.rosminzdrav.ru/materials/4023) |
+| 93 | 120 | Согласие гражданина (его законного или уполномоченного представителя) на направление и проведение медико-социальной экспертизы (PDF/A-1) | PDF | МИС | Направление на МСЭ | Реализован | – | — |
+| 94 | 121 | Направление на медико-социальную экспертизу (CDA) Редакция 6 | CDA | МИС | Направление на МСЭ | Реализован | [https://portal.egisz.rosminzdrav.ru/materials/4283](https://portal.egisz.rosminzdrav.ru/materials/4283) |
+| 95 | 122 | Сведения о результатах диспансеризации или профилактического медицинского осмотра (CDA) Редакция 2 | CDA | МИС | Карта диспансеризации | Реализован | [https://portal.egisz.rosminzdrav.ru/materials/4099](https://portal.egisz.rosminzdrav.ru/materials/4099) |
+| 96 | 123 | Направление на госпитализацию для оказания высокотехнологичной медицинской помощи (CDA) Редакция 2 | CDA | МИС | Направление на госпитализацию | Реализован | [https://portal.egisz.rosminzdrav.ru/materials/4257](https://portal.egisz.rosminzdrav.ru/materials/4257) |
+| 97 | 124 | Направление на госпитализацию для оказания специализированной медицинской помощи (CDA) Редакция 2 | CDA | МИС | Направление на госпитализацию | Реализован | [https://portal.egisz.rosminzdrav.ru/materials/4255](https://portal.egisz.rosminzdrav.ru/materials/4255) |
+| 98 | 125 | Медицинское свидетельство о смерти (CDA) Редакция 6 | CDA | МИС | Медицинское свидетельство о смерти | Не реализован | Дата начала регистрации в РЭМД 31.12.2025 | [https://portal.egisz.rosminzdrav.ru/materials/4325](https://portal.egisz.rosminzdrav.ru/materials/4325) |
+| 99 | 126 | Документ, содержащий сведения медицинского свидетельства о смерти в бумажной форме (CDA) Редакция 6 | CDA | МИС | Медицинское свидетельство о смерти | Не реализован | Дата начала регистрации в РЭМД 31.12.2025 | [https://portal.egisz.rosminzdrav.ru/materials/4325](https://portal.egisz.rosminzdrav.ru/materials/4325) |
+| 100 | 127 | Медицинское свидетельство о перинатальной смерти (CDA) Редакция 3 | CDA | МИС | Медицинское свидетельство о смерти | Не реализован | Дата начала регистрации в РЭМД 31.12.2025 | [https://portal.egisz.rosminzdrav.ru/materials/4327](https://portal.egisz.rosminzdrav.ru/materials/4327) |
+| 101 | 128 | Документ, содержащий сведения медицинского свидетельства о перинатальной смерти в бумажной форме (CDA) Редакция 3 | CDA | МИС | Медицинское свидетельство о смерти | Не реализован | Дата начала регистрации в РЭМД 31.12.2025 | [https://portal.egisz.rosminzdrav.ru/materials/4327](https://portal.egisz.rosminzdrav.ru/materials/4327) |
+| 102 | 129 | Эпикриз по результатам диспансеризации / профилактического медицинского осмотра (CDA) Редакция 1 | CDA | МИС | Карта диспансеризации | Не реализован | [https://portal.egisz.rosminzdrav.ru/materials/4415](https://portal.egisz.rosminzdrav.ru/materials/4415) |
+| 103 | 130 | Уведомление о причинах возврата направления на медико-социальную экспертизу в медицинскую организацию (CDA) Редакция 2 | CDA | Бюро МСЭ | – | Не реализован |
+| 104 | 131 | Направление к месту лечения для получения медицинской помощи (CDA) Редакция 3 | CDA | МИС | Направление на плановую госпитализацию | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4311](https://portal.egisz.rosminzdrav.ru/materials/4311) |
+| 105 | 132 | Талон на оказание высокотехнологичной медицинской помощи (CDA) Редакция 1 | CDA | МИС | Запланирован | – | [https://portal.egisz.rosminzdrav.ru/materials/4125](https://portal.egisz.rosminzdrav.ru/materials/4125) |
+| 106 | 133 | Этапный эпикриз (CDA) Редакция 1 | CDA | МИС | Устаревшая редакция ЭМД | – | [https://portal.egisz.rosminzdrav.ru/materials/4115](https://portal.egisz.rosminzdrav.ru/materials/4115) |
+| 107 | 134 | Предоперационный эпикриз (CDA) Редакция 1 | CDA | МИС | МКСБ, хирургические операции | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4107](https://portal.egisz.rosminzdrav.ru/materials/4107) |
+| 108 | 135 | Выписка из истории болезни (CDA) Редакция 1 | CDA | МИС | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4113](https://portal.egisz.rosminzdrav.ru/materials/4113) |
+| 109 | 136 | Экстренное извещение о случае острого отравления химической этиологии (CDA) Редакция 1 | CDA | МИС | Случай лечения, экстренное извещение | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4123](https://portal.egisz.rosminzdrav.ru/materials/4123) |
+| 110 | 137 | Санаторно-курортная карта (CDA) Редакция 1 | CDA | МИС | Санаторно-курортная карта | Устаревшая редакция ЭМД | – | [https://portal.egisz.rosminzdrav.ru/materials/4117](https://portal.egisz.rosminzdrav.ru/materials/4117) |
+| 111 | 138 | Программа дополнительного обследования гражданина (CDA) Редакция 1 | CDA | Бюро МСЭ | – | Не реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4285](https://portal.egisz.rosminzdrav.ru/materials/4285) |
+| 112 | 139 | Справка о результатах химико-токсикологических исследований (CDA) Редакция 2 | CDA | МИС | Результат исследования | Не реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4433](https://portal.egisz.rosminzdrav.ru/materials/4433) |
+| 113 | 140 | Отпуск по рецепту на лекарственный препарат, изделие медицинского назначения и специализированный продукт лечебного питания (CDA) Редакция 4 | CDA | МИС | Сведения об отпуске рецепта | Запланирован | [https://portal.egisz.rosminzdrav.ru/materials/4317](https://portal.egisz.rosminzdrav.ru/materials/4317) |
+| 114 | 141 | Льготный рецепт на лекарственный препарат, изделие медицинского назначения и специализированный продукт лечебного питания (CDA) Редакция 4 | CDA | МИС | Назначение и рецепт | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4319](https://portal.egisz.rosminzdrav.ru/materials/4319) |
+| 115 | 142 | Заключение об установлении факта поствакцинального осложнения (CDA) Редакция 1 | CDA | МИС | Иммунопрофилактика, поствакцинальное осложнение | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4275](https://portal.egisz.rosminzdrav.ru/materials/4275) |
+| 116 | 143 | Заключение лечебного учреждения о нуждаемости престарелого гражданина в постоянном постороннем уходе (CDA) Редакция 1 | CDA | МИС | Справка в случае лечения | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4273](https://portal.egisz.rosminzdrav.ru/materials/4273) |
+| 117 | 144 | Справка о наличии показаний к протезированию (CDA) Редакция 1 | CDA | МИС | Справка в случае лечения | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4277](https://portal.egisz.rosminzdrav.ru/materials/4277) |
+| 118 | 145 | Справка о наличии медицинских показаний, в соответствии с которыми ребенок не посещает дошкольную организацию или организацию, осуществляющую образовательную деятельность по основным общеобразовательным программам, в период учебного процесса (CDA) Редакция 1 | CDA | МИС | Справка в случае лечения | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4279](https://portal.egisz.rosminzdrav.ru/materials/4279) |
+| 119 | 146 | Талон № 2 на получение специальных талонов (именных направлений) на проезд к месту лечения для получения медицинской помощи (CDA) Редакция 3 | CDA | МИС | Направления на плановую госпитализацию | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4313](https://portal.egisz.rosminzdrav.ru/materials/4313) |
+| 120 | 147 | Эпикриз в стационаре выписной (CDA) Редакция 5 | CDA | МИС | МКСБ, хирургические операции | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4417](https://portal.egisz.rosminzdrav.ru/materials/3903) |
+| 121 | 148 | Рецепт на лекарственный препарат (CDA) Редакция 2 | CDA | МИС | Назначение и рецепт | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4321](https://portal.egisz.rosminzdrav.ru/materials/4321) |
+| 122 | 149 | Медицинское заключение о принадлежности несовершеннолетнего к медицинской группе для занятий физической культурой (CDA) Редакция 3 | CDA | МИС | Не реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4331](https://portal.egisz.rosminzdrav.ru/materials/4331) |
+| 123 | 150 | Медицинская справка в бассейн (CDA) Редакция 3 | CDA | МИС | Справка в случае лечения | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4297](https://portal.egisz.rosminzdrav.ru/materials/4297) |
+| 124 | 151 | Справка для получения путевки на санаторно-курортное лечение (CDA) Редакция 2 | CDA | МИС | Направление на санаторно-курортное лечение | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4315](https://portal.egisz.rosminzdrav.ru/materials/4315) |
+| 125 | 152 | Медицинское заключение об отсутствии противопоказаний к занятию определенными видами спорта (CDA) Редакция 3 | CDA | МИС | Справка в случае лечения | Не реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4333](https://portal.egisz.rosminzdrav.ru/materials/4333) |
+| 126 | 153 | Медицинская справка (для выезжающего за границу) (CDA) Редакция 2 | CDA | МИС | Справка в случае лечения | Не реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4335](https://portal.egisz.rosminzdrav.ru/materials/4335) |
+| 127 | 154 | Справка об отсутствии контактов с инфекционными больными (CDA) Редакция 4 | CDA | МИС | Справка в случае лечения | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4337](https://portal.egisz.rosminzdrav.ru/materials/4337) |
+| 128 | 155 | Справка об отсутствии медицинских противопоказаний для работы с использованием сведений, составляющих государственную тайну (CDA) Редакция 1 | CDA | МИС | Справка в случае лечения | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4119](https://portal.egisz.rosminzdrav.ru/materials/4119) |
+| 129 | 156 | Заключение о результатах медицинского освидетельствования граждан, намеревающихся усыновить (удочерить), взять под опеку (попечительство), в приемную или патронатную семью детей-сирот и детей, оставшихся без попечения родителей (CDA) Редакция 1 | CDA | МИС | Справка в случае лечения | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4121](https://portal.egisz.rosminzdrav.ru/materials/4121) |
+| 130 | 157 | Справка о прохождении медицинского освидетельствования в психоневрологическом диспансере (CDA) Редакция 2 | CDA | МИС | Справка в случае лечения | Не реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4419](https://portal.egisz.rosminzdrav.ru/materials/4419) |
+| 131 | 158 | Выписка из протокола врачебной комиссии (CDA) Редакция 2 | CDA | МИС | Решение ВК | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4307](https://portal.egisz.rosminzdrav.ru/materials/4307) |
+| 132 | 159 | Статистическая карта выбывшего из стационара (CDA) Редакция 1 | CDA | МИС | Не реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4421](https://portal.egisz.rosminzdrav.ru/materials/4421) |
+| 133 | 160 | Протокол телемедицинской консультации для трансграничных телемедицинских решений (CDA) Редакция 1 | CDA | МИС | Не реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4423](https://portal.egisz.rosminzdrav.ru/materials/4423) |
+| 134 | 161 | Санаторно-курортная карта для детей (CDA) Редакция 1 | CDA | Устаревшая редакция ЭМД | – | [https://portal.egisz.rosminzdrav.ru/materials/4111](https://portal.egisz.rosminzdrav.ru/materials/4111) |
+| 135 | 162 | Обратный талон санаторно-курортной карты (CDA) Редакция 1 | CDA | Устаревшая редакция ЭМД | – | [https://portal.egisz.rosminzdrav.ru/materials/4127](https://portal.egisz.rosminzdrav.ru/materials/4127) |
+| 136 | 163 | Протокол медицинской манипуляции (CDA) Редакция 1 | CDA | МИС | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4411](https://portal.egisz.rosminzdrav.ru/materials/4411) |
+| 137 | 164 | Экстренное извещение об инфекционном заболевании, пищевом, остром профессиональном отравлении, необычной реакции на прививку (CDA) Редакция 2 | CDA | МИС | Не реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4425](https://portal.egisz.rosminzdrav.ru/materials/4425) |
+| 138 | 165 | Обратный талон санаторно-курортной карты для детей (CDA) Редакция 1 | CDA | Устаревшая редакция ЭМД | – | [https://portal.egisz.rosminzdrav.ru/materials/4127](https://portal.egisz.rosminzdrav.ru/materials/4127) |
+| 139 | 166 | Медицинская справка (врачебное профессионально-консультативное заключение) (CDA) Редакция 2 | CDA | МИС | Справка в случае лечения | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4101](https://portal.egisz.rosminzdrav.ru/materials/4101) |
+| 140 | 167 | Медицинское свидетельство о рождении (CDA) Редакция 5 | CDA | МИС | Медицинское свидетельство о рождении | Дата начала регистрации в РЭМД 31.12.2025 | [https://portal.egisz.rosminzdrav.ru/materials/4059](https://portal.egisz.rosminzdrav.ru/materials/4059) |
+| 141 | 168 | Документ, содержащий сведения медицинского свидетельства о рождении в бумажной форме (CDA) Редакция 5 | CDA | МИС | Медицинское свидетельство о рождении | Дата начала регистрации в РЭМД 31.12.2025 | [https://portal.egisz.rosminzdrav.ru/materials/4059](https://portal.egisz.rosminzdrav.ru/materials/4059) |
+| 142 | 169 | Справка о временной нетрудоспособности студента, учащегося техникума, профессионально-технического училища, о болезни, карантине и прочих причинах отсутствия ребенка, посещающего школу, детское дошкольное учреждение (CDA) Редакция 4 | CDA | МИС | Справка в случае лечения | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4339](https://portal.egisz.rosminzdrav.ru/materials/4339) |
+| 143 | 170 | Сертификат профилактических прививок (CDA) Редакция 2 | CDA | МИС | Конкретная прививка в карте вакцинации | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4095](https://portal.egisz.rosminzdrav.ru/materials/4095) |
+| 144 | 171 | Медицинское заключение о наличии (об отсутствии) у водителей транспортных средств медицинских противопоказаний, медицинских показаний или медицинских ограничений к управлению транспортными средствами (CDA) Редакция 3 | CDA | МИС | Карта мероприятий на получение водительской справки | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4109](https://portal.egisz.rosminzdrav.ru/materials/4109) |
+| 145 | 172 | Справка о состоянии на учете в диспансере (CDA) Редакция 2 | CDA | МИС | Справка в случае лечения | Не реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4341](https://portal.egisz.rosminzdrav.ru/materials/4341) |
+| 146 | 173 | Протокол гемотрансфузии (CDA) Редакция 4 | CDA | МИС | Запланирован | 30.11.2023 | [https://portal.egisz.rosminzdrav.ru/materials/4427](https://portal.egisz.rosminzdrav.ru/materials/4427) |
+| 147 | 174 | Протокол инструментального исследования (СDA) Редакция 4 | CDA | МИС | Направление на исследование+протокол исследования | Не реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4429](https://portal.egisz.rosminzdrav.ru/materials/4429) |
+| 148 | 175 | Медицинская справка о состоянии здоровья ребенка, отъезжающего в организацию отдыха детей и их оздоровления (CDA) Редакция 2 | CDA | МИС | Справка в случае лечения | Не реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4343](https://portal.egisz.rosminzdrav.ru/materials/4343) |
+| 149 | 176 | Протокол цитологического исследования (CDA) Редакция 2 | CDA | Внешняя ИС | – | Должен формироваться внешней ИС | – | [https://portal.egisz.rosminzdrav.ru/materials/4373](https://portal.egisz.rosminzdrav.ru/materials/4373) |
+| 150 | 177 | Направление на госпитализацию, восстановительное лечение, обследование, консультацию (CDA) Редакция 3 | CDA | МИС | Не реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4345](https://portal.egisz.rosminzdrav.ru/materials/4345) |
+| 151 | 178 | Санаторно-курортная карта (CDA) Редакция 2 | CDA | МИС | Санаторно-курортная карта | Релизован | – | [https://portal.egisz.rosminzdrav.ru/materials/4347](https://portal.egisz.rosminzdrav.ru/materials/4347) |
+| 152 | 179 | Санаторно-курортная карта для детей (CDA) Редакция 2 | CDA | МИС | Санаторно-курортная карта | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4349](https://portal.egisz.rosminzdrav.ru/materials/4349) |
+| 153 | 180 | Медицинское заключение об отсутствии в организме человека наркотических средств, психотропных веществ и их метаболитов (CDA) Редакция 2 | CDA | МИС | Карта осмотра на получение справки к владению оружием | Не реализован, дата начала регистрации в РЭМД 31.12.2025 | – | [https://portal.egisz.rosminzdrav.ru/materials/4351](https://portal.egisz.rosminzdrav.ru/materials/4351) |
+| 154 | 181 | Протокол патолого-анатомического вскрытия (CDA) Редакция 1 | CDA | МИС | Не реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4353](https://portal.egisz.rosminzdrav.ru/materials/4353) |
+| 155 | 182 | Обратный талон санаторно-курортной карты (CDA) Редакция 2 | CDA | Запланирован | [https://portal.egisz.rosminzdrav.ru/materials/4299](https://portal.egisz.rosminzdrav.ru/materials/4299) |
+| 156 | 183 | Обратный талон санаторно-курортной карты для детей (CDA) Редакция 2 | CDA | Запланирован | [https://portal.egisz.rosminzdrav.ru/materials/4301](https://portal.egisz.rosminzdrav.ru/materials/4301) |
+| 157 | 184 | Извещение о больном с впервые в жизни установленным диагнозом злокачественного новообразования (CDA) Редакция 1 | CDA | МИС | ТАП/МКСБ + ЗНО | Не реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4355](https://portal.egisz.rosminzdrav.ru/materials/4355) |
+| 158 | 185 | Направление на консультацию и во вспомогательные кабинеты (CDA) Редакция 2 | CDA | МИС | Направление на консультацию | Не реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4357](https://portal.egisz.rosminzdrav.ru/materials/4357) |
+| 159 | 186 | Протокол лабораторного исследования (CDA) Редакция 5 | CDA | ЛИС | Направление на лабораторное исследование+результаты лабораторного исследования | Должен формироваться внешней ИС | [https://portal.egisz.rosminzdrav.ru/materials/4431](https://portal.egisz.rosminzdrav.ru/materials/4431) |
+| 160 | 187 | Сведения о результатах проведенной медико-социальной экспертизы (CDA) Редакция 3 | CDA | Бюро МСЭ | – | Должен формироваться внешней ИС | [https://portal.egisz.rosminzdrav.ru/materials/4359](https://portal.egisz.rosminzdrav.ru/materials/4359) |
+| 161 | 188 | Заключение медицинского учреждения о наличии отсутствии заболевания, препятствующего поступлению на государственную гражданскую службу Российской Федерации и муниципальную службу или ее прохождению (CDA) Редакция 1 | CDA | МИС | Не реализован | [https://portal.egisz.rosminzdrav.ru/materials/4361](https://portal.egisz.rosminzdrav.ru/materials/4361) |
+| 162 | 189 | Протокол оперативного вмешательства операции (CDA) Редакция 1 | CDA | МИС | МКСБ , хирургические операции | Реализован | [https://portal.egisz.rosminzdrav.ru/materials/4363](https://portal.egisz.rosminzdrav.ru/materials/4363) |
+| 163 | 190 | Протокол консилиума врачей (онкологического) (CDA) Редакция 1 | CDA | МИС | Не реализован | [https://portal.egisz.rosminzdrav.ru/materials/4375](https://portal.egisz.rosminzdrav.ru/materials/4375) |
+| 164 | 191 | Осмотр лечащим врачом, врачом-специалистом, заведующим отделением, лечащим врачом совместно с врачом-специалистом, лечащим врачом совместно с заведующим отделением (CDA) Редакция 1 | CDA | МИС | Запланирован | [https://portal.egisz.rosminzdrav.ru/materials/4365](https://portal.egisz.rosminzdrav.ru/materials/4365) |
+| 165 | 192 | Справка о количестве кроводач, плазмодач Редакция 1 | CDA | Внешняя ИС?? | [https://portal.egisz.rosminzdrav.ru/materials/4367](https://portal.egisz.rosminzdrav.ru/materials/4367) |
+| 166 | 193 | Справка об оплате медицинских услуг для предоставления в налоговые органы Российской Федерации (CDA) Редакция 2 | CDA | МИС | Не реализован | [https://portal.egisz.rosminzdrav.ru/materials/4377](https://portal.egisz.rosminzdrav.ru/materials/4377) |
+| 167 | 194 | Медицинское заключение по результатам предварительного (периодического) медицинского осмотра (обследования) (CDA) Редакция 2 | CDA | МИС | Реализован | [https://portal.egisz.rosminzdrav.ru/materials/4413](https://portal.egisz.rosminzdrav.ru/materials/4413) |
+| 168 | 195 | Выписка из истории болезни (CDA) Редакция 2 | CDA | МИС | Не реализован, дата начала регистрации в РЭМД 26.10.2023 |
+| 169 | 196 | Медицинская справка (врачебное профессионально-консультативное заключение) (CDA) Редакция 3 | CDA | МИС |
+| 170 | 197 | Медицинское заключение о допуске к выполнению работ на высоте, верхолазных работ, работ, связанных с подъемом на высоту, а также по обслуживанию подъемных сооружений (CDA) Редакция 2 | CDA | МИС | Не реализован, дата начала регистрации в РЭМД 28.09.2023 |
+| 171 | 198 | Первичный осмотр врачом приемного отделения (дежурным врачом или лечащим врачом) (CDA) Редакция 1 | CDA | МИС | Не реализован, дата начала регистрации в РЭМД 28.09.2023 |
+| 172 | 199 | Извещение о поступлении (обращении) пациента, а также в случае смерти пациента, личность которого не установлена (CDA) Редакция 1 | CDA | МИС | Случай лечения, экстренные извещения | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4455](https://portal.egisz.rosminzdrav.ru/materials/4455) |
+| 173 | 200 | Этапный эпикриз (CDA) Редакция 2 | CDA | МИС | медицинская запись с типом "Этапный эпикриз РЭМД" +ТАП/МКСБ | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/4457](https://portal.egisz.rosminzdrav.ru/materials/4457) |
+| 174 | 201 | Статистическая карта выбывшего из медицинской организации, оказывающей медицинскую помощь в стационарных условиях, в условиях дневного стационара (CDA) Редакция 2 | CDA | МИС | Не реализован, дата начала регистрации в РЭМД 28.09.2023 |
+| 175 | 202 | Направление на лабораторное исследование (CDA) Редакция 1 | CDA | МИС | Не реализован, дата начала регистрации в РЭМД 28.09.2023 |
+| 176 | 203 | Медицинская справка (CDA) Редакция 1 | CDA | МИС | Не реализован, дата начала регистрации в РЭМД 28.09.2023 |
+| 177 | 204 | Медицинское заключение (CDA) Редакция 1 | CDA | МИС | Не реализован, дата начала регистрации в РЭМД 21.11.2023 |
+
+## ВИМИС. Типы СЭМД бета-версии
+
+1
+
+SMSV1
+
+Направление на оказание медицинских услуг
+
+Направление на госпитализацию, восстановительное лечение, консультацию
+
+Направление на обследование (лабораторное, инструментальное)
+
+СЭМД: Направление на госпитализацию, восстановительное лечение, обследование, консультацию [https://portal.egisz.rosminzdrav.ru/materials/2933](https://portal.egisz.rosminzdrav.ru/materials/2933)
+
+2
+
+SMSV2
+
+Протокол инструментального исследования
+
+СЭМД: Протокол инструментального исследования [https://portal.egisz.rosminzdrav.ru/materials/3291](https://portal.egisz.rosminzdrav.ru/materials/3291)
+
+3
+
+SMSV3
+
+Протокол лабораторного исследования
+
+СЭМД: Протокол лабораторного исследования [https://portal.egisz.rosminzdrav.ru/materials/2939](https://portal.egisz.rosminzdrav.ru/materials/2939)
+
+5
+
+SMSV5
+
+Осмотр (консультация) пациента
+
+СЭМД: Протокол консультации [https://portal.egisz.rosminzdrav.ru/materials/2937](https://portal.egisz.rosminzdrav.ru/materials/2937)
+
+8
+
+SMSV8
+
+Лечение в условиях стационара (дневного стационара)
+
+СЭМД: Эпикриз в стационаре выписной [https://portal.egisz.rosminzdrav.ru/materials/2943](https://portal.egisz.rosminzdrav.ru/materials/2943)
+
+18
+
+SMSV18
+
+Карта вызова скорой медицинской помощи
+
+–
+
+Направление на оказание медицинских услуг
+
+Направление на госпитализацию, восстановительное лечение, консультацию
+
+Направление на обследование (лабораторное, инструментальное)
+
+СЭМД: Выписной эпикриз из родильного дома [https://portal.egisz.rosminzdrav.ru/materials/2925](https://portal.egisz.rosminzdrav.ru/materials/2925)
+
+Справка о выполнении медицинской организацией программы экстракорпорального оплодотворения и (или) переноса криоконсервированных эмбрионов в рамках территориальной программы обязательного медицинского страхования («Справка о выполнении программы ВРТ»)
+
+Направление на оказание медицинских услуг
+
+Направление на госпитализацию, восстановительное лечение, консультацию
+
+Направление на обследование (лабораторное, инструментальное)
+
+Версия 4.0
+
+СЭМД: Протокол консультации
+
+СЭМД: Эпикриз в стационаре выписной
+
+| № п/ п | Тип СЭМД beta-версии (тег docType в теле SOAP пакета) | Код СЭМД beta-версии | Наименование СЭМД beta-версии | Редакция СЭМД beta-версии | Источник отправки данного вида СЭМД | Документ в МИС, на основании которого формируется данный СЭМД | Статус реализации в МИС | Срок реализации | СЭМД, взятый за основу при разработке | Ссылка на руководство по реализации СЭМД |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | ВИМИС «ССЗ» |
+| 2 | Версия 1.2 | МИС | Реализован, исключен | – | [https://portal.egisz.rosminzdrav.ru/materials/3677](https://portal.egisz.rosminzdrav.ru/materials/3677) |
+| 3 | Версия 1.2 | МИС | Направление на исследование + протокол исследования | Реализован, исключен | – | [https://portal.egisz.rosminzdrav.ru/materials/3677](https://portal.egisz.rosminzdrav.ru/materials/3677) |
+| 4 | – | Внешняя ИС | – | Должен формироваться внешней ИС | – | [https://portal.egisz.rosminzdrav.ru/materials/3677](https://portal.egisz.rosminzdrav.ru/materials/3677) |
+| 5 | Версия 1.2 | МИС | Медицинская запись + ТАП | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3677](https://portal.egisz.rosminzdrav.ru/materials/3677) |
+| 6 | SMSV6 | Протокол консилиума врачей | Версия 2.0 | МИС | ТАП/МКСБ + Решение ВК | Реализован | – | – | [https://portal.egisz.rosminzdrav.ru/materials/3677](https://portal.egisz.rosminzdrav.ru/materials/3677) |
+| 7 | SMSV5 | Прием (осмотр) врача-специалиста | Версия 2.0 | МИС | Медицинская запись | Реализован | – | СЭМД: Протокол консультации [https://portal.egisz.rosminzdrav.ru/materials/2937](https://portal.egisz.rosminzdrav.ru/materials/2937) | [https://portal.egisz.rosminzdrav.ru/materials/3677](https://portal.egisz.rosminzdrav.ru/materials/3677) |
+| 8 | Версия 1.2 | МИС | Медицинская запись + МКСБ | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3677](https://portal.egisz.rosminzdrav.ru/materials/3677) |
+| 9 | SMSV8 | Выписной эпикриз из стационара по отдельным профилям медицинской помощи | Версия 2.0 | МИС | Медицинская запись + МКСБ | Реализован | – | – | [https://portal.egisz.rosminzdrav.ru/materials/3677](https://portal.egisz.rosminzdrav.ru/materials/3677) |
+| 10 | 14 | SMSV14 | Лист исполненных (выполненных) лекарственных назначений | Версия 2.0 | МИС | Исполненное лекарственное назначение | Реализован | – | – | [https://portal.egisz.rosminzdrav.ru/materials/3677](https://portal.egisz.rosminzdrav.ru/materials/3677) |
+| 11 | – | Внешняя ИС | – | Должен формироваться внешней ИС | – | [https://portal.egisz.rosminzdrav.ru/materials/3677](https://portal.egisz.rosminzdrav.ru/materials/3677) |
+| 12 | ВИМИС «АКиНЕО» |
+| 13 | 1 | SMSV1 | Версия 1.2 | МИС | Реализован, исключен | – | СЭМД: Направление на госпитализацию, восстановительное лечение, обследование, консультацию [https://portal.egisz.rosminzdrav.ru/materials/2933](https://portal.egisz.rosminzdrav.ru/materials/2933) | [https://portal.egisz.rosminzdrav.ru/materials/3675](https://portal.egisz.rosminzdrav.ru/materials/3675) |
+| 14 | 2 | SMSV2 | Протокол инструментального исследования | Версия 1.2 | МИС | Направление на исследование + протокол исследования | Реализован | – | СЭМД: Протокол инструментального исследования [https://portal.egisz.rosminzdrav.ru/materials/3291](https://portal.egisz.rosminzdrav.ru/materials/3291) | [https://portal.egisz.rosminzdrav.ru/materials/3675](https://portal.egisz.rosminzdrav.ru/materials/3675) |
+| 15 | 3 | SMSV3 | Протокол лабораторного исследования | – | Внешняя ИС | – | Должен формироваться внешней ИС | – | СЭМД: Протокол лабораторного исследования [https://portal.egisz.rosminzdrav.ru/materials/2939](https://portal.egisz.rosminzdrav.ru/materials/2939) | [https://portal.egisz.rosminzdrav.ru/materials/3675](https://portal.egisz.rosminzdrav.ru/materials/3675) |
+| 16 | 5 | SMSV5 | Осмотр (консультация) пациента | Версия 1.2 | МИС | Медицинская запись | Реализован, исключен | – | СЭМД: Протокол консультации [https://portal.egisz.rosminzdrav.ru/materials/2937](https://portal.egisz.rosminzdrav.ru/materials/2937) | [https://portal.egisz.rosminzdrav.ru/materials/3675](https://portal.egisz.rosminzdrav.ru/materials/3675) |
+| 17 | 5 | SMSV5 | Прием (осмотр) врача-специалиста | Версия 2.0 | МИС | Медицинская запись | Реализован | – |
+| 18 | 8 | SMSV8 | Лечение в условиях стационара (дневного стационара) | Версия 2.0 | МИС | Медицинская запись + МКСБ | Запланирован | 31.12.2022 | СЭМД: Эпикриз в стационаре выписной [https://portal.egisz.rosminzdrav.ru/materials/2943](https://portal.egisz.rosminzdrav.ru/materials/2943) | [https://portal.egisz.rosminzdrav.ru/materials/3675](https://portal.egisz.rosminzdrav.ru/materials/3675) |
+| 19 | 17 | SMSV17 | Выписной эпикриз родильного дома | Версия 1.2 | МИС | История родов | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3675](https://portal.egisz.rosminzdrav.ru/materials/3675) |
+| 20 | 22 | SMSV22 | Извещение о критическом акушерском состоянии | Версия 1.2 | МИС | Медицинская запись + Карта беременной | Реализован | – | – |
+| 21 | 8 | SMSV8 | Выписной эпикриз из стационара по отдельным профилям медицинской помощи | Версия 2.0 | МИС | Медицинская запись + МКСБ | Реализован | – | СЭМД: Эпикриз в стационаре выписной [https://portal.egisz.rosminzdrav.ru/materials/3903](https://portal.egisz.rosminzdrav.ru/materials/3903) | [https://portal.egisz.rosminzdrav.ru/materials/3675](https://portal.egisz.rosminzdrav.ru/materials/3675) |
+| 22 | 31 | SMSV31 | Заключение по результатам расчета индивидуального риска | Версия 2.0 | МИС | Направление на генетическое исследование + протокол исследование (заключение) | Реализован | – | – | [https://portal.egisz.rosminzdrav.ru/materials/3675](https://portal.egisz.rosminzdrav.ru/materials/3675) |
+| 23 | 32 | SMSV32 | Протокол родов | Версия 2.0 | МИС | История родов | Реализован | – | – | [https://portal.egisz.rosminzdrav.ru/materials/3675](https://portal.egisz.rosminzdrav.ru/materials/3675) |
+| 24 | 25 | SMSV25 | Протокол медицинской манипуляции | Версия 2.0 | МИС | Сведения об иммунизации в карте вакцинации | Реализован | – | – | [https://portal.egisz.rosminzdrav.ru/materials/3675](https://portal.egisz.rosminzdrav.ru/materials/3675) |
+| 25 | 28 | SMSV28 | Направление для проведения программы экстракорпорального оплодотворения и (или) переноса криоконсервированных эмбрионов в рамках территориальной программы обязательного медицинского страхования («Направление на программу ВРТ») | – | МИС | – | Запланирован | 30.11.2023 | – | [https://portal.egisz.rosminzdrav.ru/materials/3675](https://portal.egisz.rosminzdrav.ru/materials/3675) |
+| 26 | 29 | SMSV29 | – | МИС | – | Запланирован | 30.11.2023 | – | [https://portal.egisz.rosminzdrav.ru/materials/3675](https://portal.egisz.rosminzdrav.ru/materials/3675) |
+| 27 | 30 | SMSV30 | Вкладыш в медицинскую карту пациента, получающего медицинскую помощь в амбулаторных условиях (форма № 025/у), или карту стационарного больного, или карту пациента акушерско-гинекологического профиля в условиях стационара дневного пребывания, при использовании вспомогательных репродуктивных технологий и искусственной инсеминации | – | МИС | – | Запланирован | 30.11.2023 | – | [https://portal.egisz.rosminzdrav.ru/materials/3675](https://portal.egisz.rosminzdrav.ru/materials/3675) |
+| 28 | ВИМИС «Онкология» |
+| 29 | 1 | SMSV1 | Версия 3.6 | МИС | Реализован | – | СЭМД: Направление на госпитализацию, восстановительное лечение, обследование, консультацию [https://portal.egisz](https://portal.egisz/). [rosminzdrav.ru/materials/2933](http://rosminzdrav.ru/materials/2933) | [https://portal.egisz.rosminzdrav.ru/materials/3595](https://portal.egisz.rosminzdrav.ru/materials/3595) |
+| 30 | 2 | SMSV2 | Протокол инструментального исследования | Версия 3.6 | МИС | Направление на исследование + протокол исследования | Реализован, исключен | – | СЭМД: Протокол инструментального исследования [https://portal.egisz](https://portal.egisz/). [rosminzdrav.ru/materials/3291](http://rosminzdrav.ru/materials/3291) | [https://portal.egisz.rosminzdrav.ru/materials/3595](https://portal.egisz.rosminzdrav.ru/materials/3595) |
+| 31 | 3 | SMSV3 | Протокол лабораторного исследования | – | Внешняя ИС | – | Должен формироваться внешней ИС | – | СЭМД: Протокол лабораторного исследования [https://portal.egisz](https://portal.egisz/). [rosminzdrav.ru/materials/2939](http://rosminzdrav.ru/materials/2939) | [https://portal.egisz.rosminzdrav.ru/materials/3595](https://portal.egisz.rosminzdrav.ru/materials/3595) |
+| 32 | 4 | SMSV4 | Протокол прижизненного патолого-анатомического исследования биопсийного (операционного) материала | Версия 3.6 | МИС | Протокол исследования в модуле патоморфология | Реализован | – | СЭМД: Протокол прижизненного патологоанатомического исследования [https://portal.egisz](https://portal.egisz/). [rosminzdrav.ru/materials/2941](http://rosminzdrav.ru/materials/2941) | [https://portal.egisz.rosminzdrav.ru/materials/3595](https://portal.egisz.rosminzdrav.ru/materials/3595) |
+| 33 | 5 | SMSV5 | Осмотр (консультация) пациента | Версия 3.6 | МИС | Медицинская запись | Реализован | – | СЭМД: Протокол консультации [https://portal.egisz](https://portal.egisz/). [rosminzdrav.ru/materials/2937](http://rosminzdrav.ru/materials/2937) | [https://portal.egisz.rosminzdrav.ru/materials/3595](https://portal.egisz.rosminzdrav.ru/materials/3595) |
+| 34 | 6 | SMSV6 | Решение (протокол) врачебной комиссии (консилиума врачей) | Версия 3.6 | МИС | ТАП/МКСБ + Решение ВК | Реализован | – | – | [https://portal.egisz.rosminzdrav.ru/materials/3595](https://portal.egisz.rosminzdrav.ru/materials/3595) |
+| 35 | SMSV6 | Протокол консилиума врачей | Версия 4.0 | МИС | ТАП/МКСБ + Решение ВК | Реализован | – | – | [https://portal.egisz.rosminzdrav.ru/materials/3595](https://portal.egisz.rosminzdrav.ru/materials/3595) |
+| 36 | 7 | SMSV7 | Диспансерное наблюдение | Версия 3.6 | МИС | Карта ДН | Реализован | – | – | [https://portal.egisz.rosminzdrav.ru/materials/3595](https://portal.egisz.rosminzdrav.ru/materials/3595) |
+| 37 | 8 | SMSV8 | Лечение в условиях стационара (дневного стационара) | Версия 3.6 | МИС | Медицинская запись + МКСБ | Реализован | – | СЭМД: Эпикриз в стационаре выписной [https://portal.egisz.rosminzdrav.ru/materials/2943](https://portal.egisz.rosminzdrav.ru/materials/2943) | [https://portal.egisz.rosminzdrav.ru/materials/3595](https://portal.egisz.rosminzdrav.ru/materials/3595) |
+| 38 | 8 | SMSV8 | Выписной эпикриз из стационара по отдельным профилям медицинской помощи | Версия 4.0 | МИС | Медицинская запись + МКСБ | Запланирован | 31.12.2022 | – | [https://portal.egisz.rosminzdrav.ru/materials/3595](https://portal.egisz.rosminzdrav.ru/materials/3595) |
+| 39 | 9 | SMSV9 | Протокол цитологического исследования | – | Внешняя ИС | – | Должен формироваться внешней ИС | – | – | [https://portal.egisz.rosminzdrav.ru/materials/3595](https://portal.egisz.rosminzdrav.ru/materials/3595) |
+| 40 | 10 | SMSV10 | Протокол оперативного вмешательства | Версия 3.6 | МИС | МКСБ + ЗНО + Медицинская запись | Реализован | – | – | [https://portal.egisz.rosminzdrav.ru/materials/3595](https://portal.egisz.rosminzdrav.ru/materials/3595) |
+| 41 | Протокол хирургической операции | Версия 4.0 | МИС | МКСБ + ЗНО + Хирургическое лечение ЗНО | Запланирован | 31.12.2022 | [https://portal.egisz.rosminzdrav.ru/materials/3595](https://portal.egisz.rosminzdrav.ru/materials/3595) |
+| 42 | 11 | SMSV11 | Протокол на случай выявления у больного запущенной формы злокачественного новообразования | Версия 3.6 | МИС | ТАП + ЗНО | Реализован | – | – | [https://portal.egisz.rosminzdrav.ru/materials/3595](https://portal.egisz.rosminzdrav.ru/materials/3595) |
+| 43 | 12 | SMSV12 | Оказание медицинской помощи в амбулаторных условиях | Версия 3.6 | МИС | ТАП + ЗНО | Реализован, исключен | – | СЭМД: Эпикриз по законченному случаю амбулаторный [https://portal.egisz.rosminzdrav.ru/materials/2945](https://portal.egisz.rosminzdrav.ru/materials/2945) | [https://portal.egisz.rosminzdrav.ru/materials/3595](https://portal.egisz.rosminzdrav.ru/materials/3595) |
+| 44 | 14 | SMSV14 | Назначение лекарственных препаратов | Версия 3.6 | МИС | Лекарственное назначение | Реализован | – | – | [https://portal.egisz.rosminzdrav.ru/materials/3595](https://portal.egisz.rosminzdrav.ru/materials/3595) |
+| 45 | 14 | SMSV14 | Лист исполненных (выполненных) лекарственных назначений | Версия 4.0 | МИС | Исполненное лекарственное назначение | Реализован | – | – | [https://portal.egisz.rosminzdrav.ru/materials/3595](https://portal.egisz.rosminzdrav.ru/materials/3595) |
+| 46 | 15 | SMSV15 | Талон на оказание ВМП | – | – | – | Нецелесообразно | – | – | [https://portal.egisz.rosminzdrav.ru/materials/3595](https://portal.egisz.rosminzdrav.ru/materials/3595) |
+| 47 | 16 | SMSV16 | Ретроспективные данные по пациентам с онкологической патологией | – | – | – | Нецелесообразно | – | – | [https://portal.egisz.rosminzdrav.ru/materials/3595](https://portal.egisz.rosminzdrav.ru/materials/3595) |
+| 48 | 36 | SMSV36 | Протокол патолого-анатомического вскрытия | – | МИС | – | Запланирован | – | – | [https://portal.egisz.rosminzdrav.ru/materials/3595](https://portal.egisz.rosminzdrav.ru/materials/3595) |
+| 49 | 37 | SMSV37 | Извещение о больном с впервые в жизни установленным диагнозом злокачественного новообразования | МИС | ТАП/МКСБ + ЗНО | Реализован | 31.12.2022 | – | [https://portal.egisz.rosminzdrav.ru/materials/3595](https://portal.egisz.rosminzdrav.ru/materials/3595) |
+| 50 | ВИМИС «Профилактика» |
+| 51 | 5 | SMSV5 | Прием (осмотр) врача-специалиста | Версия 2.0 | МИС | Медицинская запись | Реализован | – | [https://portal.egisz.rosminzdrav.ru/materials/3845](https://portal.egisz.rosminzdrav.ru/materials/3845) | [https://portal.egisz.rosminzdrav.ru/materials/3951](https://portal.egisz.rosminzdrav.ru/materials/3951) |
+| 52 | 8 | SMSV8 | Выписной эпикриз из стационара по отдельным профилям медицинской помощи | Версия 2.0 | МИС | Медицинская запись + МКСБ | Запланирован | 30.09.2023 | [https://portal.egisz.rosminzdrav.ru/materials/3903](https://portal.egisz.rosminzdrav.ru/materials/3903) | [https://portal.egisz.rosminzdrav.ru/materials/3951](https://portal.egisz.rosminzdrav.ru/materials/3951) |
+| 53 | 23 | SMSV23 | Протокол анкетирования | Версия 2.0 | МИС | Медицинская запись | Реализован | – | – | [https://portal.egisz.rosminzdrav.ru/materials/3951](https://portal.egisz.rosminzdrav.ru/materials/3951) |
+| 54 | 24 | SMSV24 | Эпикриз по результатам диспансеризации/профилактического медицинского осмотра | Версия 2.0 | МИС | Карта диспансеризации | Реализован | – | – | [https://portal.egisz.rosminzdrav.ru/materials/3951](https://portal.egisz.rosminzdrav.ru/materials/3951) |
+| 55 | 25 | SMSV25 | Протокол медицинской манипуляции | Версия 2.0 | МИС | Сведения об иммунизации в карте вакцинации | Реализован | – | – | [https://portal.egisz.rosminzdrav.ru/materials/3951](https://portal.egisz.rosminzdrav.ru/materials/3951) |
+| 56 | 33 | SMSV33 | Протокол анкетирования из иных информационных систем | – | Внешняя ИС | – | Должен формироваться внешней ИС | – | – | [https://portal.egisz.rosminzdrav.ru/materials/3951](https://portal.egisz.rosminzdrav.ru/materials/3951) |
+
+## Итого:
+
+#### Всего СЭМД - 173 шт. Из них:
+
+Формат CDA - 160 шт.
+
+Формат PDF - 13 шт.
+
+#### Реализовано - 39 шт. Из них:
+
+Формат CDA - 30 шт.
+
+Формат PDF - 10 шт.
+
+#### Запланировано - 28 шт. Из них:
+
+Формат CDA - 27 шт.
+
+Формат PDF - 1 шт.
+
+#### Не реализовано - 6 шт. Из них:
+
+Формат CDA - 4 шт.
+
+Формат PDF - 2 шт.
+
+#### Устаревшая редакция ЭМД - 16 шт. Из них:
+
+Формат CDA - 15 шт.
+
+Формат PDF - 1 шт.
+
+#### Должен формироваться внешней ИС - 4 шт. Из них:
+
+Формат CDA - 4 шт.
+
+- No labels
+
+Overview
+
+Content Tools
+
+{"serverDuration": 254, "requestCorrelationId": "4b08f2e5c0cc0eab"}

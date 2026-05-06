@@ -4,7 +4,7 @@
 $ErrorActionPreference = "Stop"
 $Root = Split-Path $PSScriptRoot -Parent
 Set-Location $Root
-Write-Host "[metabase] docker build + tag :local" -ForegroundColor Cyan
+Write-Host "[metabase] docker build (при залипшем слое: docker rmi egisz-monitor-metabase:latest)" -ForegroundColor Cyan
 docker build -f metabase/Dockerfile -t egisz-monitor-metabase:latest $Root
 if ($LASTEXITCODE -ne 0) { exit 1 }
 docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:local

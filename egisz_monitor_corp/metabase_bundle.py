@@ -9,7 +9,7 @@ from typing import Any, Mapping, Tuple
 
 from egisz_monitor_corp.metabase_export import build_export_zip_bytes
 
-__all__ = ["build_empty_metabase_bundle_zip_bytes"]
+__all__ = ["build_metabase_settings_bundle_zip_bytes"]
 
 
 def _get_form_str(form: Mapping[str, Any], key: str) -> str:
@@ -19,13 +19,17 @@ def _get_form_str(form: Mapping[str, Any], key: str) -> str:
     return str(v).strip()
 
 
-def build_empty_metabase_bundle_zip_bytes(form: Mapping[str, Any]) -> Tuple[bytes, str]:
-    """Build a single ZIP meant to bootstrap an empty Metabase instance.
+def build_metabase_settings_bundle_zip_bytes(form: Mapping[str, Any]) -> Tuple[bytes, str, str]:
+    """ZIP для выгрузки настроек Metabase: дашборды, карточки/вопросы, field filters, bootstrap.
 
     Contents:
-    - metabase_dashboards/*.json : exported dashboards bundle (live or bundled fallback)
-    - metabase_bootstrap.json    : settings needed to recreate DB + site prefs
-    - metabase_import_howto.txt  : minimal instructions for operators
+    - metabase_dashboards/*.json — экспорт дашбордов (живой API или эталон из образа)
+    - metabase_dashboards/field_filter_defaults.yaml — при наличии в эталонном ZIP
+    - metabase_database_metadata.json — дамп таблиц/полей из Metabase (только при живой выгрузке)
+    - metabase_bootstrap.json — параметры Postgres и базовые настройки сайта для provision
+    - metabase_import_howto.txt — краткая инструкция по импорту
+
+    Returns (zip_bytes, suggested_filename, dashboards_source) where dashboards_source is 'live' or 'bundled'.
     """
     dashboards_zip_bytes, dashboards_zip_name, dashboards_source = build_export_zip_bytes()
 
@@ -52,40 +56,44 @@ def build_empty_metabase_bundle_zip_bytes(form: Mapping[str, Any]) -> Tuple[byte
         "metabase": metabase,
         "postgres_app_db": pg,
         "notes": {
-            "why": "Этот файл — параметры для первичной настройки Metabase (Admin + подключение к DWH) и импорта EGISZ-дашбордов.",
-            "dashboards": "JSON включает сохранённые вопросы (карточки), параметры дашбордов и сопоставления field-filter'ов для dimension template-tags.",
+            "why": "Параметры для настройки Metabase (Admin + DWH) и импорта дашбордов/карточек EGISZ.",
+            "dashboards": "JSON дашбордов включает сохранённые вопросы (карточки), параметры дашборда и сопоставления field-filter'ов для dimension template-tags.",
+            "fields": "metabase_database_metadata.json — снимок /api/database/:id/metadata (таблицы и поля DWH), см. metabase/setup-dashboards.sh.",
         },
     }
 
     howto = (
-        "EGISZ Monitor Corp — пакет для пустого Metabase\n"
+        "EGISZ Monitor Corp — выгрузка настроек Metabase (JSON)\n"
         "\n"
-        "Внутри архива:\n"
-        "- metabase_dashboards/*.json  — дашборды + сохранённые вопросы (карточки) + параметры/фильтры\n"
+        "В архиве:\n"
+        "- metabase_dashboards/*.json  — дашборды, вложенные сохранённые вопросы (карточки), параметры и фильтры\n"
+        "- metabase_dashboards/field_filter_defaults.yaml — если есть (эталон из репозитория)\n"
+        "- metabase_database_metadata.json — дамп полей/таблиц Metabase (только при выгрузке с живого инстанса)\n"
         "- metabase_bootstrap.json    — параметры подключения Postgres и базовые настройки сайта\n"
         "\n"
-        "Импорт в пустой Metabase делается тем же механизмом, что и в k8s-образе:\n"
-        "- bootstrap (создание admin + подключение Postgres): metabase/provision.sh\n"
-        "- wipe+import JSON (коллекции/дашборды/карточки/связи фильтров): metabase/setup-dashboards.sh\n"
+        "Импорт тем же механизмом, что в k8s-образе:\n"
+        "- bootstrap (admin + Postgres): metabase/provision.sh\n"
+        "- wipe+import JSON: metabase/setup-dashboards.sh\n"
         "\n"
-        "Подсказка: если API-экспорт недоступен, в пакете будет эталонный набор из metabase_dashboards/ (source=bundled).\n"
+        "Если API-экспорт недоступен, JSON дашбордов берётся из эталона metabase_dashboards/ в образе (source=bundled); дампа полей в архиве не будет.\n"
     )
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # Copy dashboards JSON into a stable subfolder.
         with zipfile.ZipFile(io.BytesIO(dashboards_zip_bytes), "r") as src:
             for info in src.infolist():
                 if info.is_dir():
                     continue
                 name = info.filename.replace("\\", "/")
-                if not name.lower().endswith(".json"):
-                    continue
-                zf.writestr(f"metabase_dashboards/{name.split('/')[-1]}", src.read(info.filename))
+                base = name.split("/")[-1]
+                lower = base.lower()
+                if lower == "metabase_database_metadata.json":
+                    zf.writestr("metabase_database_metadata.json", src.read(info.filename))
+                elif lower.endswith(".json") or lower == "field_filter_defaults.yaml":
+                    zf.writestr(f"metabase_dashboards/{base}", src.read(info.filename))
 
         zf.writestr("metabase_bootstrap.json", (json.dumps(bootstrap, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
         zf.writestr("metabase_import_howto.txt", howto.encode("utf-8"))
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    return buf.getvalue(), f"egisz_metabase_empty_bundle_{ts}.zip"
-
+    return buf.getvalue(), f"egisz_metabase_json_bundle_{ts}.zip", dashboards_source

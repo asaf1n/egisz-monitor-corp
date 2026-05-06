@@ -423,35 +423,16 @@ def test_api_metabase_export_dashboards_json_zip(cfg_yaml: Path) -> None:
     client = app.test_client()
     fake_zip = b"PK\x03\x04fake"
     with patch(
-        "egisz_monitor_corp.config_app.build_export_zip_bytes",
-        return_value=(fake_zip, "egisz_metabase_dashboards_20260101_120000.zip", "live"),
+        "egisz_monitor_corp.config_app.build_metabase_settings_bundle_zip_bytes",
+        return_value=(fake_zip, "egisz_metabase_json_bundle_20260101_120000.zip", "live"),
     ):
-        resp = client.post("/api/metabase/export-dashboards-json")
+        resp = client.post("/api/metabase/export-dashboards-json", data=_full_config_form())
     assert resp.status_code == 200
     assert resp.mimetype == "application/zip"
     assert resp.data == fake_zip
     assert resp.headers.get("X-Egisz-Metabase-Export-Source") == "live"
     cd = resp.headers.get("Content-Disposition") or ""
-    assert "egisz_metabase_dashboards" in cd
-
-
-def test_api_metabase_export_empty_bundle_zip(cfg_yaml: Path) -> None:
-    from unittest.mock import patch
-
-    app = create_app()
-    app.testing = True
-    client = app.test_client()
-    fake_zip = b"PK\x03\x04bundle"
-    with patch(
-        "egisz_monitor_corp.config_app.build_empty_metabase_bundle_zip_bytes",
-        return_value=(fake_zip, "egisz_metabase_empty_bundle_20260101_120000.zip"),
-    ):
-        resp = client.post("/api/metabase/export-empty-bundle", data=_full_config_form())
-    assert resp.status_code == 200
-    assert resp.mimetype == "application/zip"
-    assert resp.data == fake_zip
-    cd = resp.headers.get("Content-Disposition") or ""
-    assert "egisz_metabase_empty_bundle" in cd
+    assert "egisz_metabase_json_bundle" in cd
 
 
 def test_api_pg_restore_multipart_ok(cfg_yaml: Path) -> None:

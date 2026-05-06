@@ -17,6 +17,7 @@ from typing import Any
 __all__ = [
     "build_export_zip_bytes",
     "build_static_bundled_dashboards_zip",
+    "export_database_metadata_dump",
     "export_dashboards_zip",
     "main_cli",
 ]
@@ -234,6 +235,46 @@ def _iter_dashboards_in_scope(mb: str, token: str) -> list[tuple[int, str]]:
     return sorted(seen.items(), key=lambda x: x[0])
 
 
+def export_database_metadata_dump(mb: str, token: str | None) -> dict[str, Any]:
+    """Снимок метаданных БД Metabase: таблицы и поля (как setup-dashboards.sh для resolve_field_id).
+
+    Для каждой неархивной, несэмпловой БД вызывается
+    ``GET /api/database/:id/metadata?include_hidden=true``.
+    """
+    raw = _api(mb, "/api/database", "GET", None, token)
+    items = _mb_normalize_list(raw)
+    out: dict[str, Any] = {
+        "exported_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "metabase_url": mb.rstrip("/"),
+        "databases": [],
+        "errors": [],
+    }
+    for db in items:
+        if not isinstance(db, dict):
+            continue
+        if db.get("archived"):
+            continue
+        if db.get("is_sample"):
+            continue
+        did = db.get("id")
+        if did is None:
+            continue
+        did_i = int(did)
+        entry: dict[str, Any] = {
+            "id": did_i,
+            "name": db.get("name"),
+            "engine": db.get("engine"),
+        }
+        try:
+            meta = _api(mb, f"/api/database/{did_i}/metadata?include_hidden=true", "GET", None, token)
+            entry["metadata"] = meta
+        except Exception as e:
+            out["errors"].append({"database_id": did_i, "error": str(e)})
+            continue
+        out["databases"].append(entry)
+    return out
+
+
 def _existing_dashboard_name_to_filename(out_dir: str) -> dict[str, str]:
     """Map exact Metabase dashboard title -> existing repo filename (for stable names like 01_operational.json)."""
     m: dict[str, str] = {}
@@ -306,6 +347,19 @@ def export_dashboards_zip(
                 raise
             raw = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
             zf.writestr(_safe_zip_entry_name(did, title), raw.encode("utf-8"))
+        try:
+            meta_dump = export_database_metadata_dump(mb, token)
+        except Exception as e:
+            meta_dump = {
+                "exported_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "metabase_url": mb.rstrip("/"),
+                "databases": [],
+                "errors": [{"database_id": None, "error": str(e)}],
+            }
+        zf.writestr(
+            "metabase_database_metadata.json",
+            (json.dumps(meta_dump, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+        )
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     fname = f"egisz_metabase_dashboards_{ts}.zip"
     return buf.getvalue(), fname
@@ -433,6 +487,20 @@ def main_cli() -> int:
             json.dump(data, f, ensure_ascii=False, indent=2)
             f.write("\n")
         print(f"  OK {len(data['cards'])} cards -> {path}")
+    try:
+        dump = export_database_metadata_dump(mb, token)
+    except Exception as e:
+        dump = {
+            "exported_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "metabase_url": mb.rstrip("/"),
+            "databases": [],
+            "errors": [{"database_id": None, "error": str(e)}],
+        }
+    meta_path = os.path.join(out_dir, "metabase_database_metadata.json")
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(dump, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    print(f"  OK database field metadata -> {meta_path}")
     return 0
 
 

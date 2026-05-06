@@ -27,5 +27,8 @@ egisz-corp = "egisz_monitor_corp.cli:main_entry"
 where = ["."]
 include = ["egisz_monitor_corp*"]
 
+[tool.setuptools.package-data]
+egisz_monitor_corp = ["*.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

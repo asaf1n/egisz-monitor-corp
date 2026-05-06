@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS dim_semd_types (
     kind_name VARCHAR(512) NOT NULL
 );
 
-COMMENT ON TABLE dim_semd_types IS 'SEMD type dictionary (NSI codes 2–3 digits, not OID)';
+COMMENT ON TABLE dim_semd_types IS 'Типы СЭМД: kind_code — идентификатор записи НСИ, kind_name — наименование (НСИ 1.2.643.5.1.13.13.11.1520; паспорт https://nsi.rosminzdrav.ru/dictionaries/1.2.643.5.1.13.13.11.1520/passport/12.33).';
 
 CREATE TABLE IF NOT EXISTS dim_clinics (
     jid BIGINT PRIMARY KEY,
@@ -442,6 +442,59 @@ $r$;
 
 COMMENT ON FUNCTION egisz_friendly_errors_row IS 'DEPRECATED: используйте egisz_error_interpretation_row.';
 
+-- Подпись типа СЭМД для отчётов: код НСИ обязателен для различения редакций (119 ≠ 227).
+CREATE OR REPLACE FUNCTION egisz_semd_type_report_label(p_kind_code text, p_kind_name text)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+AS $stl$
+  SELECT LEFT(
+      CASE
+          WHEN NULLIF(TRIM(COALESCE(p_kind_code, '')), '') IS NOT NULL
+               AND NULLIF(TRIM(COALESCE(p_kind_name, '')), '') IS NOT NULL
+              THEN TRIM(p_kind_code) || ' · ' || TRIM(p_kind_name)
+          WHEN NULLIF(TRIM(COALESCE(p_kind_code, '')), '') IS NOT NULL
+              THEN TRIM(p_kind_code)
+          WHEN NULLIF(TRIM(COALESCE(p_kind_name, '')), '') IS NOT NULL
+              THEN TRIM(p_kind_name)
+          ELSE '(неизвестно)'
+      END,
+      220
+  );
+$stl$;
+
+COMMENT ON FUNCTION egisz_semd_type_report_label IS 'Тип СЭМД для отчётов Metabase: «код · наименование НСИ» по справочнику регистрируемых ЭМД (OID 1.2.643.5.1.13.13.11.1520, паспорт https://nsi.rosminzdrav.ru/dictionaries/1.2.643.5.1.13.13.11.1520/passport/12.33); каждый код — отдельный документ ЕГИСЗ.';
+
+-- Совместимость: прежнее имя функции (устаревшая семантика «слияния по имени» снята).
+CREATE OR REPLACE FUNCTION egisz_semd_report_group_label(p_kind_code text, p_kind_name text)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+AS $legacy$
+  SELECT egisz_semd_type_report_label(p_kind_code, p_kind_name);
+$legacy$;
+
+COMMENT ON FUNCTION egisz_semd_report_group_label IS 'DEPRECATED: используйте egisz_semd_type_report_label (код · наименование НСИ).';
+
+-- Единый ключ документа для учёта дубликатов по идентификаторам (регистр UUID несущественен).
+CREATE OR REPLACE FUNCTION egisz_document_identity_key(
+    p_relates_to text,
+    p_local_uid text,
+    p_emdr_id text
+)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+AS $dk$
+  SELECT COALESCE(
+      NULLIF(LOWER(TRIM(COALESCE(p_relates_to, ''))), ''),
+      NULLIF(LOWER(TRIM(COALESCE(p_local_uid, ''))), ''),
+      NULLIF(LOWER(TRIM(COALESCE(p_emdr_id, ''))), '')
+  );
+$dk$;
+
+COMMENT ON FUNCTION egisz_document_identity_key IS 'Один документ в контуре: приоритет relatesToMessage (колбэк), иначе localUid/DOCUMENTID, иначе emdrId; для сравнения без расхождений регистра.';
+
 -- REPLACE VIEW нельзя использовать для смены имён/набора колонок в базовой витрине (ломаются зависимости и ETL).
 -- Человекочитаемые имена — в отдельных *_ui представлениях и в dim_column_display_labels.
 -- Сначала дропаем потенциальные зависимости от healthcheck-витрины (sql/005_healthcheck.sql),
@@ -452,6 +505,8 @@ DROP VIEW IF EXISTS v_health_proxy_db_ui;
 DROP VIEW IF EXISTS v_health_by_clinic;
 DROP VIEW IF EXISTS v_health_signals;
 DROP VIEW IF EXISTS v_health_proxy_db;
+DROP VIEW IF EXISTS v_rpt_network_errors_detail_ui;
+DROP VIEW IF EXISTS v_rpt_network_errors_detail;
 DROP VIEW IF EXISTS v_rpt_semd_archive_ui;
 DROP VIEW IF EXISTS v_rpt_documents_no_response_ui;
 DROP VIEW IF EXISTS v_egisz_transactions_enriched_ui;
@@ -487,6 +542,10 @@ SELECT
     f.org_oid,
     f.kind_code,
     dt.kind_name AS kind_name,
+    egisz_semd_type_report_label(NULLIF(TRIM(f.kind_code::text), ''), NULLIF(TRIM(COALESCE(dt.kind_name::text, '')), '')) AS semd_type_label,
+    egisz_document_identity_key(f.relates_to_id, f.local_uid_semd, f.emdr_id) AS document_identity_key,
+    CASE WHEN f.relates_to_id IS NOT NULL THEN LOWER(TRIM(f.relates_to_id)) END AS relates_to_canonical,
+    CASE WHEN f.local_uid_semd IS NOT NULL THEN LOWER(TRIM(f.local_uid_semd)) END AS local_uid_canonical,
     f.status,
     f.emdr_id,
     f.errors_json,
@@ -598,7 +657,7 @@ WHERE o.document_id IS NOT NULL
     SELECT 1
     FROM fact_egisz_transactions f
     WHERE f.local_uid_semd IS NOT NULL
-      AND TRIM(f.local_uid_semd) = TRIM(o.document_id)
+      AND LOWER(TRIM(f.local_uid_semd)) = LOWER(TRIM(o.document_id))
   )
 UNION ALL
 SELECT
@@ -616,13 +675,13 @@ WHERE j.documentid IS NOT NULL
     SELECT 1
     FROM fact_egisz_transactions f
     WHERE f.local_uid_semd IS NOT NULL
-      AND TRIM(f.local_uid_semd) = TRIM(j.documentid)
+      AND LOWER(TRIM(f.local_uid_semd)) = LOWER(TRIM(j.documentid))
   )
   AND NOT EXISTS (
     SELECT 1
     FROM stg_egisz_outbound_documents o
     WHERE o.document_id IS NOT NULL
-      AND TRIM(o.document_id) = TRIM(j.documentid)
+      AND LOWER(TRIM(o.document_id)) = LOWER(TRIM(j.documentid))
   );
 
 COMMENT ON VIEW v_rpt_documents_no_response IS 'Документы без колбэка в fact: строки из stg_egisz_outbound_documents (снимок Firebird) минус факты; UNION ALL — строки только из stg_egisz_messages_journal (ещё не попали в outbound-снимок). gost_host / клиника для журнала — упрощённо по replyto.';
@@ -651,6 +710,10 @@ INSERT INTO dim_column_display_labels (source_object, source_column, display_lab
     ('v_egisz_transactions_enriched', 'org_oid', 'OID организации'),
     ('v_egisz_transactions_enriched', 'kind_code', 'Код СЭМД'),
     ('v_egisz_transactions_enriched', 'kind_name', 'Наименование СЭМД'),
+    ('v_egisz_transactions_enriched', 'semd_type_label', 'Тип СЭМД (код · наименование НСИ)'),
+    ('v_egisz_transactions_enriched', 'document_identity_key', 'Документ (ключ учёта: relatesTo / localUid / emdr)'),
+    ('v_egisz_transactions_enriched', 'relates_to_canonical', 'Связанное сообщение (канон для сравнения)'),
+    ('v_egisz_transactions_enriched', 'local_uid_canonical', 'localUid СЭМД (канон для сравнения)'),
     ('v_egisz_transactions_enriched', 'status', 'Статус'),
     ('v_egisz_transactions_enriched', 'emdr_id', 'Рег. номер РЭМД (emdrid)'),
     ('v_egisz_transactions_enriched', 'errors_json', 'Ошибки JSON'),
@@ -713,6 +776,10 @@ SELECT
     org_oid AS "OID организации",
     kind_code::text AS "Код СЭМД",
     kind_name AS "Наименование СЭМД",
+    semd_type_label AS "Тип СЭМД (код · НСИ)",
+    document_identity_key AS "Документ (ключ учёта)",
+    relates_to_canonical AS "Связанное сообщение (канон)",
+    local_uid_canonical AS "localUid СЭМД (канон)",
     status AS "Статус",
     error_global_subcategory AS "Подкатегория ошибки (глобально)",
     emdr_id AS "Рег. номер РЭМД (emdrid)",
@@ -736,7 +803,7 @@ SELECT
     relates_to_id AS "Связанное сообщение"
 FROM v_egisz_transactions_enriched;
 
-COMMENT ON VIEW v_egisz_transactions_enriched_ui IS 'Обёртка над v_egisz_transactions_enriched с подписями колонок для отчётов; см. dim_column_display_labels. JID клиники, Код СЭМД, LOGID/EGMID — TEXT (идентификаторы: без разделителей тысяч и суммирования в Metabase). «Интерпретация ошибок» — errors_interpretation: агрегация интерпретаций по errors_json, исходные «Ошибки JSON» не меняются. «Сводка ошибок» оставлена как устаревший алиас. Колонка «Связанное сообщение» (relates_to_id) — последняя для удобства витрин и Metabase.';
+COMMENT ON VIEW v_egisz_transactions_enriched_ui IS 'Обёртка над v_egisz_transactions_enriched с подписями колонок для отчётов; см. dim_column_display_labels. «Тип СЭМД (код · НСИ)» — egisz_semd_type_report_label (каждый код НСИ отдельно). «Документ (ключ учёта)» — egisz_document_identity_key (relatesToMessage приоритетнее localUid/emdr). Канонические колонки для сравнения без учёта регистра UUID: «Связанное сообщение (канон)», «localUid СЭМД (канон)». JID клиники, Код СЭМД, LOGID/EGMID — TEXT (идентификаторы: без разделителей тысяч и суммирования в Metabase). «Интерпретация ошибок» — errors_interpretation: агрегация интерпретаций по errors_json, исходные «Ошибки JSON» не меняются. «Сводка ошибок» оставлена как устаревший алиас. Колонка «Связанное сообщение» (relates_to_id) — последняя для удобства витрин и Metabase.';
 
 -- Архив СЭМД: колбэки (fact) + исходящие без ответа из staging (ожидание колбэка по EXCHANGELOG).
 CREATE OR REPLACE VIEW v_rpt_semd_archive_ui AS
@@ -755,6 +822,8 @@ SELECT
     ) AS "Тип и наименование СЭМД",
     e.kind_code::text AS "Код СЭМД",
     e.kind_name AS "Наименование СЭМД",
+    e.semd_type_label AS "Тип СЭМД (код · НСИ)",
+    e.document_identity_key AS "Документ (ключ учёта)",
     e.local_uid_semd AS "localUid СЭМД",
     e.emdr_id AS "Рег. номер РЭМД",
     e.status::text AS "Статус",
@@ -797,6 +866,8 @@ SELECT
     ) AS "Тип и наименование СЭМД",
     o.kind_code::text AS "Код СЭМД",
     COALESCE(dt.kind_name, o.kind_code::varchar) AS "Наименование СЭМД",
+    egisz_semd_type_report_label(NULLIF(TRIM(o.kind_code::text), ''), NULLIF(TRIM(COALESCE(dt.kind_name::text, '')), '')) AS "Тип СЭМД (код · НСИ)",
+    egisz_document_identity_key(NULL::varchar, o.document_id, NULL::varchar) AS "Документ (ключ учёта)",
     o.document_id AS "localUid СЭМД",
     NULL::varchar(256) AS "Рег. номер РЭМД",
     'ожидание ответа'::text AS "Статус",
@@ -837,7 +908,7 @@ WHERE o.document_id IS NOT NULL
     SELECT 1
     FROM fact_egisz_transactions f
     WHERE f.local_uid_semd IS NOT NULL
-      AND TRIM(f.local_uid_semd) = TRIM(o.document_id)
+      AND LOWER(TRIM(f.local_uid_semd)) = LOWER(TRIM(o.document_id))
   )
 UNION ALL
 SELECT
@@ -846,6 +917,8 @@ SELECT
     NULL::text AS "Тип и наименование СЭМД",
     NULL::text AS "Код СЭМД",
     NULL::varchar AS "Наименование СЭМД",
+    '(неизвестно)'::text AS "Тип СЭМД (код · НСИ)",
+    egisz_document_identity_key(NULL::varchar, TRIM(j.documentid), NULL::varchar) AS "Документ (ключ учёта)",
     TRIM(j.documentid) AS "localUid СЭМД",
     NULL::varchar(256) AS "Рег. номер РЭМД",
     'ожидание ответа'::text AS "Статус",
@@ -878,13 +951,13 @@ WHERE j.documentid IS NOT NULL
     SELECT 1
     FROM fact_egisz_transactions f
     WHERE f.local_uid_semd IS NOT NULL
-      AND TRIM(f.local_uid_semd) = TRIM(j.documentid)
+      AND LOWER(TRIM(f.local_uid_semd)) = LOWER(TRIM(j.documentid))
   )
   AND NOT EXISTS (
     SELECT 1
     FROM stg_egisz_outbound_documents o
     WHERE o.document_id IS NOT NULL
-      AND TRIM(o.document_id) = TRIM(j.documentid)
+      AND LOWER(TRIM(o.document_id)) = LOWER(TRIM(j.documentid))
   );
 
 COMMENT ON VIEW v_rpt_semd_archive_ui IS 'Все СЭМД по localUid: обработанные колбэки (fact) UNION ALL исходящие без факта из outbound-снимка UNION ALL строки только из журнала сообщений (ещё не в outbound). Статус «ожидание ответа» — нет строки в fact_egisz_transactions.';
@@ -901,3 +974,106 @@ SELECT
 FROM v_rpt_documents_no_response;
 
 COMMENT ON VIEW v_rpt_documents_no_response_ui IS 'Обёртка над v_rpt_documents_no_response с подписями колонок для отчётов; см. dim_column_display_labels. JID клиники и Код СЭМД — TEXT (идентификаторы, не суммируются в Metabase).';
+
+-- Сетевые ошибки (LOGSTATE=3 / network): связка с колбэком РЭМД по relatesToMessage из сырого MSGTEXT и/или localUid.
+CREATE OR REPLACE VIEW v_rpt_network_errors_detail AS
+SELECT
+    s.id AS staging_error_id,
+    s.created_at,
+    s.exchangelog_log_id,
+    s.egisz_messages_egmid,
+    s.journal_msgid,
+    s.error_code,
+    s.message AS network_error_message,
+    s.relates_to_hint,
+    s.local_uid_hint,
+    s.emdr_id_hint,
+    s.error_global_subcategory,
+    s.error_group_label_ru,
+    s.error_subtype_label_ru,
+    s.document_group_key,
+    lf.relates_to_id AS linked_relates_to_message,
+    lf.local_uid_semd AS linked_local_uid_semd,
+    lf.jid AS linked_jid,
+    lf.kind_code::text AS linked_kind_code,
+    ldt.kind_name AS linked_kind_name,
+    egisz_semd_type_report_label(NULLIF(TRIM(lf.kind_code::text), ''), NULLIF(TRIM(COALESCE(ldt.kind_name::text, '')), '')) AS linked_semd_type_label,
+    COALESCE(NULLIF(TRIM(ldc.jname), ''), CASE WHEN lf.jid IS NOT NULL THEN 'Клиника JID: ' || lf.jid::text ELSE NULL END) AS linked_clinic_name,
+    lf.status::text AS linked_callback_status,
+    egisz_error_interpretation_row(lf.errors_json) AS linked_errors_interpretation,
+    lf.exchangelog_log_id AS linked_exchangelog_log_id,
+    lf.egisz_messages_egmid AS linked_egisz_messages_egmid,
+    lf.emdr_id AS linked_emdr_id,
+    jgid.journal_gost_numeric_jid,
+    COALESCE(
+        COALESCE(NULLIF(TRIM(ldc.jname), ''), CASE WHEN lf.jid IS NOT NULL THEN 'Клиника JID: ' || lf.jid::text END),
+        NULLIF(TRIM(ldj.jname), ''),
+        CASE WHEN jgid.journal_gost_numeric_jid IS NOT NULL THEN 'Только JID из журнала: ' || jgid.journal_gost_numeric_jid::text END,
+        '(клиника по gost/журналу не определена)'
+    ) AS connectivity_clinic_label,
+    (lf.relates_to_id IS NOT NULL) AS has_linked_callback_fact
+FROM v_stg_channel_errors_by_document s
+LEFT JOIN LATERAL (
+    SELECT (regexp_match(COALESCE(s.log_excerpt, ''), 'gost-([0-9]+)\.infoclinica\.lan', 'i'))[1]::bigint AS journal_gost_numeric_jid
+) jgid ON TRUE
+LEFT JOIN dim_clinics ldj ON ldj.jid = jgid.journal_gost_numeric_jid
+LEFT JOIN LATERAL (
+    SELECT f.*
+    FROM fact_egisz_transactions f
+    WHERE (
+        NULLIF(TRIM(s.relates_to_hint), '') IS NOT NULL
+        AND LOWER(TRIM(s.relates_to_hint)) = LOWER(TRIM(f.relates_to_id))
+    )
+    OR (
+        NULLIF(TRIM(s.local_uid_hint), '') IS NOT NULL
+        AND LOWER(TRIM(s.local_uid_hint)) = LOWER(TRIM(f.local_uid_semd))
+    )
+    ORDER BY
+        CASE
+            WHEN NULLIF(TRIM(s.relates_to_hint), '') IS NOT NULL
+                 AND LOWER(TRIM(s.relates_to_hint)) = LOWER(TRIM(f.relates_to_id))
+            THEN 0
+            ELSE 1
+        END,
+        f.processed_at DESC NULLS LAST
+    LIMIT 1
+) lf ON TRUE
+LEFT JOIN dim_semd_types ldt ON ldt.kind_code = lf.kind_code
+LEFT JOIN dim_clinics ldc ON ldc.jid = lf.jid
+WHERE s.error_top_type = 'network'
+   OR UPPER(COALESCE(s.error_code, '')) IN ('NETWORK_ERROR', 'INTEGRATION_LOGSTATE_3');
+
+COMMENT ON VIEW v_rpt_network_errors_detail IS 'Ошибки связи (транспорт, LOGSTATE=3): не смешивать с отказом регистрации в теле ответа РЭМД. Клиника для отчёта: связанный колбэк в fact (если есть), иначе JID из gost в фрагменте журнала (log_excerpt), иначе заглушка. Опциональная LATERAL-связка с fact для контекста.';
+
+CREATE OR REPLACE VIEW v_rpt_network_errors_detail_ui AS
+SELECT
+    staging_error_id AS "№ записи stg",
+    created_at AS "Создано (staging)",
+    exchangelog_log_id::text AS "LOGID журнала (сетевая ошибка)",
+    egisz_messages_egmid::text AS "EGMID сообщения (строка журнала)",
+    journal_msgid AS "MSGID обмена",
+    error_code AS "Код ошибки канала",
+    network_error_message AS "Текст сетевой ошибки",
+    relates_to_hint AS "relatesToMessage (из текста журнала)",
+    local_uid_hint AS "localUid / DOCUMENTID (из текста)",
+    emdr_id_hint AS "emdrId (из текста)",
+    error_subtype_label_ru AS "Подтип ошибки канала",
+    document_group_key AS "Ключ документа (группировка)",
+    linked_relates_to_message AS "Связанное сообщение (ответ РЭМД)",
+    linked_local_uid_semd AS "Идентификатор документа (localUid)",
+    linked_jid::text AS "JID клиники",
+    linked_kind_code AS "Код СЭМД",
+    linked_kind_name AS "Наименование СЭМД",
+    linked_semd_type_label AS "Тип СЭМД (код · НСИ)",
+    linked_clinic_name AS "Медицинская организация",
+    linked_callback_status AS "Статус регистрации в РЭМД",
+    linked_errors_interpretation AS "Интерпретация ошибок регистрации",
+    linked_exchangelog_log_id::text AS "LOGID записи ответа",
+    linked_egisz_messages_egmid::text AS "EGMID записи ответа",
+    linked_emdr_id AS "Регистрационный номер РЭМД",
+    journal_gost_numeric_jid::text AS "JID из журнала (gost, число)",
+    connectivity_clinic_label AS "Клиника (транспорт)",
+    has_linked_callback_fact AS "Ответ РЭМД найден в витрине"
+FROM v_rpt_network_errors_detail;
+
+COMMENT ON VIEW v_rpt_network_errors_detail_ui IS 'Сетевые ошибки (транспорт): «Клиника (транспорт)» — для отчётов по недоступности (колбэк в fact и/или JID из gost в log_excerpt). Колонки «Медицинская организация» / «Интерпретация ошибок регистрации» относятся к связанному колбэку и не объясняют сбой доставки.';

@@ -11,7 +11,7 @@
 | Путь | Назначение |
 |------|------------|
 | `pyproject.toml` | Пакет `egisz-monitor-corp`, зависимости; CLI: **`egisz-corp`** и **`egisz-monitor`** (оба → `egisz_monitor_corp.cli`) |
-| `start.ps1` | Локальный стек в K8s (**namespace `egisz-monitor`**): по умолчанию **`apply`** / **`start`**; **`deploy`** — оба образа + DROP/CREATE БД приложения Metabase; **`reset-deploy`**, **`restart-metabase`** / **`restart-web`**, **`verify`** (port-forward + self-test Firebird, без `verify-corp-stack`), **`metabase-provision-local`**, **`test`** — см. **`README.md`** (локальная инфраструктура). `apply`/`deploy`/`reset-deploy`: после in-cluster smoke **нет** вызова `verify-corp-stack.sh`. Пересборка conf-ui без кэша + apply: **`.\start.ps1 -Action apply -DockerNoCache`** или **`.\scripts\apply-local-rebuild.ps1`**. Сброс только app DB Metabase без удаления namespace: **`deploy`** / **`reset-deploy`** или env **`METABASE_FORCE_PROVISION`**. Скрипт в **UTF-8 с BOM**. |
+| `start.ps1` | Локальный стек в K8s (**namespace `egisz-monitor`**): по умолчанию **`apply`** / **`start`**; **`deploy`** — оба образа + DROP/CREATE БД приложения Metabase; после **`apply-schema` в conf-ui** — **`rollout restart` Metabase**, чтобы провижинг дашбордов не упирался в неготовую витрину; **`reset-deploy`**, **`restart-metabase`** / **`restart-web`**, **`verify`** (port-forward + self-test Firebird, без `verify-corp-stack`), **`metabase-provision-local`**, **`test`** — см. **`README.md`** (локальная инфраструктура). `apply`/`deploy`/`reset-deploy`: после in-cluster smoke **нет** вызова `verify-corp-stack.sh`. Пересборка conf-ui без кэша + apply: **`.\start.ps1 -Action apply -DockerNoCache`** или **`.\scripts\apply-local-rebuild.ps1`**. Сброс только app DB Metabase без удаления namespace: **`deploy`** / **`reset-deploy`** или env **`METABASE_FORCE_PROVISION`**. Скрипт в **UTF-8 с BOM**. |
 | `README.md` | Витрина прототипа: что это за проект и какие дашборды доступны разным ролям |
 | `.cursor/rules/documentation-style.mdc` | Стиль текстов для ИИ-агента Cursor (`alwaysApply`) — отсылает к **AGENTS.md** § «Стиль документации» |
 | `.cursorrules` | Парсинг SOAP/XML, витрина, отчёты, критичные статусы и сигналы для мониторинга интеграции |
@@ -31,13 +31,13 @@
 | `config_app.py` | Flask-приложение конфиг-UI: сохранение YAML, sync, healthcheck, **POST `/api/metabase/export-dashboards-json`** (ZIP дашбордов Metabase) |
 | `metabase_export.py` | Выгрузка дашбордов Metabase в JSON (формат `metabase_dashboards/`); используется Config UI и CLI |
 | `sync_routes.py` | HTTP-ручки синка (single-flight), связка с `run_sync` |
-| `semd_dictionary.py` | Справочник кодов СЭМД → наименования (fallback к `dim_semd_types`) |
+| `semd_dictionary.py` | Справочник **идентификатор → наименование** по НСИ 11.1520 ([паспорт](https://nsi.rosminzdrav.ru/dictionaries/1.2.643.5.1.13.13.11.1520/passport/12.33)); JSON в пакете + `dim_semd_types` в БД |
 
 ## SQL и витрина (`sql/`)
 
 | Файл | Содержимое |
 |------|------------|
-| `001_schema.sql` | Таблицы факта/измерений, `stg_jpersons_import`, `stg_egisz_licenses_import`, **`stg_egisz_messages_journal`**, `stg_egisz_outbound_documents`, представления `v_*`, **`stg_parse_errors`** / **`v_stg_parse_errors_by_document`** (два глобальных класса: ошибка связи vs асинхронный ответ РЭМД), функции `egisz_error_interpretation_*` (алиасы `egisz_friendly_*` оставлены для совместимости), `dim_column_display_labels` |
+| `001_schema.sql` | Таблицы факта/измерений, `stg_jpersons_import`, `stg_egisz_licenses_import`, **`stg_egisz_messages_journal`**, `stg_egisz_outbound_documents`, представления `v_*`, **`stg_channel_errors`** / **`v_stg_channel_errors_by_document`** (ошибка связи vs асинхронный ответ РЭМД), **`v_rpt_network_errors_detail`** / **`v_rpt_network_errors_detail_ui`** (транспорт LOGSTATE=3; клиника для отчёта — колбэк и/или JID из `gost` в `log_excerpt`; опциональная LATERAL-связка с `fact` для контекста), функции **`egisz_semd_type_report_label`** (код · наименование НСИ в отчётах), **`egisz_document_identity_key`** (единый ключ документа), legacy **`egisz_semd_report_group_label`**, `egisz_error_interpretation_*` (алиасы `egisz_friendly_*` оставлены для совместимости), `dim_column_display_labels` |
 | `002_etl_state.sql` | Таблица `etl_state`: `last_log_id`, **`last_egmid`**, кэш **`source_max_licenses_modifydate`** / **`source_peaks_updated_at`** после успешного ETL |
 | `005_healthcheck.sql` | Healthcheck-витрина: `v_health_by_clinic` (агрегаты за 24ч по **уникальным** `relates_to_id`, очередь по **уникальным** `local_uid_semd`), `v_health_signals` (5 сигналов), `v_health_proxy_db` (сводка staging исходящих + курсор ETL) + UI-обёртки `*_ui` для блока healthcheck в `02_service.json` |
 
@@ -72,8 +72,8 @@
 
 | Путь | Назначение |
 |------|------------|
-| `metabase/Dockerfile` | Образ **`egisz-monitor-metabase`** (теги `:k8s-v23`, `:local` — `docker build` в `start.ps1` deploy/reset-deploy/restart-metabase и в `metabase/provision-local.ps1`; non-root UID 1500, **python3** + `PYTHONPATH=/app` для `python3 -m egisz_monitor_corp.metabase_export`, HEALTHCHECK; bump при смене JSON/скриптов) |
-| `metabase/provision.sh` | Старт пода: провижининг из `METABASE_DASHBOARDS_DIR` (по умолчанию `/app/metabase_dashboards/`); при `METABASE_FORCE_PROVISION=auto` пропуск повторного импорта только если число дашбордов в персональной коллекции не меньше числа JSON и **SHA набора всех `*.json`** совпадает с сохранённым после последнего успешного `setup-dashboards.sh` файлам `/shared/corp-metabase-dashboards-manifest.sha256` (переменная `METABASE_DASHBOARDS_MANIFEST_STAMP`) |
+| `metabase/Dockerfile` | Образ **`egisz-monitor-metabase`** (`docker build -f metabase/Dockerfile -t egisz-monitor-metabase:latest .`; доп. тег `:local` для локального run; non-root UID 1500, **python3** + `PYTHONPATH=/app` для `python3 -m egisz_monitor_corp.metabase_export`, HEALTHCHECK) |
+| `metabase/provision.sh` | Старт пода: провижининг из `METABASE_DASHBOARDS_DIR` (по умолчанию `/app/metabase_dashboards/`); ожидание витрины в Postgres до **45 мин** перед импортом; при неготовой схеме пишет `/shared/corp-metabase-provision-schema-incomplete.txt` (см. `Wait-CorpMetabaseProvisioning` в `start.ps1`). При `METABASE_FORCE_PROVISION=auto` пропуск повторного импорта только если число дашбордов в персональной коллекции не меньше числа JSON и **SHA набора всех `*.json`** совпадает с сохранённым после последнего успешного `setup-dashboards.sh` файлам `/shared/corp-metabase-dashboards-manifest.sha256` (переменная `METABASE_DASHBOARDS_MANIFEST_STAMP`). Тяжёлый старт UI: см. комментарий в `provision.sh` (убраны default past* в JSON; `auto_apply_filters` включается только `METABASE_AUTO_APPLY_FILTERS=true` в `setup-dashboards.sh`) |
 | `metabase/setup-dashboards.sh` | Очистка целевой коллекции администратора (дашборды, карточки, вложенные коллекции), затем импорт всех `*.json` из `DASHBOARDS_DIR` |
 | `metabase/export_dashboards_from_api.py` | CLI-обёртка над **`egisz_monitor_corp.metabase_export`** (выгрузка в каталог) |
 | `metabase/provision-local.ps1` | Локальный провижининг к Metabase на `localhost:3000` |
@@ -90,7 +90,7 @@
 |------|------------|
 | `k8s/` | Манифесты Postgres, Metabase, conf-ui, CronJob, примеры секретов — см. **`README.md`** (локальная инфраструктура) |
 | `k8s/postgres/` | StatefulSet, сервисы, Job **`egisz-reports-schema-init`** (DDL по `sql/schema_apply_order.txt`), Job’ы Metabase app DB и (при необходимости) Airflow metadata |
-| `k8s/metabase.yaml` | Deployment Metabase (образ `egisz-monitor-metabase:k8s-v23`); `JAVA_TOOL_OPTIONS` (G1GC, MaxRAMPercentage, `ExitOnOutOfMemoryError`), длинный `startupProbe` до `/api/health`, `METABASE_FORCE_PROVISION=auto` — см. `metabase/provision.sh` |
+| `k8s/metabase.yaml` | Deployment Metabase (образ `egisz-monitor-metabase:latest`, пересборка из корня репо; на kind/docker-desktop `start.ps1` может выставить уникальный тег `latest-<utc>`); `JAVA_TOOL_OPTIONS`, длинный `startupProbe` до `/api/health`, `METABASE_FORCE_PROVISION=auto` — см. `metabase/provision.sh` |
 | `k8s/conf-ui.yaml` | Config UI (gunicorn 1×16t + `sync_routes`); non-root UID 10001, `/healthz`, RollingUpdate `maxUnavailable=0` |
 | `k8s/etl-cron.yaml` | **CronJob `egisz-monitor-sync`**: `*/15 * * * *`, тот же образ `egisz-conf-ui:sync-web`, CLI `egisz-monitor sync`, `concurrencyPolicy: Forbid` + advisory lock в Postgres против гонки с UI-кнопкой. **`spec.suspend` / `schedule` / `timeZone`** выравниваются с **`auto_sync`** в YAML (POST /save в Config UI, `egisz-monitor k8s-reconcile-cronjob`, шаг `start.ps1` после apply). В манифесте стартово `suspend: true`. |
 | `k8s/egisz_monitor.local.yaml` | Конфиг для секрета conf-ui (локальный кластер на Windows: Firebird = host.docker.internal) |
@@ -101,7 +101,7 @@
 ## Docker, Kubernetes и CI (краткая справка)
 
 - **Сборка образов** (контекст — корень репозитория):  
-  `docker build -f metabase/Dockerfile -t egisz-monitor-metabase:local .`  
+  `docker build -f metabase/Dockerfile -t egisz-monitor-metabase:latest .` (при необходимости: `docker tag … :local` для локального run)  
   `docker build -f docker/web/Dockerfile -t egisz-conf-ui:sync-web .`  
   Для web при необходимости: `--build-arg PYTHON_BASE=…`, `--build-arg PIP_INDEX_URL=…` (см. комментарии в `docker/web/Dockerfile`).
 - **Манифесты** (при настроенном `kubectl` и namespace `egisz-monitor`): `kubectl apply -f k8s/metabase.yaml`, `kubectl apply -f k8s/conf-ui.yaml`; наблюдение за стартом Metabase: `kubectl get pods -w -n egisz-monitor -l app.kubernetes.io/name=metabase`.
@@ -138,6 +138,8 @@
 **Прогресс Config UI / `EtlProgressPayload`:** при разборе журнала — **`documents_unique`**, **`documents_localuid_unique`**, **`documents_emdrid_unique`** (уникальные значения из разобранного SOAP, не «строки журнала»).
 
 **Single-flight на уровне БД**: в начале `run_sync` берём `pg_try_advisory_lock(hash(pipeline_name))`. Помеченный CronJob `egisz-monitor-sync` (по расписанию `*/15 * * * *`) и UI-кнопка «Синхронизировать сейчас» защищены от гонки — второй процесс выйдет с `PipelineLockBusyError` (CLI exit 75, UI показывает «параллельный sync уже идёт»). Lock — session-level: автоматически освобождается при разрыве соединения, без ручного reset после крэша воркера. Обновления `progress_detail_cb` при неизменной фазе троттлятся (~220 ms), при смене фазы — без задержки, чтобы UI не тормозил выборку и парсинг.
+
+**Ошибка Postgres `canceling statement due to lock timeout` при синке**: чаще всего конкуренция длительных `SELECT` Metabase (дашборды с широким периодом) с DDL/`DELETE`+INSERT в ETL на тех же объектах. В коде для шагов с явным `SET LOCAL lock_timeout` лимит увеличен до 300s; при повторе — снизить нагрузку отчётов или выполнить `egisz-monitor reset-etl-locks` только если зависли чужие advisory-сессии (не путать с обычной блокировкой строк).
 
 ## Типичные задачи агента
 

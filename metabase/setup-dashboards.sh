@@ -20,6 +20,9 @@ PGHOST="${PGHOST:-postgres}"
 PGPORT="${PGPORT:-5432}"
 # Каталог с JSON дашбордов (в образе /app/metabase_dashboards; локально можно смонтировать репозиторий).
 DASHBOARDS_DIR="${METABASE_DASHBOARDS_DIR:-/app/metabase_dashboards}"
+# true: при открытии дашборда сразу применять выбранные фильтры — без обязательного «Применить» в UI.
+# Отключить (тяжёлый старт / нагрузка на PG рядом с ETL): METABASE_AUTO_APPLY_FILTERS=false.
+MB_AUTO_APPLY_FILTERS="${METABASE_AUTO_APPLY_FILTERS:-true}"
 
 ROOT_COLLECTION_NAME="EGISZ Corp Monitoring"
 
@@ -398,117 +401,39 @@ create_card() {
   local template_tags
   template_tags="$(
     echo "$parsed_json" | jq -c --slurpfile metaArr "$meta_file" '
-      # Сопоставление поля фильтра: точное имя из JSON, затем колонка с «IPS» в имени (обход расхождений UTF-8 в shell/jq).
-      def resolve_field_id($meta; $tr; $fn):
-        (
-          [
-            $meta.tables[]?
-            | select(.name == $tr or ((.schema // "public") + "." + .name) == $tr)
-            | .fields[]?
-            | select(.name == $fn or .display_name == $fn)
-            | .id
-          ] | first
-        ) // (
-          if ($fn | type) == "string" and ($fn | contains("IPS")) then
-            [
-              $meta.tables[]?
-              | select(.name == $tr or ((.schema // "public") + "." + .name) == $tr)
-              | .fields[]?
-              | select((.name | type) == "string" and (.name | contains("IPS")))
-              | .id
-            ] | first
-          else
-            null
-          end
-        ) // (
-          if $fn == "Обработано IPS" then
-            [
-              $meta.tables[]?
-              | select(.name == $tr or ((.schema // "public") + "." + .name) == $tr)
-              | .fields[]?
-              | select(.name == "Обработано" or .display_name == "Обработано")
-              | .id
-            ] | first
-          else
-            null
-          end
-        ) // (
-          if $tr == "v_rpt_documents_no_response_ui" then
-            [
-              $meta.tables[]?
-              | select(.name == $tr or ((.schema // "public") + "." + .name) == $tr)
-              | .fields[]?
-              | select(.base_type == "type/DateTimeWithLocalTZ")
-              | .id
-            ] | first
-          else
-            null
-          end
-        ) // (
-          if $tr == "v_egisz_transactions_enriched_ui" then
-            ([
-              $meta.tables[]?
-              | select(.name == $tr or ((.schema // "public") + "." + .name) == $tr)
-              | .fields[]?
-              | select(.base_type == "type/Date")
-              | .id
-            ] | unique | if length == 1 then .[0] else null end)
-          else
-            null
-          end
-        );
-      def infer_table_ref($q):
-        # Некоторые запросы объединяют факты + staging (например UNION ALL с v_stg_channel_errors_by_document).
-        # Для dwh_date_filter и большинства фильтров базовая витрина — v_egisz_transactions_enriched_ui, поэтому
-        # при наличии выбираем её приоритетно.
-        if ($q | test("v_rpt_documents_no_response_ui")) then "v_rpt_documents_no_response_ui"
-        elif ($q | test("v_rpt_semd_archive_ui")) then "v_rpt_semd_archive_ui"
-        elif ($q | test("v_egisz_transactions_enriched_ui")) then "v_egisz_transactions_enriched_ui"
-        elif ($q | test("v_stg_channel_errors_by_document")) then "v_stg_channel_errors_by_document"
-        else null end;
-      def infer_field_name($tr; $q; $tagKey):
-        if $tagKey == "parse_created" then "created_at"
-        elif $tagKey != "dwh_date" then null
-        elif $tr == "v_rpt_documents_no_response_ui" then "Отправлено"
-        elif $tr == "v_rpt_semd_archive_ui" then "Дата обработки"
-        elif ($q | test("\"День \\(тренд\\)\"")) then "День (тренд)"
-        else "Обработано IPS" end;
+      # Только явное сопоставление из metabase-field-filters у карточки: имя или display_name поля в метаданных Metabase.
+      # Без совпадения provisioning не падает: остаётся тип из JSON (dimension / text); привязку столбца можно задать в UI.
+      def resolve_field_id_simple($meta; $tr; $fn):
+        [
+          $meta.tables[]?
+          | select(.name == $tr or ((.schema // "public") + "." + .name) == $tr)
+          | .fields[]?
+          | select(.name == $fn or .display_name == $fn)
+          | .id
+        ] | first // null;
       ($metaArr[0]) as $meta
-      | (.dataset_query.native["template-tags"] // {}) as $tags
-      | (.["metabase-field-filters"] // {}) as $ff
-      | (.dataset_query.native.query // "") as $q
-      | (infer_table_ref($q)) as $trAuto
+      | . as $card
+      | ($card.dataset_query.native["template-tags"] // {}) as $tags
+      | ($card["metabase-field-filters"] // {}) as $ff
       | (
-          if ($ff | length) > 0 then
-            $ff
+          if ($ff | length) == 0 then
+            $tags
           else
-            reduce ($tags | keys_unsorted[]) as $k ({}; 
-              if (($tags[$k].type // "") == "dimension") then
-                (infer_field_name($trAuto; $q; $k)) as $fn
-                | if ($trAuto != null and $fn != null) then
-                    . + { ($k): { table_ref: $trAuto, field_name: $fn } }
-                  else
-                    .
-                  end
-              else
-                .
-              end
-            )
-          end
-        ) as $ff2
-      | if ($ff2 | length) == 0 then
-          $tags
-        else
-          ($ff2 | keys_unsorted) as $keys
-          | reduce $keys[] as $k ($tags;
-              resolve_field_id($meta; $ff2[$k].table_ref; $ff2[$k].field_name) as $fid
-              | if $fid == null then
-                  error("metabase-field-filters: field not found: \($ff2[$k].table_ref).\($ff2[$k].field_name)")
+            reduce ($tags | keys_unsorted[]) as $k ($tags;
+              ($tags[$k]) as $tv
+              | if (($tv.type // "") == "dimension") and (($ff[$k] // null) != null) then
+                  resolve_field_id_simple($meta; $ff[$k].table_ref; $ff[$k].field_name) as $fid
+                  | if $fid != null then
+                      .[$k] = ($tv + { dimension: ["field", $fid, null] })
+                    else
+                      .
+                    end
                 else
-                  .[$k] = ($tags[$k] // {}) + { dimension: ["field", $fid, null] }
+                  .
                 end
             )
-        end
+          end
+        )
     '
   )"
   local table_ref="$(echo "$parsed_json" | jq -r '.table_ref // empty')"
@@ -585,7 +510,11 @@ create_card() {
 create_dashboard() {
   local file_json="$1"
   local collection_id="$2"
-  
+  local mb_auto_apply="false"
+  case "${MB_AUTO_APPLY_FILTERS}" in
+    true|1|yes|on) mb_auto_apply="true" ;;
+  esac
+
   if ! parsed_json="$(cat "$file_json" | jq -r .)"; then
     echo "Failed to parse $file_json. Exiting." >&2
     exit 1
@@ -603,6 +532,7 @@ create_dashboard() {
     --arg collectionId "${collection_id}" \
     --arg parameters "${parameters_json}" \
     --arg width "${dash_width}" \
+    --argjson autoApply "${mb_auto_apply}" \
     '{
       name: $name,
       description: $description,
@@ -610,7 +540,7 @@ create_dashboard() {
       width: $width,
       cacheables: [],
       parameters: ($parameters | fromjson),
-      auto_apply_filters: true
+      auto_apply_filters: $autoApply
     }')"
 
   dashboard_id="$(api_request POST "/api/dashboard" "${dashboard_payload}" | jq -r '.id')"
@@ -702,10 +632,10 @@ create_dashboard() {
 
     repair_dashboard_parameter_links_if_needed "${dashboard_id}"
 
-    # Полное тело как после GET (уже с parameter_mappings), с auto_apply_filters — обходит сброс при PUT …/cards в MB 0.48+.
+    # Полное тело как после GET (уже с parameter_mappings); auto_apply — см. MB_AUTO_APPLY_FILTERS (по умолчанию true).
     local dash_after fix_payload
     dash_after="$(api_request GET "/api/dashboard/${dashboard_id}")"
-    fix_payload="$(echo "${dash_after}" | jq --arg w "${dash_width}" '.auto_apply_filters = true | .width = $w')"
+    fix_payload="$(echo "${dash_after}" | jq --arg w "${dash_width}" --argjson autoApply "${mb_auto_apply}" '.auto_apply_filters = $autoApply | .width = $w')"
     if ! api_request PUT "/api/dashboard/${dashboard_id}" "${fix_payload}" >/dev/null; then
       log_info "WARN: PUT /api/dashboard/${dashboard_id} after dashcards failed (filters may need Apply in UI)"
     fi
@@ -720,6 +650,8 @@ log_info "Waiting for Metabase at ${METABASE_URL}..."
 until curl --silent --fail "${METABASE_URL}/api/health" >/dev/null; do
   sleep 3
 done
+
+log_info "METABASE_AUTO_APPLY_FILTERS=${MB_AUTO_APPLY_FILTERS} (true: текущие значения фильтров применяются при открытии; false — только после «Применить» в UI)."
 
 authenticate
 delete_demo_content

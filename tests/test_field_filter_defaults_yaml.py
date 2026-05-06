@@ -12,7 +12,6 @@ def test_field_filter_defaults_yaml_exists_and_structure():
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert isinstance(data, dict)
     assert data.get("version") == 1
-    assert "dwh_date_bindings" in data
-    assert "text_parameter_bindings" in data
-    assert isinstance(data.get("dashboards"), list)
-    assert len(data["dashboards"]) >= 6
+    raw = path.read_text(encoding="utf-8")
+    assert "metabase-field-filters" in raw
+    assert "setup-dashboards.sh" in raw

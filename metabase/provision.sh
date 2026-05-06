@@ -236,16 +236,21 @@ case "${FORCE_FLAG}" in
 esac
 
 if [ -x /app/setup-dashboards.sh ] && [ "${PROVISION_DASHBOARDS}" = "1" ]; then
+  # auto_apply_filters по умолчанию true (см. setup-dashboards.sh). При конкуренции с ETL: METABASE_AUTO_APPLY_FILTERS=false.
   log_info "Waiting for DWH schema in Postgres (needed for dashboard provisioning)..."
   SCHEMA_SQL="SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('fact_egisz_transactions', 'v_egisz_transactions_enriched', 'v_egisz_transactions_enriched_ui', 'v_rpt_semd_archive_ui', 'etl_state');"
   SCHEMA_CHECK="0"
-  # -At: одна строка без пробелов/переносов — иначе сравнение в bash может не сработать
-  for _attempt in $(seq 1 120); do
+  # -At: одна строка без пробелов/переносов — иначе сравнение в bash может не сработать.
+  # До 45 мин: тяжёлый 001_schema.sql + Job на медленном томе может идти дольше 10 мин; Metabase при этом уже в Ready.
+  for _attempt in $(seq 1 540); do
     SCHEMA_CHECK="$(PGPASSWORD="${APP_DB_PASSWORD}" psql -h "${PGHOST}" -U "${APP_DB_USER}" -d "${APP_DB_NAME}" -Atc "${SCHEMA_SQL}" 2>/dev/null || true)"
     SCHEMA_CHECK="$(echo "${SCHEMA_CHECK}" | tr -d '[:space:]')"
     SCHEMA_CHECK="${SCHEMA_CHECK:-0}"
     if [ "${SCHEMA_CHECK}" -ge 5 ] 2>/dev/null; then
       break
+    fi
+    if [ $((_attempt % 60)) -eq 0 ]; then
+      log_info "Still waiting for DWH schema in ${APP_DB_NAME} (attempt ${_attempt}/540, count=${SCHEMA_CHECK})…"
     fi
     sleep 5
   done
@@ -275,7 +280,14 @@ if [ -x /app/setup-dashboards.sh ] && [ "${PROVISION_DASHBOARDS}" = "1" ]; then
       log_info "WARN: could not record manifest stamp (bundle SHA empty)."
     fi
   else
-    echo "[provision] Warning: Application database schema not fully initialized after wait (need fact + v_egisz_transactions_enriched + v_egisz_transactions_enriched_ui + v_rpt_semd_archive_ui + etl_state). Skipping dashboard provisioning. Run egisz-monitor apply-schema and restart Metabase."
+    echo "[provision] Warning: Application database schema not fully initialized after wait (need fact + v_egisz_transactions_enriched + v_egisz_transactions_enriched_ui + v_rpt_semd_archive_ui + etl_state). Skipping dashboard provisioning. Run egisz-monitor apply-schema and restart Metabase." >&2
+    mkdir -p "$(dirname "${MANIFEST_STAMP_FILE}")"
+    {
+      echo "schema_tables_count=${SCHEMA_CHECK}"
+      echo "expected_min=5"
+      echo "hint=Run: kubectl -n egisz-monitor exec deploy/conf-ui -c conf-ui -- python -m egisz_monitor_corp apply-schema"
+      echo "then: kubectl -n egisz-monitor rollout restart deployment/metabase"
+    } > /shared/corp-metabase-provision-schema-incomplete.txt
   fi
 elif [ "${PROVISION_DASHBOARDS}" = "1" ]; then
   log_info "Note: /app/setup-dashboards.sh is missing; provisioning skipped."

@@ -1,13 +1,12 @@
 {
   "name": "06 Архив СЭМД",
-  "description": "Обработанные документы (колбэки) из `v_rpt_semd_archive_ui`: итоги по фильтру, распределение по типам СЭМД и полная таблица реквизитов. [Field filters](https://www.metabase.com/docs/v0.60/questions/native-editor/field-filters): **Дата обработки** (`dwh_date_filter`), **Код СЭМД**, **JID клиники**.",
+  "description": "Обработанные документы (ответы РЭМД по регистрации) из `v_rpt_semd_archive_ui`: итоги по фильтру, распределение по типам СЭМД и полная таблица реквизитов. [Field filters](https://www.metabase.com/docs/v0.60/questions/native-editor/field-filters): **Дата обработки** (`dwh_date_filter`), **Код СЭМД**, **JID клиники**.",
   "parameters": [
     {
       "id": "b8f3c2b1-4d5e-6f70-a8b9-c0d1e2f3a4c6",
       "name": "Период по дате обработки",
       "slug": "dwh_date_filter",
       "type": "date/all-options",
-      "default": "past90days",
       "sectionId": "date"
     },
     {
@@ -185,7 +184,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT \"День (тренд)\" AS \"Дата\", CASE WHEN NULLIF(TRIM(\"Код СЭМД\"), '') IS NULL THEN initcap(COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)')) ELSE NULLIF(TRIM(\"Код СЭМД\"), '') || '. ' || initcap(COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)')) END AS \"Наименование СЭМД\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] GROUP BY 1, 2 ORDER BY 1 ASC",
+          "query": "SELECT \"День (тренд)\" AS \"Дата\", COALESCE(NULLIF(TRIM(\"Тип СЭМД (код · НСИ)\"), ''), '(пусто)') AS \"Тип СЭМД (код · НСИ)\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] GROUP BY 1, 2 ORDER BY 1 ASC",
           "template-tags": {
             "dwh_date": {
               "display-name": "По дате «День (тренд)»",
@@ -224,8 +223,8 @@
           "[\"name\",\"Дата\"]": {
             "column_title": "Дата"
           },
-          "[\"name\",\"Наименование СЭМД\"]": {
-            "column_title": "Наименование СЭМД"
+          "[\"name\",\"Тип СЭМД (код · НСИ)\"]": {
+            "column_title": "Тип СЭМД (код · НСИ)"
           },
           "[\"name\",\"Документов\"]": {
             "column_title": "Документов",
@@ -240,7 +239,8 @@
         },
         "graph.x_axis.scale": "timeseries",
         "graph.dimensions": [
-          "Дата"
+          "Дата",
+          "Тип СЭМД (код · НСИ)"
         ]
       },
       "sizeX": 20,
@@ -365,7 +365,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM public.v_rpt_semd_archive_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID\"::text = {{top_clinic}}]] [[AND NULLIF(TRIM(\"localUid СЭМД\"::text), '') = {{local_uid}}]] [[AND NULLIF(TRIM(\"Связанное сообщение\"::text), '') = {{relates_to}}]] [[AND NULLIF(TRIM(\"Рег. номер РЭМД\"::text), '') = {{emdr_id}}]] [[AND NULLIF(TRIM(\"Статус\"::text), '') = {{status}}]] [[AND NULLIF(TRIM(\"LOGID журнала EXCHANGELOG\"::text), '') = {{log_id}}]] [[AND NULLIF(TRIM(\"EGISZ_MESSAGES.EGMID (ключ записи, РЭМД)\"::text), '') = {{egmid}}]] GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 25",
+          "query": "SELECT COALESCE(NULLIF(TRIM(\"Тип СЭМД (код · НСИ)\"), ''), '(пусто)') AS \"Тип СЭМД (код · НСИ)\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM public.v_rpt_semd_archive_ui WHERE 1=1 [[AND {{dwh_date}}]] [[AND NULLIF(TRIM(\"Код СЭМД\"), '') = {{top_semd}}]] [[AND \"JID\"::text = {{top_clinic}}]] [[AND NULLIF(TRIM(\"localUid СЭМД\"::text), '') = {{local_uid}}]] [[AND NULLIF(TRIM(\"Связанное сообщение\"::text), '') = {{relates_to}}]] [[AND NULLIF(TRIM(\"Рег. номер РЭМД\"::text), '') = {{emdr_id}}]] [[AND NULLIF(TRIM(\"Статус\"::text), '') = {{status}}]] [[AND NULLIF(TRIM(\"LOGID журнала EXCHANGELOG\"::text), '') = {{log_id}}]] [[AND NULLIF(TRIM(\"EGISZ_MESSAGES.EGMID (ключ записи, РЭМД)\"::text), '') = {{egmid}}]] GROUP BY 1 ORDER BY 2 DESC LIMIT 25",
           "template-tags": {
             "top_semd": {
               "widget-type": "string/=",
@@ -445,7 +445,7 @@
       "display": "row",
       "visualization_settings": {
         "graph.dimensions": [
-          "Наименование СЭМД"
+          "Тип СЭМД (код · НСИ)"
         ],
         "graph.show_values": true,
         "table": {
@@ -462,11 +462,8 @@
           }
         },
         "column_settings": {
-          "[\"name\",\"Код СЭМД\"]": {
-            "column_title": "Код СЭМД"
-          },
-          "[\"name\",\"Наименование СЭМД\"]": {
-            "column_title": "Наименование СЭМД"
+          "[\"name\",\"Тип СЭМД (код · НСИ)\"]": {
+            "column_title": "Тип СЭМД (код · НСИ)"
           },
           "[\"name\",\"Документов\"]": {
             "column_title": "Документов",

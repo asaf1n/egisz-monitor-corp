@@ -169,9 +169,7 @@ function Invoke-DockerBuildMetabaseOnly {
     }
     Invoke-Native docker build @nc -f metabase/Dockerfile -t egisz-monitor-metabase:latest $Root
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    # :k8s-v23 + :local — теги в k8s/metabase.yaml; bump тега при смене JSON/скриптов Metabase.
-    Invoke-Native docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:k8s-v23
-    if ($LASTEXITCODE -ne 0) { exit 1 }
+    # Доп. тег для docker run / metabase/provision-local.ps1 (тот же image ID, что :latest).
     Invoke-Native docker tag egisz-monitor-metabase:latest egisz-monitor-metabase:local
     if ($LASTEXITCODE -ne 0) { exit 1 }
     Write-Host "`[Docker] egisz-monitor-metabase OK" -ForegroundColor Green
@@ -238,8 +236,6 @@ function Invoke-KindLoadImagesIfNeeded {
     kind load docker-image egisz-conf-ui:sync-web --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }
     kind load docker-image egisz-monitor-metabase:latest --name $name
-    if ($LASTEXITCODE -ne 0) { exit 1 }
-    kind load docker-image egisz-monitor-metabase:k8s-v23 --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }
     kind load docker-image egisz-monitor-metabase:local --name $name
     if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -355,7 +351,7 @@ function Publish-MetabaseStampedDeploymentImage {
     kubectl -n egisz-monitor get deploy metabase -o name 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) { return }
     $stamp = [DateTime]::UtcNow.ToString("yyyyMMddHHmmss")
-    $img = "egisz-monitor-metabase:k8s-v23-$stamp"
+    $img = "egisz-monitor-metabase:latest-$stamp"
     docker tag egisz-monitor-metabase:latest $img
     if ($LASTEXITCODE -ne 0) { return }
     if ($ctx -match '^kind-') {
@@ -419,7 +415,8 @@ function Invoke-ResetMetabaseApplicationDatabase {
 SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'metabase' AND pid <> pg_backend_pid();
 DROP DATABASE IF EXISTS metabase;
 CREATE DATABASE metabase OWNER 
-'@ + $pgUser + ';'
+'@
+    $sql = $sql + $pgUser + ';'
     # psql NOTICE (e.g. database does not exist) goes to stderr; PS 7 + ErrorAction Stop treats it as terminating.
     $prevEaSql = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
@@ -502,14 +499,31 @@ function Wait-CorpMetabaseProvisioning {
     Write-Host ("`[kubectl] Waiting for Metabase provisioning markers (up to {0}s)..." -f $TimeoutSec) -ForegroundColor Cyan
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     while ((Get-Date) -lt $deadline) {
-        # Любой маркер: штамп JSON (успешный импорт) или public UUID.
+        # Явный отказ: витрина в Postgres не догрузилась — provision.sh не импортировал дашборды (маркера SHA не будет).
+        $badSh = "test -s /shared/corp-metabase-provision-schema-incomplete.txt"
+        $badArgs = @('-n', $ns, 'exec', 'deployment/metabase', '-c', 'metabase', '--', 'bash', '-lc', $badSh)
+        $badCode = 1
+        try {
+            $null = & $kubectlExe @badArgs 2>$null
+            $badCode = [int]$LASTEXITCODE
+        } catch {
+            $badCode = 1
+        }
+        if ($badCode -eq 0) {
+            Write-Host "`[kubectl] ERROR: Metabase пропустил импорт дашбордов — витрина egisz_reports не готова в срок (см. /shared/corp-metabase-provision-schema-incomplete.txt в поде)." -ForegroundColor Red
+            Write-Host "  Логи: kubectl -n egisz-monitor logs deploy/metabase -c metabase --tail=250" -ForegroundColor DarkGray
+            Write-Host "  Восстановление: kubectl -n egisz-monitor exec deploy/conf-ui -c conf-ui -- python -m egisz_monitor_corp apply-schema" -ForegroundColor DarkGray
+            Write-Host "  Затем: kubectl -n egisz-monitor rollout restart deployment/metabase" -ForegroundColor DarkGray
+            return
+        }
+        # Любой маркер успеха: штамп JSON (успешный импорт) или public UUID.
         $sh = "test -s /shared/corp-metabase-dashboards-manifest.sha256 -o -s /shared/main-dashboard-public-uuid"
-        $args = @('-n', $ns, 'exec', 'deployment/metabase', '-c', 'metabase', '--', 'bash', '-lc', $sh)
+        $kubectlArgs = @('-n', $ns, 'exec', 'deployment/metabase', '-c', 'metabase', '--', 'bash', '-lc', $sh)
         $code = 1
         try {
             # В PowerShell non-zero exit от native command может стать NativeCommandError
             # (в зависимости от $ErrorActionPreference). Нам нужен именно код, а не исключение.
-            $null = & $kubectlExe @args 2>$null
+            $null = & $kubectlExe @kubectlArgs 2>$null
             $code = [int]$LASTEXITCODE
         } catch {
             $code = 1
@@ -522,7 +536,8 @@ function Wait-CorpMetabaseProvisioning {
     }
 
     Write-Host "`[kubectl] WARN: provisioning markers were not detected in time. Metabase can be Ready, but dashboards/import may still be in progress or failed." -ForegroundColor Yellow
-    Write-Host "  Check logs: kubectl -n egisz-monitor logs deploy/metabase --tail=200" -ForegroundColor DarkGray
+    Write-Host "  Check logs: kubectl -n egisz-monitor logs deploy/metabase -c metabase --tail=250" -ForegroundColor DarkGray
+    Write-Host "  If provision skipped schema: cat hint via kubectl exec ... cat /shared/corp-metabase-provision-schema-incomplete.txt" -ForegroundColor DarkGray
 }
 
 function Wait-CorpConfUiRollout {
@@ -632,7 +647,7 @@ function Invoke-PostgresSchemaInit {
     kubectl -n egisz-monitor delete job/egisz-reports-schema-init --ignore-not-found
     kubectl apply -f (Join-Path $Root "k8s\postgres\egisz-reports-schema-job.yaml")
     if ($LASTEXITCODE -ne 0) { exit 1 }
-    if (-not (Wait-KubectlJobSucceeded -Namespace egisz-monitor -JobName egisz-reports-schema-init -TimeoutSec 300)) {
+    if (-not (Wait-KubectlJobSucceeded -Namespace egisz-monitor -JobName egisz-reports-schema-init -TimeoutSec 900)) {
         Write-Host "ERROR: Schema job did not succeed. Logs: kubectl -n egisz-monitor logs job/egisz-reports-schema-init" -ForegroundColor Red
         exit 1
     }
@@ -1211,6 +1226,9 @@ switch ($Action) {
         Invoke-KindLoadImagesIfNeeded
         Invoke-KubectlApply -ResetMetabaseAppDb
         Invoke-ConfUiApplyReportsSchema
+        Write-Host "`[kubectl] Metabase: rollout restart после apply-schema (повторный provision с готовой витриной)..." -ForegroundColor Cyan
+        Invoke-CorpRolloutRestartMetabaseOnly
+        Wait-CorpMetabaseRollout
         Show-DeployInfo
         Invoke-CorpPortForwardIfRequestedAfterK8s -BackgroundSwitchPresent:$PSBoundParameters.ContainsKey('BackgroundPortForward') -BackgroundEnabled:$BackgroundPortForward -ConfAndMetabaseOnly:$(-not $IncludePostgresPortForward)
         Wait-CorpMetabaseProvisioning -TimeoutSec 900
@@ -1225,6 +1243,9 @@ switch ($Action) {
         Invoke-KindLoadImagesIfNeeded
         Invoke-KubectlApply -ResetNamespace -ResetMetabaseAppDb
         Invoke-ConfUiApplyReportsSchema
+        Write-Host "`[kubectl] Metabase: rollout restart после apply-schema (повторный provision с готовой витриной)..." -ForegroundColor Cyan
+        Invoke-CorpRolloutRestartMetabaseOnly
+        Wait-CorpMetabaseRollout
         Show-DeployInfo
         Invoke-CorpPortForwardIfRequestedAfterK8s -BackgroundSwitchPresent:$PSBoundParameters.ContainsKey('BackgroundPortForward') -BackgroundEnabled:$BackgroundPortForward -ConfAndMetabaseOnly:$(-not $IncludePostgresPortForward)
         Wait-CorpMetabaseProvisioning -TimeoutSec 900

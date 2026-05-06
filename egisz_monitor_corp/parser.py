@@ -72,6 +72,22 @@ def _norm_ws(s: str | None) -> str | None:
     return t or None
 
 
+# Стандартный UUID в MIS/РЭМД: регистр шестнадцатеричных цифр не семантичен; унифицируем для стыковки с DOCUMENTID.
+_UUID_SEMD_DOCUMENT_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+
+def canonical_semd_document_uid(s: str | None) -> str | None:
+    """Нормализует идентификатор документа СЭМД: UUID → lower-case, остальное без изменений."""
+    t = _norm_ws(s)
+    if not t:
+        return None
+    if _UUID_SEMD_DOCUMENT_RE.fullmatch(t):
+        return t.lower()
+    return t
+
+
 def _soap_xml_source(msg_text: str | None) -> str | None:
     """SOAP/XML только из EXCHANGELOG.MSGTEXT; в LOGTEXT — только транспортный хост, не XML."""
     blob = (msg_text or "").strip()
@@ -650,7 +666,9 @@ class EgiszMonitorParser:
 
         mismatch = _jid_sources_mismatch(lic_jid, j_log, j_rep, t_log, t_rep)
 
-        local_uid_semd = _norm_ws(local_uid_xml) or _norm_ws(document_id)
+        local_uid_semd = canonical_semd_document_uid(
+            _norm_ws(local_uid_xml) or _norm_ws(document_id)
+        )
 
         hint_relates, hint_local, hint_emdr = extract_parse_hints(soap_src)
 

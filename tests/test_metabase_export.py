@@ -95,6 +95,67 @@ def test_safe_zip_entry_name() -> None:
     assert me._safe_zip_entry_name(1, "x").endswith(".json")
 
 
+def test_export_database_metadata_dump_skips_sample_and_archived(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_api(mb: str, path: str, method: str = "GET", body: object = None, token: str | None = None) -> object:
+        if path == "/api/database":
+            return {
+                "data": [
+                    {"id": 1, "name": "Sample", "engine": "h2", "is_sample": True, "archived": False},
+                    {"id": 2, "name": "Old", "engine": "postgres", "is_sample": False, "archived": True},
+                    {"id": 3, "name": "DWH", "engine": "postgres", "is_sample": False, "archived": False},
+                ]
+            }
+        if path == "/api/database/3/metadata?include_hidden=true":
+            return {"tables": [{"name": "v_x", "fields": [{"id": 10, "name": "n"}]}]}
+        raise AssertionError(f"unexpected path {path!r}")
+
+    monkeypatch.setattr(me, "_api", fake_api)
+    out = me.export_database_metadata_dump("http://mb.test", None)
+    assert out["errors"] == []
+    assert len(out["databases"]) == 1
+    assert out["databases"][0]["id"] == 3
+    assert out["databases"][0]["metadata"]["tables"][0]["name"] == "v_x"
+
+
+def test_export_database_metadata_dump_per_db_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_api(mb: str, path: str, method: str = "GET", body: object = None, token: str | None = None) -> object:
+        if path == "/api/database":
+            return {"data": [{"id": 5, "name": "X", "engine": "postgres", "is_sample": False, "archived": False}]}
+        if path == "/api/database/5/metadata?include_hidden=true":
+            raise RuntimeError("metadata failed")
+        raise AssertionError(path)
+
+    monkeypatch.setattr(me, "_api", fake_api)
+    out = me.export_database_metadata_dump("http://mb.test", None)
+    assert out["databases"] == []
+    assert len(out["errors"]) == 1
+    assert out["errors"][0]["database_id"] == 5
+
+
+def test_export_dashboards_zip_includes_metadata_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    import io
+    import zipfile
+
+    monkeypatch.setenv("METABASE_API_KEY", "k")
+    monkeypatch.setattr(me, "_iter_dashboards_in_scope", lambda mb, token: [(7, "Dash")])
+    monkeypatch.setattr(
+        me,
+        "export_dashboard",
+        lambda mb, token, did, db_placeholder=1: {"name": "Dash", "cards": []},
+    )
+    monkeypatch.setattr(
+        me,
+        "export_database_metadata_dump",
+        lambda mb, token: {"databases": [{"id": 3, "metadata": {}}]},
+    )
+    blob, fn = me.export_dashboards_zip("http://mb.test", "u", "p")
+    assert "dashboards" in fn
+    zf = zipfile.ZipFile(io.BytesIO(blob))
+    assert "metabase_database_metadata.json" in zf.namelist()
+    body = json.loads(zf.read("metabase_database_metadata.json").decode())
+    assert body["databases"][0]["id"] == 3
+
+
 def test_existing_dashboard_name_to_filename(tmp_path: Path) -> None:
     p = tmp_path / "01_operational.json"
     p.write_text(json.dumps({"name": "01 Оперативный мониторинг", "cards": []}), encoding="utf-8")

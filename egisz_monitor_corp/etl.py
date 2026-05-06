@@ -34,6 +34,7 @@ from egisz_monitor_corp.error_model import classify_staging_error_code
 from egisz_monitor_corp.parser import (
     EgiszMonitorParser,
     StagingChannelError,
+    canonical_semd_document_uid,
     coerce_exchangelog_log_state,
     extract_parse_hints,
 )
@@ -1123,7 +1124,7 @@ def _refresh_outbound_documents(
     # Для UI считаем "документы" как уникальные DOCUMENTID (localUid), а не как строки выборки.
     outbound_total_docs = len(
         {
-            _to_str(r.get("documentid"))
+            canonical_semd_document_uid(_to_str(r.get("documentid")))
             for r in omsg_sorted
             if _to_str(r.get("documentid"))
         }
@@ -1146,7 +1147,7 @@ def _refresh_outbound_documents(
     for oi, r in enumerate(omsg_sorted, start=1):
         if oi == 1 or oi % 400 == 0:
             _raise_if_cancel(cancel_check)
-        did = _to_str(r.get("documentid"))
+        did = canonical_semd_document_uid(_to_str(r.get("documentid")))
         skip = not did or did in seen_doc
         reply_to = _to_str(r.get("replyto"))
         if not skip:

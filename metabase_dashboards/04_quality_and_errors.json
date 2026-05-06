@@ -1,13 +1,12 @@
 {
   "name": "04 Ошибки и качество данных",
-  "description": "**Качество витрины:** успешность по клиникам и типам СЭМД, проверки JID/OID, полнота ключевых полей. **Отказы РЭМД:** распределение и рейтинги по тексту ошибки из «Ошибки JSON», **матрица СЭМД × тип ошибки** (pivot) для всплесков однотипных отказов по всем клиникам. Общий фильтр периода по дате **«Обработано IPS»** на всех карточках.",
+  "description": "**Качество витрины:** успешность по клиникам и по **типу СЭМД** (колонка «Тип СЭМД (код · НСИ)»: каждый код НСИ — отдельный документ ЕГИСЗ; идентификатор и наименование по паспорту НСИ [1520](https://nsi.rosminzdrav.ru/dictionaries/1.2.643.5.1.13.13.11.1520/passport/12.33)). Учёт экземпляра документа — колонка «Документ (ключ учёта)» / DISTINCT по «Связанное сообщение» в потоке ответов РЭМД. Проверки JID/OID, полнота полей. **Отказы РЭМД:** рейтинги по «Ошибки JSON», матрица тип СЭМД × тип ошибки. **Ошибки связи (транспорт):** сбой канала (журнал LOGSTATE=3), не путать с текстом отказа регистрации в XML ответа РЭМД. Витрина `v_rpt_network_errors_detail_ui`: «Клиника (транспорт)» — gost/JID из журнала и/или контекст из связанного колбэка; фильтр периода — **«Обработано IPS»** (`dwh_date_filter`) на фактах и **`parse_created_filter`** по дате строки в staging.",
   "parameters": [
     {
       "id": "e5f6a7b8-c9d0-4123-ef45-6789abcdef01",
       "name": "Период по дате обработки (витрина)",
       "slug": "dwh_date_filter",
       "type": "date/all-options",
-      "default": "past90days",
       "sectionId": "date"
     },
     {
@@ -37,6 +36,13 @@
       "slug": "status_filter",
       "type": "string/=",
       "sectionId": "string"
+    },
+    {
+      "id": "f5e6d7c8-b9a0-4123-cdef-012345678901",
+      "name": "Период по created_at (ошибки канала)",
+      "slug": "parse_created_filter",
+      "type": "date/all-options",
+      "sectionId": "date"
     }
   ],
   "cards": [
@@ -103,11 +109,11 @@
     },
     {
       "name": "04 · Успешность по типам СЭМД",
-      "description": "Доля успешных документов по коду и наименованию СЭМД. Метрика: COUNT(DISTINCT «Связанное сообщение») по статусу.",
+      "description": "Доля успешных документов по **группе СЭМД** (унификация разных кодов НСИ с одним наименованием). Метрика: COUNT(DISTINCT «Связанное сообщение») по статусу.",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS \"Код СЭМД\", COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS \"Наименование СЭМД\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Всего отправлено\", COUNT(DISTINCT \"Связанное сообщение\") FILTER (WHERE \"Статус\"='success')::bigint AS \"Успешно\", COUNT(DISTINCT \"Связанное сообщение\") FILTER (WHERE \"Статус\"='error')::bigint AS \"Ошибок\", ROUND(100.0 * COUNT(DISTINCT \"Связанное сообщение\") FILTER (WHERE \"Статус\"='success') / NULLIF(COUNT(DISTINCT \"Связанное сообщение\"), 0), 2) AS \"Процент успешных\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] GROUP BY 1, 2 ORDER BY 6 ASC, 3 DESC LIMIT 50",
+          "query": "SELECT COALESCE(NULLIF(TRIM(\"Тип СЭМД (код · НСИ)\"), ''), '(пусто)') AS \"Тип СЭМД (код · НСИ)\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Всего отправлено\", COUNT(DISTINCT \"Связанное сообщение\") FILTER (WHERE \"Статус\"='success')::bigint AS \"Успешно\", COUNT(DISTINCT \"Связанное сообщение\") FILTER (WHERE \"Статус\"='error')::bigint AS \"Ошибок\", ROUND(100.0 * COUNT(DISTINCT \"Связанное сообщение\") FILTER (WHERE \"Статус\"='success') / NULLIF(COUNT(DISTINCT \"Связанное сообщение\"), 0), 2) AS \"Процент успешных\" FROM public.v_egisz_transactions_enriched_ui WHERE 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ORDER BY 5 ASC, 2 DESC LIMIT 50",
           "template-tags": {
             "dwh_date": {
               "widget-type": "date/all-options",
@@ -134,14 +140,11 @@
           null,
           387
         ],
-        "table.pivot_column": "Наименование СЭМД",
+        "table.pivot_column": "Тип СЭМД (код · НСИ)",
         "table.cell_column": "Всего отправлено",
         "column_settings": {
-          "[\"name\",\"Код СЭМД\"]": {
-            "column_title": "Код СЭМД"
-          },
-          "[\"name\",\"Наименование СЭМД\"]": {
-            "column_title": "Наименование СЭМД"
+          "[\"name\",\"Тип СЭМД (код · НСИ)\"]": {
+            "column_title": "Тип СЭМД (код · НСИ)"
           },
           "[\"name\",\"Всего отправлено\"]": {
             "column_title": "Всего отправлено",
@@ -217,7 +220,7 @@
     },
     {
       "name": "04 · Полнота полей витрины",
-      "description": "Сводка по витрине за период: документы без localUid СЭМД, без кода СЭМД, успешные колбэки без заполненной даты регистрации в ЕГИСЗ РЭМД.",
+      "description": "Сводка по витрине за период: документы без localUid СЭМД, без кода вида ЭМД, успешные ответы РЭМД без заполненной даты регистрации в ЕГИСЗ РЭМД.",
       "dataset_query": {
         "type": "native",
         "native": {
@@ -330,7 +333,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH per_doc AS ( SELECT \"JID клиники\"::text AS \"JID клиники\", \"Наименование клиники\", COALESCE(NULLIF(TRIM(\"Код СЭМД\"), ''), '(пусто)') AS kod_semd, COALESCE(NULLIF(TRIM(\"Наименование СЭМД\"), ''), '(пусто)') AS name_semd, COALESCE( ( SELECT LEFT(public.egisz_error_interpretation_type(err->>'code', err->>'message'), 120) FROM jsonb_array_elements(COALESCE(\"Ошибки JSON\", '[]'::jsonb)) AS e(err) WHERE NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL LIMIT 1 ), '(ошибка без деталей)' ) AS err_summary, \"Связанное сообщение\" FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] ) SELECT \"JID клиники\", \"Наименование клиники\", kod_semd AS \"Код СЭМД\", name_semd AS \"Наименование СЭМД\", err_summary AS \"Сводка ошибки\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM per_doc GROUP BY 1, 2, 3, 4, 5 ORDER BY 6 DESC LIMIT 50",
+          "query": "WITH per_doc AS ( SELECT \"JID клиники\"::text AS \"JID клиники\", \"Наименование клиники\", COALESCE(NULLIF(TRIM(\"Тип СЭМД (код · НСИ)\"), ''), '(пусто)') AS grp_semd, COALESCE( ( SELECT LEFT(public.egisz_error_interpretation_type(err->>'code', err->>'message'), 120) FROM jsonb_array_elements(COALESCE(\"Ошибки JSON\", '[]'::jsonb)) AS e(err) WHERE NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL LIMIT 1 ), '(ошибка без деталей)' ) AS err_summary, \"Связанное сообщение\" FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] ) SELECT \"JID клиники\", \"Наименование клиники\", grp_semd AS \"Тип СЭМД (код · НСИ)\", err_summary AS \"Сводка ошибки\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM per_doc GROUP BY 1, 2, 3, 4 ORDER BY 5 DESC LIMIT 50",
           "template-tags": {
             "dwh_date": {
               "widget-type": "date/all-options",
@@ -360,11 +363,8 @@
           "[\"name\",\"Наименование клиники\"]": {
             "column_title": "Наименование клиники"
           },
-          "[\"name\",\"Код СЭМД\"]": {
-            "column_title": "Код СЭМД"
-          },
-          "[\"name\",\"Наименование СЭМД\"]": {
-            "column_title": "Наименование СЭМД"
+          "[\"name\",\"Тип СЭМД (код · НСИ)\"]": {
+            "column_title": "Тип СЭМД (код · НСИ)"
           },
           "[\"name\",\"Сводка ошибки\"]": {
             "column_title": "Сводка ошибки"
@@ -489,11 +489,11 @@
     },
     {
       "name": "04 · Доля ошибок по СЭМД",
-      "description": "Доля ошибок по СЭМД: топ-10 по числу документов со статусом error; остальные — срез «Остальные (N)». «Итого» — сумма всех таких документов за период.",
+      "description": "Доля ошибок по **группе СЭМД** (унификация кодов с одним наименованием): топ-10 по числу документов со статусом error; остальные — «Остальные (N)».",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH per_code AS ( SELECT LEFT( CASE WHEN NULLIF(TRIM(\"Код СЭМД\"), '') IS NOT NULL THEN TRIM(\"Код СЭМД\") || COALESCE(' · ' || NULLIF(LEFT(TRIM(\"Наименование СЭМД\"), 32), ''), '') WHEN NULLIF(TRIM(\"Наименование СЭМД\"), '') IS NOT NULL THEN LEFT(TRIM(\"Наименование СЭМД\"), 72) ELSE '(неизвестно)' END, 80 ) AS lbl, COUNT(DISTINCT \"Связанное сообщение\")::bigint AS cnt FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ), ranked AS ( SELECT lbl, cnt, ROW_NUMBER() OVER (ORDER BY cnt DESC) AS rn FROM per_code ), tail AS ( SELECT COALESCE(SUM(cnt), 0)::bigint AS tail_cnt FROM ranked WHERE rn > 10 ) SELECT CASE WHEN r.rn <= 10 THEN r.lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END AS \"СЭМД\", SUM(r.cnt)::bigint AS \"Количество\" FROM ranked r CROSS JOIN tail t GROUP BY CASE WHEN r.rn <= 10 THEN r.lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END ORDER BY 2 DESC",
+          "query": "WITH per_code AS ( SELECT COALESCE(NULLIF(TRIM(\"Тип СЭМД (код · НСИ)\"), ''), '(неизвестно)') AS lbl, COUNT(DISTINCT \"Связанное сообщение\")::bigint AS cnt FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ), ranked AS ( SELECT lbl, cnt, ROW_NUMBER() OVER (ORDER BY cnt DESC) AS rn FROM per_code ), tail AS ( SELECT COALESCE(SUM(cnt), 0)::bigint AS tail_cnt FROM ranked WHERE rn > 10 ) SELECT CASE WHEN r.rn <= 10 THEN r.lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END AS \"СЭМД\", SUM(r.cnt)::bigint AS \"Количество\" FROM ranked r CROSS JOIN tail t GROUP BY CASE WHEN r.rn <= 10 THEN r.lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END ORDER BY 2 DESC",
           "template-tags": {
             "dwh_date": {
               "widget-type": "date/all-options",
@@ -662,7 +662,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "SELECT LEFT( CASE WHEN NULLIF(TRIM(\"Код СЭМД\"), '') IS NOT NULL THEN TRIM(\"Код СЭМД\") || COALESCE(' · ' || NULLIF(LEFT(TRIM(\"Наименование СЭМД\"), 40), ''), '') WHEN NULLIF(TRIM(\"Наименование СЭМД\"), '') IS NOT NULL THEN LEFT(TRIM(\"Наименование СЭМД\"), 72) ELSE '(неизвестно)' END, 80 ) AS \"СЭМД (подпись)\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Ошибок\" FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ORDER BY 2 DESC LIMIT 25",
+          "query": "SELECT COALESCE(NULLIF(TRIM(\"Тип СЭМД (код · НСИ)\"), ''), '(неизвестно)') AS \"СЭМД (подпись)\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Ошибок\" FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] GROUP BY 1 ORDER BY 2 DESC LIMIT 25",
           "template-tags": {
             "dwh_date": {
               "widget-type": "date/all-options",
@@ -771,12 +771,12 @@
       "col": 0
     },
     {
-      "name": "04 · Матрица: тип СЭМД × тип ошибки",
+      "name": "04 · Матрица: тип тип СЭМД × тип ошибки",
       "description": "Pivot-таблица: по оси Y — подпись СЭМД (как в рейтингах), по оси X — нормализованный тип ошибки (`egisz_error_interpretation_type` по **каждому** значимому элементу «Ошибки JSON», не только первому). **Документов** — число уникальных «Связанное сообщение» в ячейке по **всем клиникам**; один документ с несколькими разными ошибками попадает в несколько ячеек. Пустой/бессодержательный массив — строка «(ошибка без деталей)».",
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH raw AS ( SELECT v.\"Связанное сообщение\", LEFT( CASE WHEN NULLIF(TRIM(v.\"Код СЭМД\"), '') IS NOT NULL THEN TRIM(v.\"Код СЭМД\") || COALESCE(' · ' || NULLIF(LEFT(TRIM(v.\"Наименование СЭМД\"), 40), ''), '') WHEN NULLIF(TRIM(v.\"Наименование СЭМД\"), '') IS NOT NULL THEN LEFT(TRIM(v.\"Наименование СЭМД\"), 72) ELSE '(неизвестно)' END, 80 ) AS semd_lbl, v.\"Ошибки JSON\" FROM public.v_egisz_transactions_enriched_ui v WHERE v.\"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] ), expanded AS ( SELECT r.\"Связанное сообщение\", r.semd_lbl, LEFT(public.egisz_error_interpretation_type(elem->>'code', elem->>'message'), 120) AS err_lbl FROM raw r CROSS JOIN LATERAL jsonb_array_elements(COALESCE(r.\"Ошибки JSON\", '[]'::jsonb)) AS je(elem) WHERE NULLIF(elem->>'message', '') IS NOT NULL OR NULLIF(elem->>'code', '') IS NOT NULL UNION ALL SELECT r.\"Связанное сообщение\", r.semd_lbl, '(ошибка без деталей)'::text FROM raw r WHERE NOT EXISTS ( SELECT 1 FROM jsonb_array_elements(COALESCE(r.\"Ошибки JSON\", '[]'::jsonb)) AS je2(elem2) WHERE NULLIF(elem2->>'message', '') IS NOT NULL OR NULLIF(elem2->>'code', '') IS NOT NULL ) ) SELECT semd_lbl AS \"Тип СЭМД\", err_lbl AS \"Тип ошибки\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM expanded GROUP BY 1, 2 ORDER BY 3 DESC, 1, 2",
+          "query": "WITH raw AS ( SELECT v.\"Связанное сообщение\", COALESCE(NULLIF(TRIM(v.\"Тип СЭМД (код · НСИ)\"), ''), '(неизвестно)') AS semd_lbl, v.\"Ошибки JSON\" FROM public.v_egisz_transactions_enriched_ui v WHERE v.\"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] ), expanded AS ( SELECT r.\"Связанное сообщение\", r.semd_lbl, LEFT(public.egisz_error_interpretation_type(elem->>'code', elem->>'message'), 120) AS err_lbl FROM raw r CROSS JOIN LATERAL jsonb_array_elements(COALESCE(r.\"Ошибки JSON\", '[]'::jsonb)) AS je(elem) WHERE NULLIF(elem->>'message', '') IS NOT NULL OR NULLIF(elem->>'code', '') IS NOT NULL UNION ALL SELECT r.\"Связанное сообщение\", r.semd_lbl, '(ошибка без деталей)'::text FROM raw r WHERE NOT EXISTS ( SELECT 1 FROM jsonb_array_elements(COALESCE(r.\"Ошибки JSON\", '[]'::jsonb)) AS je2(elem2) WHERE NULLIF(elem2->>'message', '') IS NOT NULL OR NULLIF(elem2->>'code', '') IS NOT NULL ) ) SELECT semd_lbl AS \"Тип СЭМД\", err_lbl AS \"Тип ошибки\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM expanded GROUP BY 1, 2 ORDER BY 3 DESC, 1, 2",
           "template-tags": {
             "dwh_date": {
               "widget-type": "date/all-options",
@@ -844,7 +844,7 @@
       "dataset_query": {
         "type": "native",
         "native": {
-          "query": "WITH base AS ( SELECT *, ( SELECT LEFT(public.egisz_error_interpretation_type(err->>'code', err->>'message'), 100) FROM jsonb_array_elements(\"Ошибки JSON\") AS e(err) WHERE (NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL) LIMIT 1 ) AS err_text FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] ) SELECT COALESCE(err_text, '(без детализации)') AS \"Тип ошибки\", LEFT(CASE WHEN NULLIF(TRIM(\"Код СЭМД\"), '') IS NOT NULL THEN TRIM(\"Код СЭМД\") || COALESCE(' · ' || NULLIF(LEFT(TRIM(\"Наименование СЭМД\"), 28), ''), '') WHEN NULLIF(TRIM(\"Наименование СЭМД\"), '') IS NOT NULL THEN LEFT(TRIM(\"Наименование СЭМД\"), 64) ELSE '(неизвестно)' END, 72) AS \"Код СЭМД\", \"JID клиники\"::text AS \"JID клиники\", LEFT(COALESCE(NULLIF(TRIM(\"Наименование клиники\"), ''), ''), 40) AS \"Клиника\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM base GROUP BY 1, 2, 3, 4 ORDER BY 5 DESC NULLS LAST LIMIT 400",
+          "query": "WITH base AS ( SELECT *, ( SELECT LEFT(public.egisz_error_interpretation_type(err->>'code', err->>'message'), 100) FROM jsonb_array_elements(\"Ошибки JSON\") AS e(err) WHERE (NULLIF(err->>'message', '') IS NOT NULL OR NULLIF(err->>'code', '') IS NOT NULL) LIMIT 1 ) AS err_text FROM public.v_egisz_transactions_enriched_ui WHERE \"Статус\" = 'error' AND 1=1 [[AND {{dwh_date}}]] ) SELECT COALESCE(err_text, '(без детализации)') AS \"Тип ошибки\", COALESCE(NULLIF(TRIM(\"Тип СЭМД (код · НСИ)\"), ''), '(неизвестно)') AS \"Тип СЭМД (код · НСИ)\", \"JID клиники\"::text AS \"JID клиники\", LEFT(COALESCE(NULLIF(TRIM(\"Наименование клиники\"), ''), ''), 40) AS \"Клиника\", COUNT(DISTINCT \"Связанное сообщение\")::bigint AS \"Документов\" FROM base GROUP BY 1, 2, 3, 4 ORDER BY 5 DESC NULLS LAST LIMIT 400",
           "template-tags": {
             "dwh_date": {
               "widget-type": "date/all-options",
@@ -871,8 +871,8 @@
           "[\"name\",\"Тип ошибки\"]": {
             "column_title": "Тип ошибки"
           },
-          "[\"name\",\"Код СЭМД\"]": {
-            "column_title": "Код СЭМД"
+          "[\"name\",\"Тип СЭМД (код · НСИ)\"]": {
+            "column_title": "Тип СЭМД (код · НСИ)"
           },
           "[\"name\",\"JID клиники\"]": {
             "column_title": "JID клиники"
@@ -890,6 +890,128 @@
       "sizeX": 24,
       "sizeY": 10,
       "row": 54,
+      "col": 0
+    },
+    {
+      "name": "04 · Ошибки связи (транспорт): доля по клиникам",
+      "description": "Сбой доставки/транспорта (LOGSTATE=3), не содержимое ответа РЭМД. **Клиника (транспорт)** — приоритет: колбэк в витрине (если сопоставили журнал с фактом), иначе МО по числовому JID из `gost-…` в фрагменте журнала. Период — **created_at** staging (`parse_created_filter`).",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "WITH per_clinic AS ( SELECT COALESCE(NULLIF(TRIM(\"Клиника (транспорт)\"), ''), '(не определено)') AS lbl, COUNT(DISTINCT \"Ключ документа (группировка)\")::bigint AS cnt FROM public.v_rpt_network_errors_detail_ui WHERE 1=1 [[AND {{parse_created}}]] GROUP BY 1 ), ranked AS ( SELECT lbl, cnt, ROW_NUMBER() OVER (ORDER BY cnt DESC) AS rn FROM per_clinic ), tail AS ( SELECT COALESCE(SUM(cnt), 0)::bigint AS tail_cnt FROM ranked WHERE rn > 10 ) SELECT CASE WHEN r.rn <= 10 THEN r.lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END AS \"Клиника\", SUM(r.cnt)::bigint AS \"Количество\" FROM ranked r CROSS JOIN tail t GROUP BY CASE WHEN r.rn <= 10 THEN r.lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END ORDER BY 2 DESC",
+          "template-tags": {
+            "parse_created": {
+              "widget-type": "date/all-options",
+              "id": "f9000001-0001-4001-8001-000000000501",
+              "name": "parse_created",
+              "display-name": "По дате created_at (ошибки канала)",
+              "type": "dimension"
+            }
+          }
+        },
+        "database": 1
+      },
+      "display": "pie",
+      "visualization_settings": {
+        "pie.show_legend": true,
+        "pie.show_total": true,
+        "pie.percent_visibility": "inside",
+        "pie.slice_threshold": 0,
+        "pie.dimension": [
+          "Клиника"
+        ],
+        "pie.metric": "Количество",
+        "version": 2,
+        "column_settings": {
+          "[\"name\",\"Клиника\"]": {
+            "column_title": "Клиника"
+          },
+          "[\"name\",\"Количество\"]": {
+            "number_separators": ".",
+            "decimals": 0
+          }
+        }
+      },
+      "sizeX": 12,
+      "sizeY": 6,
+      "row": 64,
+      "col": 0
+    },
+    {
+      "name": "04 · Ошибки связи: доля по формулировке LOGSTATE=3",
+      "description": "Транспорт: группировка по **нормализованному** тексту сетевой ошибки (URL/host в тексте заменены на плейсхолдеры при записи в staging). Это не формулировки отказа регистрации из XML ответа РЭМД. Уникальные документы — по «Ключ документа (группировка)». Период — **created_at** staging.",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "WITH per_kind AS ( SELECT LEFT(COALESCE(NULLIF(TRIM(\"Текст сетевой ошибки\"), ''), '(без текста)'), 120) AS lbl, COUNT(DISTINCT \"Ключ документа (группировка)\")::bigint AS cnt FROM public.v_rpt_network_errors_detail_ui WHERE 1=1 [[AND {{parse_created}}]] GROUP BY 1 ), ranked AS ( SELECT lbl, cnt, ROW_NUMBER() OVER (ORDER BY cnt DESC) AS rn FROM per_kind ), tail AS ( SELECT COALESCE(SUM(cnt), 0)::bigint AS tail_cnt FROM ranked WHERE rn > 8 ) SELECT CASE WHEN r.rn <= 8 THEN r.lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END AS \"Тип сетевой ошибки\", SUM(r.cnt)::bigint AS \"Количество\" FROM ranked r CROSS JOIN tail t GROUP BY CASE WHEN r.rn <= 8 THEN r.lbl ELSE 'Остальные (' || t.tail_cnt::text || ')' END ORDER BY 2 DESC",
+          "template-tags": {
+            "parse_created": {
+              "widget-type": "date/all-options",
+              "id": "f9000002-0002-4002-8002-000000000501",
+              "name": "parse_created",
+              "display-name": "По дате created_at (ошибки канала)",
+              "type": "dimension"
+            }
+          }
+        },
+        "database": 1
+      },
+      "display": "pie",
+      "visualization_settings": {
+        "pie.show_legend": true,
+        "pie.show_total": true,
+        "pie.percent_visibility": "inside",
+        "pie.slice_threshold": 0,
+        "pie.dimension": [
+          "Тип сетевой ошибки"
+        ],
+        "pie.metric": "Количество",
+        "version": 2,
+        "column_settings": {
+          "[\"name\",\"Тип сетевой ошибки\"]": {
+            "column_title": "Тип сетевой ошибки"
+          },
+          "[\"name\",\"Количество\"]": {
+            "number_separators": ".",
+            "decimals": 0
+          }
+        }
+      },
+      "sizeX": 12,
+      "sizeY": 6,
+      "row": 64,
+      "col": 12
+    },
+    {
+      "name": "04 · Ошибки связи: детализация (транспорт и контекст)",
+      "description": "Транспорт: фрагмент текста канала, подсказки из журнала. Колонки «Интерпретация ошибок регистрации» и статусы колбэка относятся к **уже доставленному** ответу в витрине (если удалось сопоставить) и **не объясняют** сбой доставки. Период — **created_at** staging.",
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT \"Создано (staging)\", \"Клиника (транспорт)\", \"JID из журнала (gost, число)\", \"LOGID журнала (сетевая ошибка)\", LEFT(\"Текст сетевой ошибки\", 160) AS \"Сеть (фрагмент)\", \"relatesToMessage (из текста журнала)\", \"localUid / DOCUMENTID (из текста)\", \"Медицинская организация\", \"JID клиники\", \"Тип СЭМД (код · НСИ)\", \"Интерпретация ошибок регистрации\", \"Ответ РЭМД найден в витрине\", \"LOGID записи ответа\", \"EGMID записи ответа\" FROM public.v_rpt_network_errors_detail_ui WHERE 1=1 [[AND {{parse_created}}]] ORDER BY \"Создано (staging)\" DESC NULLS LAST LIMIT 150",
+          "template-tags": {
+            "parse_created": {
+              "widget-type": "date/all-options",
+              "id": "f9000003-0003-4003-8003-000000000501",
+              "name": "parse_created",
+              "display-name": "По дате created_at (ошибки канала)",
+              "type": "dimension"
+            }
+          }
+        },
+        "database": 1
+      },
+      "display": "table",
+      "visualization_settings": {
+        "column_settings": {
+          "[\"name\",\"Сеть (фрагмент)\"]": {
+            "column_title": "Сеть (фрагмент)"
+          }
+        }
+      },
+      "sizeX": 24,
+      "sizeY": 10,
+      "row": 70,
       "col": 0
     }
   ]
