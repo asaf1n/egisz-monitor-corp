@@ -1061,6 +1061,12 @@
     {
       "name": "01 · Доля ошибок по дням",
       "description": "По календарным дням (колонка «День (тренд)»): **уникальные документы** (DISTINCT «Связанное сообщение»), из них со статусом error и процент ошибок. Дополняет stacked-график по статусам.",
+      "metabase-field-filters": {
+        "dwh_date": {
+          "table_ref": "public.v_egisz_transactions_enriched_ui",
+          "field_name": "Обработано IPS"
+        }
+      },
       "dataset_query": {
         "type": "native",
         "native": {
