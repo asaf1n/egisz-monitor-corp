@@ -512,7 +512,8 @@ def test_coerce_exchangelog_log_state_firebird_shapes() -> None:
     assert coerce_exchangelog_log_state(True) is None
 
 
-def test_build_record_logstate_3_network_error_typed_like_firebird() -> None:
+def test_build_record_logstate_3_skipped_without_document_linkage() -> None:
+    """Транспорт без идентификатора документа в MSGTEXT/journal — не попадает в staging."""
     p = EgiszMonitorParser()
     staged: list = []
 
@@ -529,8 +530,58 @@ def test_build_record_logstate_3_network_error_typed_like_firebird() -> None:
             journal_msgid="MSG-NET",
         )
         assert r is None
-        assert len(staged) == 1
-        assert staged[0].error_code == "INTEGRATION_LOGSTATE_3"
-        assert staged[0].error_top_type == "network"
-        assert staged[0].error_group == "network"
-        assert staged[0].error_subtype == "logstate_3"
+        assert len(staged) == 0
+
+
+def test_build_record_logstate_3_stages_when_document_id_from_journal() -> None:
+    p = EgiszMonitorParser()
+    staged: list = []
+
+    def on_staging_error(e) -> None:
+        staged.append(e)
+
+    r = p.build_record(
+        "http://gost-5008.infoclinica.lan:9945/timeout",
+        msg_text=None,
+        log_state=3,
+        document_id="  doc-uuid-1  ",
+        on_staging_error=on_staging_error,
+    )
+    assert r is None
+    assert len(staged) == 1
+    assert staged[0].error_code == "INTEGRATION_LOGSTATE_3"
+    assert staged[0].local_uid_hint == "doc-uuid-1"
+
+
+def test_build_record_logstate_3_stages_when_relates_in_msgtext() -> None:
+    p = EgiszMonitorParser()
+    staged: list = []
+
+    def on_staging_error(e) -> None:
+        staged.append(e)
+
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<registerDocumentResult xmlns="http://egisz.rosminzdrav.ru/iehr/emdr/callback/">
+  <relatesToMessage>550e8400-e29b-41d4-a716-446655440000</relatesToMessage>
+</registerDocumentResult>"""
+    r = p.build_record(
+        "http://gost-5008.infoclinica.lan:9945/timeout",
+        msg_text=xml,
+        log_state=3,
+        on_staging_error=on_staging_error,
+    )
+    assert r is None
+    assert len(staged) == 1
+    assert staged[0].error_code == "INTEGRATION_LOGSTATE_3"
+    assert staged[0].relates_to_id == "550e8400-e29b-41d4-a716-446655440000"
+    assert staged[0].relates_to_hint == "550e8400-e29b-41d4-a716-446655440000"
+
+
+def test_extract_parse_hints_relates_attribute_in_blob() -> None:
+    from egisz_monitor_corp.parser import extract_parse_hints
+
+    blob = 'noise relatesToMessage="aa-bb-cc" more'
+    rh, lu, em = extract_parse_hints(blob)
+    assert rh == "aa-bb-cc"
+    assert lu is None
+    assert em is None

@@ -7,6 +7,7 @@ import json
 import os
 import random
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -1184,6 +1185,7 @@ def insert_staging_channel_errors(
             str | None,
             str | None,
             str | None,
+            datetime | None,
         ]
     ],
 ) -> None:  # type: ignore[no-untyped-def]
@@ -1197,9 +1199,10 @@ def insert_staging_channel_errors(
                 relates_to_id, error_code, message, log_excerpt,
                 exchangelog_log_id, egisz_messages_egmid, journal_msgid,
                 error_top_type, error_group, error_subtype,
-                relates_to_hint, local_uid_hint, emdr_id_hint
+                relates_to_hint, local_uid_hint, emdr_id_hint,
+                proxy_context_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
             """,
             rows,
         )

@@ -1,4 +1,5 @@
-# Справочник для авторов дашбордов (не используется скриптами провижининга).
+# Справочник для авторов дашбордов. Провижининг: см. AGENTS.md (Metabase) и скрипт
+# scripts/apply_metabase_field_filters.py — массовая генерация metabase-field-filters для dimension-тегов.
 #
 # Импорт: metabase/setup-dashboards.sh подставляет dimension ["field", id, null] только если у карточки
 # в JSON есть блок metabase-field-filters с точным table_ref и field_name, совпадающим с именем или

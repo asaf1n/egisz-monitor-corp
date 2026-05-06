@@ -708,6 +708,25 @@ for _i in $(seq 1 90); do
 done
 APP_DB_METADATA_JSON=""
 
+# Карточки с field filter по v_rpt_network_errors_detail_ui («Дата создания документа») — дождаться полей view.
+log_info "Waiting for DWH view field metadata (v_rpt_network_errors_detail_ui)…"
+for _i in $(seq 1 90); do
+  APP_DB_METADATA_JSON=""
+  _nnet="$(get_database_metadata | jq '
+    ([.tables[]? | select(.name == "v_rpt_network_errors_detail_ui")] | first | .fields // []) | length
+  ')"
+  if [ "${_nnet:-0}" -ge 12 ] 2>/dev/null; then
+    log_info "DWH network errors view fields in metadata (count=${_nnet}) — OK"
+    break
+  fi
+  if [ "$_i" -eq 90 ]; then
+    echo "[dashboards] ERROR: v_rpt_network_errors_detail_ui: недостаточно полей в metadata за 180s (получено ${_nnet:-0}, нужно ≥12). Примените sql/001_schema.sql; в Metabase: Sync database schema." >&2
+    exit 1
+  fi
+  sleep 2
+done
+APP_DB_METADATA_JSON=""
+
 # Дашборды в корне личной коллекции (тот же URL, что «Персональная коллекция …»), иначе вложенная папка не видна на главном экране коллекции.
 PERSONAL_ID="$(api_request GET "/api/user/current" | jq -r '.personal_collection_id // empty')"
 if [ -n "${PERSONAL_ID}" ] && [ "${PERSONAL_ID}" != "null" ]; then
@@ -752,12 +771,21 @@ wipe_corp_root_collection() {
 
 wipe_corp_root_collection "${ROOT_COLLECTION_ID}"
 
+_any_dash_fail=0
 for dashboard_file in "${DASHBOARDS_DIR}"/*.json; do
   if [ -f "$dashboard_file" ]; then
     log_info "Provisioning $dashboard_file..."
-    create_dashboard "$dashboard_file" "$ROOT_COLLECTION_ID"
+    # Подоболочка: внутри create_dashboard/create_card при ошибке — exit 1; иначе оборвётся весь скрипт и 02–06 не импортируются.
+    if ! ( create_dashboard "$dashboard_file" "$ROOT_COLLECTION_ID" >/dev/null ); then
+      log_info "ERROR: provisioning failed for ${dashboard_file} (see Metabase API errors above). Continuing with other JSON files."
+      _any_dash_fail=1
+    fi
   fi
 done
+if [ "${_any_dash_fail}" -ne 0 ]; then
+  echo "[dashboards] One or more dashboard JSON files failed to import. Fix errors and re-run provisioning (e.g. METABASE_FORCE_PROVISION=true or restart Metabase pod)." >&2
+  exit 1
+fi
 
 log_info "Database: ${APP_DB_ID}"
 log_info "Root collection: ${ROOT_COLLECTION_ID}"

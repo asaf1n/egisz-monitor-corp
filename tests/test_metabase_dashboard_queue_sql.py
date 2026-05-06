@@ -14,15 +14,15 @@ def test_provision_anchor_last_operations_query_contains_bundle_fragment() -> No
     assert anchor in card["dataset_query"]["native"]["query"]
 
 
-def test_quality_errors_per_clinic_semd_includes_relates_to_in_cte() -> None:
-    """Native card must expose \"Связанное сообщение\" in CTE for COUNT(DISTINCT ...) in outer query."""
+def test_quality_errors_per_clinic_semd_includes_document_key_in_cte() -> None:
+    """Native card must expose «Документ (ключ учёта)» in CTE for COUNT(DISTINCT ...) in outer query."""
     root = Path(__file__).resolve().parents[1]
     path = root / "metabase_dashboards" / "04_quality_and_errors.json"
     data = json.loads(path.read_text(encoding="utf-8"))
     card = next(c for c in data["cards"] if c.get("name") == "04 · Ошибки по клиникам и СЭМД")
     q = card["dataset_query"]["native"]["query"]
-    assert ") AS err_summary, \"Связанное сообщение\" FROM public.v_egisz_transactions_enriched_ui" in q
-    assert "COUNT(DISTINCT \"Связанное сообщение\")" in q
+    assert ") AS err_summary, \"Документ (ключ учёта)\" FROM public.v_egisz_transactions_enriched_ui" in q
+    assert "COUNT(DISTINCT \"Документ (ключ учёта)\")" in q
 
 
 def test_executive_snapshot_queue_subquery_uses_local_uid_not_relates_to() -> None:

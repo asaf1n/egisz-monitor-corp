@@ -905,6 +905,7 @@ def _ingest_exchangelog_rows_chunk(
                         relates_to_hint=rth,
                         local_uid_hint=luh,
                         emdr_id_hint=emh,
+                        proxy_context_at=msg_created or log_created,
                     )
                 )
                 continue

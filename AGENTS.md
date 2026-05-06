@@ -51,18 +51,20 @@
 
 ## Metabase
 
-Агрегаты в `metabase_dashboards/*.json`: **документная единица** — `COUNT(DISTINCT "Связанное сообщение")` на витрине колбэков (`relates_to_id`), для очереди без ответа — `COUNT(DISTINCT "localUid СЭМД")`; см. **`README.md`** (Metabase).
+Агрегаты в `metabase_dashboards/*.json`: **единица учёта СЭМД** — `COUNT(DISTINCT "Документ (ключ учёта)")` (`egisz_document_identity_key`: приоритет **relatesToMessage** (коррелятор XML) → **localUid**/DOCUMENTID → **emdrId**). Колонка **«Связанное сообщение»** в UI — это `relates_to_id` / relatesToMessage, **не** синоним «идентификатора СЭМД». Очередь без ответа — `COUNT(DISTINCT "localUid СЭМД")`. **Транспорт (ошибка связи):** KPI на **01**, **02** (блок LOGSTATE=3), **04**, **05** — `v_rpt_network_errors_detail_ui`, **COUNT(DISTINCT …)** по «Ключ документа (группировка)»; field filter периода — **«Дата создания документа»** (на **05** тег `parse_date`). См. **`README.md`** (Metabase).
 
 | Путь | Назначение |
 |------|------------|
 | `metabase_dashboards/*.json` | Дашборды как код; имена и native-SQL карточек |
+
+**Field filters (native `template-tags` с `type: "dimension"`):** без блока **`metabase-field-filters`** у карточки провижининг не подставляет `dimension: ["field", id, null]` (см. `metabase/setup-dashboards.sh` → `create_card`), и Metabase падает с «Не удалось найти поле с ID: null» на дашборде. У каждого такого тега должен быть объект `{ "table_ref": "public.<view>", "field_name": "<имя или display_name поля в метаданных>" }`. Массовое дополнение после правок: `py scripts/apply_metabase_field_filters.py`. Регрессия: `tests/test_metabase_dimension_field_filters_complete.py`.
 
 **Файл JSON → имя дашборда в Metabase (`name`):**
 
 | Файл | Имя в UI |
 |------|----------|
 | `01_operational.json` | 01 Оперативный мониторинг и динамика |
-| `02_service.json` | 02 Сервис, healthcheck и парсинг журнала |
+| `02_service.json` | 02 Сервис, healthcheck и сбои канала |
 | `03_documents_no_response.json` | 03 Документы без ответа |
 | `04_quality_and_errors.json` | 04 Ошибки и качество данных |
 | `05_executive.json` | 05 Управление СЭМД |
@@ -123,7 +125,7 @@
 | `egisz_monitor_corp/pg_warehouse.py` → `fetch_healthcheck_snapshot(con)` | Чтение трёх view + агрегаты для UI/JSON; `statement_timeout = 10s` на каждый блок. |
 | `GET /api/healthcheck` (`egisz_monitor_corp/config_app.py`) | JSON-снимок `{signals, by_clinic_top, proxy_db, level_summary}`. При недоступной PG — `ok: false` и `errors[]` (graceful). |
 | Config UI: вкладки **Snapshot / Healthcheck** | Snapshot — `GET /api/pg/sync-snapshot`: `last_log_id`, `last_egmid` (`etl_state`), кэш `MAX(MODIFYDATE)` лицензий; поле EGMID в UI заполняется тем же `last_egmid`. Healthcheck — сигналы, top-3 клиники, прокси-БД (`GET /api/healthcheck`, опрос ~30 c). **Сохранить в YAML** также патчит CronJob `egisz-monitor-sync` по `auto_sync` (RBAC SA `conf-ui`). |
-| Дашборд `metabase_dashboards/02_service.json` | «02 Сервис, healthcheck и парсинг журнала»: поток по витрине (heatmap по **Обработано IPS** с тем же `dwh_date`, что топы и **06** архив); сигналы healthcheck, очередь, тренд парсинга с `parse_created_filter`; детальные карточки staging; сводка прокси-БД. |
+| Дашборд `metabase_dashboards/02_service.json` | «02 Сервис, healthcheck и сбои канала»: поток колбэков (heatmap по **Обработано IPS** с тем же `dwh_date`, что топы и **06** архив); сигналы healthcheck, очередь, транспорт по **«Дата создания документа»**; детальные карточки healthcheck по журналу связи; сводка прокси-БД. |
 | Операторам Config UI (дашборды vs веб, смысл метрик в отчётах) | `README.md`; технический лог синка и курсоры — **`AGENTS.md`** (раздел ETL), healthcheck — **`GET /api/healthcheck`** |
 
 ## ETL: pipeline и параллельный запуск

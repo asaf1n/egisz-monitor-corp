@@ -172,6 +172,9 @@ def extract_parse_hints(msg_text: str | None) -> tuple[str | None, str | None, s
 
     Order of precedence for grouping in reporting: relatesToMessage → localUid → emdrId
     (aligned with fact key relates_to_id and СЭМД instance ids in `.cursorrules`).
+
+    Учитывается полный MSGTEXT (не только фрагмент после ``_soap_xml_source``): для LOGSTATE=3
+    идентификаторы могут быть в теле без успешного разбора конверта.
     """
     blob = (msg_text or "").strip()
     if not blob:
@@ -183,7 +186,37 @@ def extract_parse_hints(msg_text: str | None) -> tuple[str | None, str | None, s
         m = pat.search(s)
         return _norm_ws(m.group(1)) if m else None
 
-    return (first(_RELATES_RE, blob), first(_LOCALUID_RE, blob), first(_EMDRID_RE, blob))
+    rh = first(_RELATES_RE, blob)
+    if not rh:
+        m_attr = re.search(r'relatesToMessage\s*=\s*"([^"]+)"', blob, re.IGNORECASE)
+        if m_attr:
+            rh = _norm_ws(m_attr.group(1))
+    return (rh, first(_LOCALUID_RE, blob), first(_EMDRID_RE, blob))
+
+
+def _has_network_error_document_linkage(
+    *,
+    relates_to_id: str | None,
+    local_uid_semd: str | None,
+    emdr_id: str | None,
+    hint_relates: str | None,
+    hint_local: str | None,
+    hint_emdr: str | None,
+) -> bool:
+    """Для LOGSTATE=3: в отчёты попадают только строки с привязкой к документу (колбэк / СЭМД)."""
+    if _norm_ws(relates_to_id):
+        return True
+    if _norm_ws(local_uid_semd):
+        return True
+    if _norm_ws(emdr_id):
+        return True
+    if _norm_ws(hint_relates):
+        return True
+    if _norm_ws(hint_local):
+        return True
+    if _norm_ws(hint_emdr):
+        return True
+    return False
 
 
 def _jid_sources_mismatch(
@@ -241,6 +274,7 @@ class StagingChannelError:
     relates_to_hint: str | None = None
     local_uid_hint: str | None = None
     emdr_id_hint: str | None = None
+    proxy_context_at: datetime | None = None
 
     def as_insert_tuple(
         self,
@@ -258,6 +292,7 @@ class StagingChannelError:
         str | None,
         str | None,
         str | None,
+        datetime | None,
     ]:
         return (
             self.relates_to_id,
@@ -273,6 +308,7 @@ class StagingChannelError:
             self.relates_to_hint,
             self.local_uid_hint,
             self.emdr_id_hint,
+            self.proxy_context_at,
         )
 
 
@@ -670,7 +706,10 @@ class EgiszMonitorParser:
             _norm_ws(local_uid_xml) or _norm_ws(document_id)
         )
 
-        hint_relates, hint_local, hint_emdr = extract_parse_hints(soap_src)
+        hint_relates, hint_local, hint_emdr = extract_parse_hints(msg_text)
+        eff_rel_hint = _norm_ws(hint_relates) or _norm_ws(relates_to_id)
+        eff_loc_hint = _norm_ws(hint_local) or _norm_ws(local_uid_semd)
+        eff_em_hint = _norm_ws(hint_emdr) or _norm_ws(emdr_id)
 
         def _stage(err: StagingChannelError) -> None:
             if on_staging_error:
@@ -678,6 +717,7 @@ class EgiszMonitorParser:
 
         def _stage_code(*, code: str, message: str, relates_to: str | None) -> None:
             c = classify_staging_error_code(code)
+            proxy_ctx = msg_created_at or log_created_at
             _stage(
                 StagingChannelError(
                     relates_to_id=relates_to,
@@ -690,16 +730,30 @@ class EgiszMonitorParser:
                     exchangelog_log_id=exchangelog_log_id,
                     egisz_messages_egmid=egisz_messages_egmid,
                     journal_msgid=journal_msgid,
-                    relates_to_hint=hint_relates,
-                    local_uid_hint=hint_local,
-                    emdr_id_hint=hint_emdr,
+                    relates_to_hint=eff_rel_hint or None,
+                    local_uid_hint=eff_loc_hint or None,
+                    emdr_id_hint=eff_em_hint or None,
+                    proxy_context_at=proxy_ctx,
                 )
             )
 
         ls = coerce_exchangelog_log_state(log_state)
         if ls == 3:
+            if not _has_network_error_document_linkage(
+                relates_to_id=relates_to_id,
+                local_uid_semd=local_uid_semd,
+                emdr_id=emdr_id,
+                hint_relates=hint_relates,
+                hint_local=hint_local,
+                hint_emdr=hint_emdr,
+            ):
+                return None
             net_text = _normalize_network_error_text(log_text) or "Сетевая ошибка (LOGSTATE=3)"
-            _stage_code(code="INTEGRATION_LOGSTATE_3", message=net_text, relates_to=None)
+            _stage_code(
+                code="INTEGRATION_LOGSTATE_3",
+                message=net_text,
+                relates_to=_norm_ws(relates_to_id) or None,
+            )
             return None
 
         if not relates_to_id:

@@ -87,6 +87,12 @@ COMMENT ON COLUMN fact_egisz_transactions.journal_msgid IS 'EXCHANGELOG.MSGID (=
 
 CREATE INDEX IF NOT EXISTS idx_fact_journal_msgid ON fact_egisz_transactions (journal_msgid) WHERE journal_msgid IS NOT NULL;
 
+-- Сопоставление stg_channel_errors ↔ fact в v_rpt_network_errors_detail: условие LATERAL использует
+-- lower(trim(...)) по relates_to_id / local_uid_semd; без выраженных индексов — Seq Scan на факте на каждую строку сетевой ошибки.
+CREATE INDEX IF NOT EXISTS idx_fact_relates_id_lower_trim ON fact_egisz_transactions ((lower(trim(relates_to_id))));
+CREATE INDEX IF NOT EXISTS idx_fact_local_uid_lower_trim ON fact_egisz_transactions ((lower(trim(local_uid_semd))))
+    WHERE local_uid_semd IS NOT NULL;
+
 DO $$
 BEGIN
   IF to_regclass('public.stg_parse_errors') IS NOT NULL
@@ -115,8 +121,10 @@ ALTER TABLE stg_channel_errors ADD COLUMN IF NOT EXISTS error_subtype VARCHAR(64
 ALTER TABLE stg_channel_errors ADD COLUMN IF NOT EXISTS relates_to_hint VARCHAR(512);
 ALTER TABLE stg_channel_errors ADD COLUMN IF NOT EXISTS local_uid_hint VARCHAR(512);
 ALTER TABLE stg_channel_errors ADD COLUMN IF NOT EXISTS emdr_id_hint VARCHAR(512);
+ALTER TABLE stg_channel_errors ADD COLUMN IF NOT EXISTS proxy_context_at TIMESTAMPTZ;
 
-COMMENT ON TABLE stg_channel_errors IS 'Сбои канала ETL без построенного факта: ошибка связи (напр. EXCHANGELOG LOGSTATE=3, LOGTEXT) или ошибка в асинхронном ответе РЭМД (MSGTEXT/SOAP). Классификация: error_top_type, error_group, error_subtype.';
+COMMENT ON TABLE stg_channel_errors IS 'События канала интеграции без построенного факта ответа РЭМД: ошибка связи (EXCHANGELOG LOGSTATE=3 и др.) или ошибка в асинхронном ответе. Источник — прокси-база сервиса интеграции. Классификация: error_top_type, error_group, error_subtype.';
+COMMENT ON COLUMN stg_channel_errors.proxy_context_at IS 'Время в контексте прокси-журнала: CREATEDATE сообщения EGISZ_MESSAGES (если есть), иначе CREATEDATE строки EXCHANGELOG; для отчётов как «дата создания документа» вместе с моментом загрузки в аналитику (created_at).';
 COMMENT ON COLUMN stg_channel_errors.exchangelog_log_id IS 'EXCHANGELOG.LOGID — исходная строка прокси-журнала (трассировка)';
 COMMENT ON COLUMN stg_channel_errors.egisz_messages_egmid IS 'EGISZ_MESSAGES.EGMID — идентификатор записи сообщения (трассировка)';
 COMMENT ON COLUMN stg_channel_errors.journal_msgid IS 'EXCHANGELOG.MSGID — идентификатор сообщения в контуре обмена (трассировка к EGISZ_MESSAGES.MSGID)';
@@ -126,6 +134,14 @@ COMMENT ON COLUMN stg_channel_errors.error_subtype IS 'Подтип внутри
 COMMENT ON COLUMN stg_channel_errors.relates_to_hint IS 'Регексп по тегу relatesToMessage в сыром MSGTEXT, если факт не построен';
 COMMENT ON COLUMN stg_channel_errors.local_uid_hint IS 'Регексп по localUid в сыром MSGTEXT (экземпляр СЭМД в МИС)';
 COMMENT ON COLUMN stg_channel_errors.emdr_id_hint IS 'Регексп по emdrId в сыром MSGTEXT (рег. номер в РЭМД, если уже фигурирует в теле)';
+
+-- Дашборды по сетевым ошибкам: фильтр по бизнес-времени прокси-журнала и по моменту загрузки.
+CREATE INDEX IF NOT EXISTS idx_stg_channel_errors_network_created_at ON stg_channel_errors (created_at DESC, id)
+WHERE error_top_type = 'network'
+   OR UPPER(COALESCE(error_code::text, '')) IN ('NETWORK_ERROR', 'INTEGRATION_LOGSTATE_3');
+CREATE INDEX IF NOT EXISTS idx_stg_channel_errors_network_proxy_ctx ON stg_channel_errors (proxy_context_at DESC NULLS LAST, id)
+WHERE error_top_type = 'network'
+   OR UPPER(COALESCE(error_code::text, '')) IN ('NETWORK_ERROR', 'INTEGRATION_LOGSTATE_3');
 
 -- Ключ для агрегации «один документ — одна ошибка» в Metabase/healthcheck: coalesce идентификаторов, иначе уникальный id строки.
 CREATE OR REPLACE VIEW v_stg_channel_errors_by_document AS
@@ -505,8 +521,12 @@ DROP VIEW IF EXISTS v_health_proxy_db_ui;
 DROP VIEW IF EXISTS v_health_by_clinic;
 DROP VIEW IF EXISTS v_health_signals;
 DROP VIEW IF EXISTS v_health_proxy_db;
+DROP VIEW IF EXISTS v_rpt_connectivity_global_daily_ui;
+DROP VIEW IF EXISTS v_rpt_clinic_connectivity_daily_ui;
+DROP VIEW IF EXISTS v_rpt_clinic_connectivity_daily;
 DROP VIEW IF EXISTS v_rpt_network_errors_detail_ui;
 DROP VIEW IF EXISTS v_rpt_network_errors_detail;
+DROP VIEW IF EXISTS v_stg_channel_network_errors_by_document;
 DROP VIEW IF EXISTS v_rpt_semd_archive_ui;
 DROP VIEW IF EXISTS v_rpt_documents_no_response_ui;
 DROP VIEW IF EXISTS v_egisz_transactions_enriched_ui;
@@ -762,7 +782,23 @@ INSERT INTO dim_column_display_labels (source_object, source_column, display_lab
         'v_stg_channel_errors_by_document',
         'error_subtype_label_ru',
         'Подтип (рус.); переменные адреса/URL — в message (нормализация для агрегатов)'
-    )
+    ),
+    (
+        'v_stg_channel_network_errors_by_document',
+        'error_global_subcategory',
+        'Глобальный класс: Ошибка связи | Ошибка в асинхронном ответе РЭМД'
+    ),
+    ('v_stg_channel_network_errors_by_document', 'error_group_label_ru', 'Внутренняя группа (рус.)'),
+    (
+        'v_stg_channel_network_errors_by_document',
+        'error_subtype_label_ru',
+        'Подтип (рус.); переменные адреса/URL — в message (нормализация для агрегатов)'
+    ),
+    ('v_rpt_clinic_connectivity_daily_ui', 'День', 'Календарный день (UTC)'),
+    ('v_rpt_clinic_connectivity_daily_ui', 'JID клиники (ключ)', 'JID для стыковки факта и сети'),
+    ('v_rpt_clinic_connectivity_daily_ui', 'Доступность транспорта (прибл.), %', 'Прокси: успехи / (успехи + ошибки связи)'),
+    ('v_rpt_connectivity_global_daily_ui', 'День', 'Календарный день (UTC)'),
+    ('v_rpt_connectivity_global_daily_ui', 'Доступность транспорта (прибл.), %', 'Прокси доступности транспорта')
 ON CONFLICT (source_object, source_column) DO UPDATE SET display_label_ru = EXCLUDED.display_label_ru;
 
 -- Metabase / отчёты: те же данные, что v_egisz_transactions_enriched, с русскими именами колонок (ResultSet / «Спросить данные»).
@@ -975,11 +1011,30 @@ FROM v_rpt_documents_no_response;
 
 COMMENT ON VIEW v_rpt_documents_no_response_ui IS 'Обёртка над v_rpt_documents_no_response с подписями колонок для отчётов; см. dim_column_display_labels. JID клиники и Код СЭМД — TEXT (идентификаторы, не суммируются в Metabase).';
 
+-- Сетевые ошибки: только строки с идентификатором документа в staging (см. ETL LOGSTATE=3).
+CREATE OR REPLACE VIEW v_stg_channel_network_errors_by_document AS
+SELECT *
+FROM v_stg_channel_errors_by_document s
+WHERE (
+    s.error_top_type = 'network'
+    OR UPPER(COALESCE(s.error_code::text, '')) IN ('NETWORK_ERROR', 'INTEGRATION_LOGSTATE_3')
+)
+AND (
+    NULLIF(TRIM(s.relates_to_id::text), '') IS NOT NULL
+    OR NULLIF(TRIM(s.relates_to_hint::text), '') IS NOT NULL
+    OR NULLIF(TRIM(s.local_uid_hint::text), '') IS NOT NULL
+    OR NULLIF(TRIM(s.emdr_id_hint::text), '') IS NOT NULL
+);
+
+COMMENT ON VIEW v_stg_channel_network_errors_by_document IS 'Подмножество v_stg_channel_errors_by_document: ошибки связи с привязкой к документу; дашборды сети и v_rpt_network_errors_detail.';
+
 -- Сетевые ошибки (LOGSTATE=3 / network): связка с колбэком РЭМД по relatesToMessage из сырого MSGTEXT и/или localUid.
 CREATE OR REPLACE VIEW v_rpt_network_errors_detail AS
 SELECT
     s.id AS staging_error_id,
     s.created_at,
+    s.proxy_context_at,
+    COALESCE(s.proxy_context_at, s.created_at) AS document_context_at,
     s.exchangelog_log_id,
     s.egisz_messages_egmid,
     s.journal_msgid,
@@ -1012,7 +1067,7 @@ SELECT
         '(клиника по gost/журналу не определена)'
     ) AS connectivity_clinic_label,
     (lf.relates_to_id IS NOT NULL) AS has_linked_callback_fact
-FROM v_stg_channel_errors_by_document s
+FROM v_stg_channel_network_errors_by_document s
 LEFT JOIN LATERAL (
     SELECT (regexp_match(COALESCE(s.log_excerpt, ''), 'gost-([0-9]+)\.infoclinica\.lan', 'i'))[1]::bigint AS journal_gost_numeric_jid
 ) jgid ON TRUE
@@ -1039,16 +1094,13 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) lf ON TRUE
 LEFT JOIN dim_semd_types ldt ON ldt.kind_code = lf.kind_code
-LEFT JOIN dim_clinics ldc ON ldc.jid = lf.jid
-WHERE s.error_top_type = 'network'
-   OR UPPER(COALESCE(s.error_code, '')) IN ('NETWORK_ERROR', 'INTEGRATION_LOGSTATE_3');
+LEFT JOIN dim_clinics ldc ON ldc.jid = lf.jid;
 
-COMMENT ON VIEW v_rpt_network_errors_detail IS 'Ошибки связи (транспорт, LOGSTATE=3): не смешивать с отказом регистрации в теле ответа РЭМД. Клиника для отчёта: связанный колбэк в fact (если есть), иначе JID из gost в фрагменте журнала (log_excerpt), иначе заглушка. Опциональная LATERAL-связка с fact для контекста.';
+COMMENT ON VIEW v_rpt_network_errors_detail IS 'Ошибки связи (транспорт, LOGSTATE=3): строки прокси-журнала с идентификатором документа (v_stg_channel_network_errors_by_document). Не смешивать с отказом регистрации в теле ответа РЭМД. Клиника: связанный колбэк в fact (если есть), иначе JID из gost в log_excerpt.';
 
 CREATE OR REPLACE VIEW v_rpt_network_errors_detail_ui AS
 SELECT
-    staging_error_id AS "№ записи stg",
-    created_at AS "Создано (staging)",
+    document_context_at AS "Дата создания документа",
     exchangelog_log_id::text AS "LOGID журнала (сетевая ошибка)",
     egisz_messages_egmid::text AS "EGMID сообщения (строка журнала)",
     journal_msgid AS "MSGID обмена",
@@ -1073,7 +1125,87 @@ SELECT
     linked_emdr_id AS "Регистрационный номер РЭМД",
     journal_gost_numeric_jid::text AS "JID из журнала (gost, число)",
     connectivity_clinic_label AS "Клиника (транспорт)",
-    has_linked_callback_fact AS "Ответ РЭМД найден в витрине"
+    has_linked_callback_fact AS "Связанный колбэк найден в аналитике"
 FROM v_rpt_network_errors_detail;
 
-COMMENT ON VIEW v_rpt_network_errors_detail_ui IS 'Сетевые ошибки (транспорт): «Клиника (транспорт)» — для отчётов по недоступности (колбэк в fact и/или JID из gost в log_excerpt). Колонки «Медицинская организация» / «Интерпретация ошибок регистрации» относятся к связанному колбэку и не объясняют сбой доставки.';
+COMMENT ON VIEW v_rpt_network_errors_detail_ui IS 'Сетевые ошибки (транспорт) по данным прокси-базы: «Клиника (транспорт)» — недоступность/доставка (связанный колбэк в fact и/или JID из gost в log_excerpt). «Дата создания документа» — COALESCE(proxy_context_at, created_at): время из EGISZ_MESSAGES/EXCHANGELOG при загрузке, иначе момент фиксации в аналитике.';
+
+-- По дням и JID: ответы РЭМД (факт) vs ошибки связи (staging). Ключ клиники — COALESCE(linked_jid, gost-JID из журнала) для сети и jid факта для колбэков.
+CREATE OR REPLACE VIEW v_rpt_clinic_connectivity_daily AS
+SELECT
+    COALESCE(f.day_bucket, n.day_bucket) AS day_bucket,
+    COALESCE(f.clinic_jid_key, n.clinic_jid_key) AS clinic_jid_key,
+    COALESCE(f.facts_success, 0)::bigint AS facts_success,
+    COALESCE(f.facts_error_remd, 0)::bigint AS facts_error_remd,
+    COALESCE(f.facts_total, 0)::bigint AS facts_total,
+    COALESCE(n.network_document_errors, 0)::bigint AS network_document_errors,
+    CASE
+        WHEN COALESCE(f.facts_success, 0) + COALESCE(n.network_document_errors, 0) > 0 THEN
+            ROUND(
+                100.0 * COALESCE(f.facts_success, 0)
+                / (COALESCE(f.facts_success, 0) + COALESCE(n.network_document_errors, 0)),
+                2
+            )
+        ELSE NULL
+    END AS availability_transport_proxy_pct
+FROM (
+    SELECT
+        (date_trunc('day', f.processed_at AT TIME ZONE 'UTC'))::date AS day_bucket,
+        COALESCE(f.jid::text, '(нет JID)') AS clinic_jid_key,
+        COUNT(DISTINCT f.relates_to_id) FILTER (WHERE f.status = 'success') AS facts_success,
+        COUNT(DISTINCT f.relates_to_id) FILTER (WHERE f.status = 'error') AS facts_error_remd,
+        COUNT(DISTINCT f.relates_to_id) AS facts_total
+    FROM fact_egisz_transactions f
+    GROUP BY 1, 2
+) f
+FULL OUTER JOIN (
+    SELECT
+        (date_trunc('day', d.document_context_at AT TIME ZONE 'UTC'))::date AS day_bucket,
+        COALESCE(COALESCE(d.linked_jid, d.journal_gost_numeric_jid)::text, '(нет JID)') AS clinic_jid_key,
+        COUNT(DISTINCT d.document_group_key) AS network_document_errors
+    FROM v_rpt_network_errors_detail d
+    GROUP BY 1, 2
+) n ON f.day_bucket = n.day_bucket AND f.clinic_jid_key = n.clinic_jid_key;
+
+COMMENT ON VIEW v_rpt_clinic_connectivity_daily IS 'Сводка «ответы РЭМД / ошибки связи» по календарным суткам (UTC) и JID клиники. availability_transport_proxy_pct = успехи / (успехи + сетевые документы) — прокси доступности транспорта, не бизнес-SLA.';
+
+CREATE OR REPLACE VIEW v_rpt_clinic_connectivity_daily_ui AS
+SELECT
+    v.day_bucket AS "День",
+    v.clinic_jid_key AS "JID клиники (ключ)",
+    COALESCE(
+        dc.jname,
+        CASE
+            WHEN v.clinic_jid_key ~ '^[0-9]+$' THEN 'Клиника JID: ' || v.clinic_jid_key
+            ELSE v.clinic_jid_key
+        END
+    ) AS "Наименование клиники",
+    v.facts_success AS "Ответы РЭМД: успех (документов)",
+    v.facts_error_remd AS "Ответы РЭМД: отказ (документов)",
+    v.facts_total AS "Ответы РЭМД: всего (документов)",
+    v.network_document_errors AS "Ошибки связи (документов)",
+    v.availability_transport_proxy_pct AS "Доступность транспорта (прибл.), %"
+FROM v_rpt_clinic_connectivity_daily v
+LEFT JOIN dim_clinics dc ON dc.jid::text = v.clinic_jid_key AND v.clinic_jid_key ~ '^[0-9]+$';
+
+COMMENT ON VIEW v_rpt_clinic_connectivity_daily_ui IS 'Сводка доступности транспорта по клиникам и дням; см. v_rpt_clinic_connectivity_daily.';
+
+CREATE OR REPLACE VIEW v_rpt_connectivity_global_daily_ui AS
+SELECT
+    day_bucket AS "День",
+    SUM(facts_success)::bigint AS "Успешные ответы РЭМД (документов)",
+    SUM(facts_error_remd)::bigint AS "Отказы РЭМД в ответе (документов)",
+    SUM(network_document_errors)::bigint AS "Ошибки связи (документов)",
+    CASE
+        WHEN SUM(facts_success) + SUM(network_document_errors) > 0 THEN
+            ROUND(
+                100.0 * SUM(facts_success)
+                / (SUM(facts_success) + SUM(network_document_errors)),
+                2
+            )
+        ELSE NULL
+    END AS "Доступность транспорта (прибл.), %"
+FROM v_rpt_clinic_connectivity_daily
+GROUP BY day_bucket;
+
+COMMENT ON VIEW v_rpt_connectivity_global_daily_ui IS 'Глобальная сводка по дням: успехи колбэков vs ошибки связи (документы); доля — прокси, не SLA.';

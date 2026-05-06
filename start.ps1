@@ -10,7 +10,7 @@
 # apply: Config UI (Flask) + kubectl apply; does not reset Metabase app DB. Always rollout restart conf-ui and Metabase. Metabase app DB reset (DROP/CREATE) only on deploy / reset-deploy.
 
 param(
-    [ValidateSet("deploy", "reset-deploy", "apply", "start", "restart-metabase", "restart-web", "status", "verify", "metabase-provision-local", "test", "help")]
+    [ValidateSet("deploy", "reset-deploy", "apply", "apply-schema", "start", "restart-metabase", "restart-web", "status", "verify", "metabase-provision-local", "test", "help")]
     [string]$Action = "apply",
     [switch]$SkipKindCluster,
     # С deploy / apply / verify и port-forward: не вешать localhost:5432 на Postgres (если на хосте уже занят 5432).
@@ -104,6 +104,7 @@ function Show-Help {
 egisz-monitor-corp\start.ps1
 
   apply | start (default)   kind при необходимости + docker build только Config UI + kubectl apply; витрина и БД Metabase не сбрасываются; rollout Metabase+conf-ui + smoke + port-forward 8080/3000 (+ Postgres: -IncludePostgresPortForward). Имя start = то же, что apply.
+  apply-schema      только DDL: ConfigMap + Job egisz-reports-schema-init из sql/ на хосте, затем apply-schema в поде conf-ui (нужен собранный образ с актуальным sql/). Без docker build и без kubectl apply манифестов.
   deploy            docker build (conf-ui + Metabase, с кэшем слоёв) + apply + apply-schema в conf-ui (DDL из образа) + DROP/CREATE БД Metabase + port-forward; данные egisz_reports не очищаются.
   reset-deploy      Полный сброс namespace egisz-monitor (все поды/SVC/Deployment/StatefulSet/PVC внутри него исчезают) + docker build --no-cache обоих образов + kind load + kubectl apply с нуля + DROP/CREATE БД Metabase. Не выполняет: docker system prune / глобальную очистку buildkit (только --no-cache у этих двух build).
   restart-metabase  docker build образа Metabase (--no-cache) + kind load + rollout restart deployment/metabase + ожидание Ready. JSON попадает в образ, но импорт в БД приложения Metabase при METABASE_FORCE_PROVISION=auto часто пропускается, если число дашбордов и якорь «01» уже совпали с образом — тогда смена имён/состава дашбордов не видна; нужен METABASE_FORCE_PROVISION=true (k8s/metabase.yaml) или deploy/reset-deploy.
@@ -1166,6 +1167,14 @@ switch ($Action) {
         if ($LASTEXITCODE -ne 0) { exit 1 }
     }
     "test" { Invoke-PythonTests }
+    "apply-schema" {
+        Write-NestedSiblingMonitorWarning
+        Assert-KubectlCluster
+        Write-Banner "apply-schema (DDL из репозитория → Postgres + выравнивание /app/sql в conf-ui)"
+        Invoke-PostgresSchemaInit
+        Invoke-ConfUiApplyReportsSchema
+        Write-Host "`[apply-schema] Готово. При изменении только sql/: достаточно этого шага; для обновления слоя /app/sql пересоберите conf-ui: apply или restart-web." -ForegroundColor Green
+    }
     "verify" {
         Write-NestedSiblingMonitorWarning
         Invoke-CorpPortForwardIfRequestedAfterK8s -BackgroundSwitchPresent:$PSBoundParameters.ContainsKey('BackgroundPortForward') -BackgroundEnabled:$BackgroundPortForward -ConfAndMetabaseOnly:$(-not $IncludePostgresPortForward)

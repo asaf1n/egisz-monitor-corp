@@ -1,6 +1,7 @@
 {
   "name": "03 Документы без ответа",
-  "description": "Очередь исходящих **документов** без callback: построчный список, топ клиник, возраст ожидания, срез по СЭМД и детализация (раньше отдельный дашборд «08 Агрегация ожидающих»). [Field filter](https://www.metabase.com/docs/v0.60/questions/native-editor/field-filters) по **«Отправлено»**. Фильтры **Код СЭМД** и **JID клиники** — слаги `top_semd_filter` / `top_clinic_filter`, как на «01 Оперативный мониторинг».",
+  "width": "full",
+  "description": "Очередь исходящих **СЭМД** без callback: единица учёта — **`localUid СЭМД`** (исходящая запись в РЭМД), это **не** то же самое, что **relatesToMessage** из колбэка. Построчный список, топ клиник, возраст ожидания, срез по типу СЭМД. [Field filter](https://www.metabase.com/docs/v0.60/questions/native-editor/field-filters) по **«Отправлено»**; **Код СЭМД** / **JID** — `top_semd_filter` / `top_clinic_filter` (как на **01**).",
   "parameters": [
     {
       "id": "d4e5f6a7-b8c9-0d1e-2f3a-4b5c6d7e8f0a1",
@@ -120,7 +121,13 @@
       "sizeX": 24,
       "sizeY": 10,
       "row": 0,
-      "col": 0
+      "col": 0,
+      "metabase-field-filters": {
+        "dwh_date": {
+          "table_ref": "public.v_rpt_documents_no_response_ui",
+          "field_name": "Отправлено"
+        }
+      }
     },
     {
       "name": "03 · Топ клиник с зависшими документами",
@@ -204,7 +211,13 @@
       "sizeX": 12,
       "sizeY": 8,
       "row": 10,
-      "col": 0
+      "col": 0,
+      "metabase-field-filters": {
+        "dwh_date": {
+          "table_ref": "public.v_rpt_documents_no_response_ui",
+          "field_name": "Отправлено"
+        }
+      }
     },
     {
       "name": "03 · Возраст зависших документов",
@@ -285,7 +298,13 @@
       "sizeX": 12,
       "sizeY": 8,
       "row": 10,
-      "col": 12
+      "col": 12,
+      "metabase-field-filters": {
+        "dwh_date": {
+          "table_ref": "public.v_rpt_documents_no_response_ui",
+          "field_name": "Отправлено"
+        }
+      }
     },
     {
       "name": "03 · Зависшие по типам СЭМД",
@@ -366,7 +385,13 @@
       "sizeX": 24,
       "sizeY": 8,
       "row": 18,
-      "col": 0
+      "col": 0,
+      "metabase-field-filters": {
+        "dwh_date": {
+          "table_ref": "public.v_rpt_documents_no_response_ui",
+          "field_name": "Отправлено"
+        }
+      }
     },
     {
       "name": "03 · Зависшие — детализация",
@@ -441,7 +466,13 @@
       "sizeX": 24,
       "sizeY": 10,
       "row": 26,
-      "col": 0
+      "col": 0,
+      "metabase-field-filters": {
+        "dwh_date": {
+          "table_ref": "public.v_rpt_documents_no_response_ui",
+          "field_name": "Отправлено"
+        }
+      }
     }
   ]
 }
